@@ -1,0 +1,15 @@
+id: bad-mode-001
+title: "Bad mode task"
+domain: general
+worker: codex
+goal: "Do something"
+mode: invalid_mode
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md

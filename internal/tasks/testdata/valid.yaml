@@ -1,0 +1,18 @@
+id: test-task-001
+title: "Valid test task"
+domain: general
+worker: codex
+goal: "Do a smoke test"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - task validates

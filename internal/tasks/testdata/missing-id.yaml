@@ -1,0 +1,14 @@
+title: "Missing id"
+domain: general
+worker: codex
+goal: "Do something"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
