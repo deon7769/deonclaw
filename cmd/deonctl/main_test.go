@@ -52,6 +52,7 @@ func TestRunWorkerCodexRun(t *testing.T) {
 		}
 	})
 	setRunID(t, "run-test-001")
+	setGitDiff(t, "")
 
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -94,6 +95,7 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	assertFileContent(t, filepath.Join(runDir, "stdout.jsonl"), "")
 	assertFileContent(t, filepath.Join(runDir, "events.jsonl"), `{"type":"message","text":"ok"}`+"\n")
 	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "stderr line\n")
+	assertFileContent(t, filepath.Join(runDir, "diff.patch"), "")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
 
 	db, err := storepkg.OpenSQLite(storePath)
@@ -132,6 +134,7 @@ func TestRunWorkerCodexRun(t *testing.T) {
 		filepath.Join(runDir, "stdout.jsonl"): false,
 		filepath.Join(runDir, "events.jsonl"): false,
 		filepath.Join(runDir, "stderr.log"):   false,
+		filepath.Join(runDir, "diff.patch"):   false,
 		filepath.Join(runDir, "summary.md"):   false,
 	}
 	for _, artifact := range gotArtifacts {
@@ -165,6 +168,7 @@ func TestRunWorkerCodexRunPreservesRawStdoutWhenJSONLIsInvalid(t *testing.T) {
 		}
 	})
 	setRunID(t, "run-invalid-json-001")
+	setGitDiff(t, "")
 
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -232,6 +236,138 @@ func TestRunWorkerCodexRunPreservesRawStdoutWhenJSONLIsInvalid(t *testing.T) {
 	}
 }
 
+func TestRunWorkerCodexRunMarksPolicyFailedForDiffViolations(t *testing.T) {
+	tests := []struct {
+		name     string
+		runID    string
+		taskPath string
+		diff     string
+		want     string
+	}{
+		{
+			name:     "forbidden path",
+			runID:    "run-policy-forbidden-001",
+			taskPath: writeTaskFileWithPolicy(t, "codex", "workspace_write", []string{"internal/**"}, []string{"secrets/**"}),
+			diff: `diff --git a/secrets/token.txt b/secrets/token.txt
+new file mode 100644
+index 0000000..3333333
+--- /dev/null
++++ b/secrets/token.txt
+@@ -0,0 +1 @@
++token
+`,
+			want: `secrets/token.txt matches forbidden path "secrets/**"`,
+		},
+		{
+			name:     "outside allowed paths",
+			runID:    "run-policy-allowed-001",
+			taskPath: writeTaskFileWithPolicy(t, "codex", "workspace_write", []string{"internal/**"}, []string{"secrets/**"}),
+			diff: `diff --git a/README.md b/README.md
+index 1111111..2222222 100644
+--- a/README.md
++++ b/README.md
+@@ -1 +1 @@
+-old
++new
+`,
+			want: "README.md is outside allowed paths",
+		},
+		{
+			name:     "read only diff",
+			runID:    "run-policy-readonly-001",
+			taskPath: writeTaskFileWithPolicy(t, "codex", "read_only", nil, []string{"secrets/**"}),
+			diff: `diff --git a/internal/tasks/task.go b/internal/tasks/task.go
+index 1111111..2222222 100644
+--- a/internal/tasks/task.go
++++ b/internal/tasks/task.go
+@@ -1 +1 @@
+-old
++new
+`,
+			want: "read_only task changed files: internal/tasks/task.go",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setCodexWorkerFactory(t, func() workers.Worker {
+				return fakeWorker{
+					runResult: &workers.RunResult{
+						Workspace: ".",
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--cd", ".", "-"},
+						Events: []workers.WorkerEvent{
+							{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
+						},
+					},
+				}
+			})
+			setRunID(t, tt.runID)
+			setGitDiff(t, tt.diff)
+
+			tempDir := t.TempDir()
+			storePath := filepath.Join(tempDir, "deonclaw.db")
+			artifactsDir := filepath.Join(tempDir, "artifacts")
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := run([]string{
+				"worker",
+				"codex",
+				"run",
+				tt.taskPath,
+				"--store",
+				storePath,
+				"--artifacts-dir",
+				artifactsDir,
+			}, &stdout, &stderr)
+
+			if code != 1 {
+				t.Fatalf("run() exit code = %d, want 1", code)
+			}
+			if !strings.Contains(stderr.String(), "policy failed: "+tt.want) {
+				t.Fatalf("stderr = %q, want policy failure %q", stderr.String(), tt.want)
+			}
+
+			runDir := filepath.Join(artifactsDir, tt.runID)
+			assertFileContent(t, filepath.Join(runDir, "diff.patch"), tt.diff)
+			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: policy_failed")
+			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Policy: "+tt.want)
+
+			db, err := storepkg.OpenSQLite(storePath)
+			if err != nil {
+				t.Fatalf("OpenSQLite() error = %v", err)
+			}
+			defer db.Close()
+
+			gotRun, err := db.Run(context.Background(), tt.runID)
+			if err != nil {
+				t.Fatalf("Run() error = %v", err)
+			}
+			if gotRun.Status != runs.StatusPolicyFailed {
+				t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusPolicyFailed)
+			}
+
+			gotArtifacts, err := db.ArtifactsByRun(context.Background(), tt.runID)
+			if err != nil {
+				t.Fatalf("ArtifactsByRun() error = %v", err)
+			}
+			wantDiffPath := filepath.Join(runDir, "diff.patch")
+			var sawDiff bool
+			for _, artifact := range gotArtifacts {
+				if artifact.Path == wantDiffPath {
+					sawDiff = true
+					if artifact.Kind != artifacts.KindDiff {
+						t.Fatalf("diff artifact kind = %q, want %q", artifact.Kind, artifacts.KindDiff)
+					}
+				}
+			}
+			if !sawDiff {
+				t.Fatalf("diff artifact path %q was not persisted", wantDiffPath)
+			}
+		})
+	}
+}
+
 func TestRunWorkerCodexRunPersistsFailureArtifacts(t *testing.T) {
 	setCodexWorkerFactory(t, func() workers.Worker {
 		return fakeWorker{
@@ -247,6 +383,7 @@ func TestRunWorkerCodexRunPersistsFailureArtifacts(t *testing.T) {
 		}
 	})
 	setRunID(t, "run-failed-001")
+	setGitDiff(t, "")
 
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -391,6 +528,17 @@ func setRunID(t *testing.T, runID string) {
 	}
 }
 
+func setGitDiff(t *testing.T, diff string) {
+	t.Helper()
+	oldRunner := gitDiffRunner
+	t.Cleanup(func() {
+		gitDiffRunner = oldRunner
+	})
+	gitDiffRunner = func(context.Context, string) ([]byte, error) {
+		return []byte(diff), nil
+	}
+}
+
 func assertFileContent(t *testing.T, path string, want string) {
 	t.Helper()
 	got, err := os.ReadFile(path)
@@ -411,6 +559,47 @@ func assertFileContains(t *testing.T, path string, want string) {
 	if !strings.Contains(string(got), want) {
 		t.Fatalf("ReadFile(%q) = %q, want %q", path, got, want)
 	}
+}
+
+func writeTaskFileWithPolicy(t *testing.T, worker string, mode string, allowedPaths []string, forbiddenPaths []string) string {
+	t.Helper()
+
+	content := `id: task-` + strings.ReplaceAll(mode, "_", "-") + `-001
+title: "Policy task"
+domain: general
+worker: ` + worker + `
+goal: "Do not execute"
+mode: ` + mode + `
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths:
+` + yamlStringList(allowedPaths) + `forbidden_paths:
+` + yamlStringList(forbiddenPaths) + `expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - command fails before worker execution
+`
+	path := filepath.Join(t.TempDir(), "task.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write task file: %v", err)
+	}
+	return path
+}
+
+func yamlStringList(values []string) string {
+	if len(values) == 0 {
+		return "  []\n"
+	}
+	var output strings.Builder
+	for _, value := range values {
+		output.WriteString("  - ")
+		output.WriteString(value)
+		output.WriteByte('\n')
+	}
+	return output.String()
 }
 
 type fakeWorker struct {

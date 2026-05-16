@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/config"
 	"github.com/deon7769/deonclaw/internal/events"
+	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
@@ -37,6 +39,8 @@ var codexWorkerFactory = func() workers.Worker {
 var runIDFactory = func() string {
 	return "run-" + time.Now().UTC().Format("20060102T150405.000000000Z")
 }
+
+var gitDiffRunner = captureGitDiff
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -238,10 +242,29 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		}
 	}
 
+	workspace := result.Workspace
+	if workspace == "" {
+		workspace = task.Workspace.Path
+	}
+	diffPatch, diffErr := gitDiffRunner(ctx, workspace)
+	if diffErr != nil && runErr == nil {
+		runErr = fmt.Errorf("capture git diff: %w", diffErr)
+	}
+	policyResult := policy.EvaluateChangedPaths(
+		task.Mode,
+		policy.ChangedPathsFromGitDiff(diffPatch),
+		task.AllowedPaths,
+		task.ForbiddenPaths,
+	)
+	policySummary := policyResult.Summary()
+
 	finishedAt := time.Now().UTC()
 	runRecord.Status = runs.StatusSucceeded
 	if runErr != nil {
 		runRecord.Status = runs.StatusFailed
+	}
+	if !policyResult.OK() {
+		runRecord.Status = runs.StatusPolicyFailed
 	}
 	runRecord.UpdatedAt = finishedAt
 	runRecord.FinishedAt = &finishedAt
@@ -251,7 +274,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, diffPatch, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -270,6 +293,10 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	if result != nil && result.Stderr != "" {
 		fmt.Fprintf(stderr, "%s", result.Stderr)
 	}
+	if !policyResult.OK() {
+		fmt.Fprintf(stderr, "policy failed: %s\n", policySummary)
+		return 1
+	}
 	if runErr != nil {
 		fmt.Fprintf(stderr, "run failed: %v\n", runErr)
 		return 1
@@ -283,7 +310,28 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	return 0
 }
 
-func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, createdAt time.Time) ([]artifacts.Artifact, error) {
+func captureGitDiff(ctx context.Context, workspace string) ([]byte, error) {
+	workspace = strings.TrimSpace(workspace)
+	if workspace == "" {
+		workspace = "."
+	}
+
+	cmd := exec.CommandContext(ctx, "git", "-C", workspace, "diff", "--binary")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
+	diff, err := cmd.Output()
+	if err != nil {
+		message := strings.TrimSpace(stderr.String())
+		if message != "" {
+			return nil, fmt.Errorf("%w: %s", err, message)
+		}
+		return nil, err
+	}
+	return diff, nil
+}
+
+func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, diffPatch []byte, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -309,7 +357,10 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 	if err := writer.write("stderr", "stderr.log", artifacts.KindLog, rawStderr); err != nil {
 		return nil, err
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr)); err != nil {
+	if err := writer.write("diff", "diff.patch", artifacts.KindDiff, diffPatch); err != nil {
+		return nil, err
+	}
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary)); err != nil {
 		return nil, err
 	}
 
@@ -346,7 +397,7 @@ func workerEventsJSONL(workerEvents []workers.WorkerEvent) []byte {
 	return output.Bytes()
 }
 
-func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error) []byte {
+func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -361,6 +412,7 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 		fmt.Sprintf("Workspace: %s", workspace),
 		fmt.Sprintf("Command: %s", strings.Join(result.Command, " ")),
 		fmt.Sprintf("Events: %d", len(result.Events)),
+		fmt.Sprintf("Policy: %s", policySummary),
 	}
 	if runErr != nil {
 		lines = append(lines, fmt.Sprintf("Error: %v", runErr))
@@ -427,7 +479,7 @@ func artifactFileName(path string) string {
 
 func isCLIOwnedArtifact(name string) bool {
 	switch name {
-	case "stdout.jsonl", "stderr.log", "events.jsonl", "summary.md":
+	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "summary.md":
 		return true
 	default:
 		return false
