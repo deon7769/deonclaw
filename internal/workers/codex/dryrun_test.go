@@ -2,6 +2,7 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"reflect"
 	"strings"
 	"testing"
@@ -65,10 +66,101 @@ func TestDryRunRejectsUnsupportedMode(t *testing.T) {
 	}
 }
 
+func TestRunExecutesCommandAndCapturesJSONL(t *testing.T) {
+	var gotCommand string
+	var gotArgs []string
+	var gotPrompt string
+
+	worker := newWithRunner("codex", func(ctx context.Context, command string, args []string, prompt string) ([]byte, string, error) {
+		gotCommand = command
+		gotArgs = append(gotArgs, args...)
+		gotPrompt = prompt
+
+		stdout := []byte(`{"type":"message","text":"hello"}` + "\n" + `{"type":"done"}` + "\n")
+		return stdout, "stderr line\n", nil
+	})
+
+	result, err := worker.Run(context.Background(), workers.RunSpec{
+		Task:      taskWithMode("workspace_write"),
+		Workspace: "workspaces/run-001",
+		Prompt:    "summarize this repository",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if gotCommand != "codex" {
+		t.Fatalf("command = %q, want codex", gotCommand)
+	}
+	wantArgs := []string{"exec", "--json", "--sandbox", "workspace-write", "--cd", "workspaces/run-001", "-"}
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
+	}
+	if gotPrompt != "summarize this repository" {
+		t.Fatalf("prompt = %q, want prompt sent on stdin", gotPrompt)
+	}
+	if result.Stderr != "stderr line\n" {
+		t.Fatalf("Stderr = %q, want captured stderr", result.Stderr)
+	}
+	if len(result.Events) != 2 {
+		t.Fatalf("len(Events) = %d, want 2", len(result.Events))
+	}
+	if result.Events[0].Type != workers.EventStdoutJSON {
+		t.Fatalf("event type = %q, want %q", result.Events[0].Type, workers.EventStdoutJSON)
+	}
+	var payload map[string]string
+	if err := json.Unmarshal(result.Events[0].Payload, &payload); err != nil {
+		t.Fatalf("payload is not JSON: %v", err)
+	}
+	if payload["type"] != "message" || payload["text"] != "hello" {
+		t.Fatalf("payload = %#v, want message payload", payload)
+	}
+}
+
+func TestRunUsesTaskGoalAsDefaultPrompt(t *testing.T) {
+	var gotPrompt string
+	worker := newWithRunner("codex", func(ctx context.Context, command string, args []string, prompt string) ([]byte, string, error) {
+		gotPrompt = prompt
+		return []byte(`{"type":"done"}` + "\n"), "", nil
+	})
+
+	task := taskWithMode("read_only")
+	task.Goal = "use the task goal"
+
+	if _, err := worker.Run(context.Background(), workers.RunSpec{
+		Task:      task,
+		Workspace: ".",
+	}); err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+
+	if gotPrompt != "use the task goal" {
+		t.Fatalf("prompt = %q, want task goal", gotPrompt)
+	}
+}
+
+func TestRunRejectsInvalidJSONL(t *testing.T) {
+	worker := newWithRunner("codex", func(ctx context.Context, command string, args []string, prompt string) ([]byte, string, error) {
+		return []byte("{not-json}\n"), "", nil
+	})
+
+	_, err := worker.Run(context.Background(), workers.RunSpec{
+		Task:      taskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err == nil {
+		t.Fatal("Run() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "parse codex stdout jsonl line 1") {
+		t.Fatalf("error = %v, want JSONL parse error", err)
+	}
+}
+
 func taskWithMode(mode string) *tasks.Task {
 	return &tasks.Task{
 		ID:     "task-001",
 		Worker: "codex",
+		Goal:   "default prompt",
 		Mode:   mode,
 		Workspace: tasks.WorkspaceSpec{
 			Path: ".",
