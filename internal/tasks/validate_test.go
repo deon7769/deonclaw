@@ -43,3 +43,62 @@ func TestValidateBadMode(t *testing.T) {
 		t.Fatalf("error = %v, want unsupported mode", err)
 	}
 }
+
+func TestValidateRequiresDefinitionOfDone(t *testing.T) {
+	task := validTask()
+	task.DefinitionOfDone = nil
+
+	err := Validate(task)
+	if err == nil {
+		t.Fatal("Validate() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "definition_of_done must not be empty") {
+		t.Fatalf("error = %v, want definition_of_done requirement", err)
+	}
+}
+
+func TestValidateRequiresAllowedPathsForWorkspaceWrite(t *testing.T) {
+	task := validTask()
+	task.Mode = "workspace_write"
+	task.AllowedPaths = nil
+
+	err := Validate(task)
+	if err == nil {
+		t.Fatal("Validate() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "allowed_paths must not be empty for workspace_write mode") {
+		t.Fatalf("error = %v, want workspace_write allowed_paths requirement", err)
+	}
+}
+
+func TestValidateAllowsEmptyAllowedPathsForReadOnly(t *testing.T) {
+	task := validTask()
+	task.Mode = "read_only"
+	task.AllowedPaths = nil
+
+	if err := Validate(task); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
+func validTask() *Task {
+	return &Task{
+		ID:     "valid-task-001",
+		Title:  "Valid task",
+		Domain: "general",
+		Worker: "codex",
+		Goal:   "Validate task policy",
+		Mode:   "read_only",
+		Workspace: WorkspaceSpec{
+			Strategy: "local_repo",
+			Path:     ".",
+		},
+		Memory: MemorySpec{
+			Scope: "none",
+		},
+		AllowedPaths:     nil,
+		ForbiddenPaths:   []string{"secrets/**"},
+		ExpectedOutputs:  []string{"artifacts/summary.md"},
+		DefinitionOfDone: []string{"task validates"},
+	}
+}

@@ -40,6 +40,9 @@ func Validate(task *Task) error {
 	if task.Mode != "" && !config.IsKnownMode(task.Mode) {
 		errs = append(errs, fmt.Errorf("mode %q is not supported", task.Mode))
 	}
+	if task.Mode == "workspace_write" && len(task.AllowedPaths) == 0 {
+		errs = append(errs, errors.New("allowed_paths must not be empty for workspace_write mode"))
+	}
 	if task.Workspace.Strategy != "" && !config.IsKnownWorkspaceStrategy(task.Workspace.Strategy) {
 		errs = append(errs, fmt.Errorf("workspace.strategy %q is not supported", task.Workspace.Strategy))
 	}
@@ -51,6 +54,9 @@ func Validate(task *Task) error {
 	}
 	if len(task.ExpectedOutputs) == 0 {
 		errs = append(errs, errors.New("expected_outputs must not be empty"))
+	}
+	if len(task.DefinitionOfDone) == 0 {
+		errs = append(errs, errors.New("definition_of_done must not be empty"))
 	}
 
 	return errors.Join(errs...)
