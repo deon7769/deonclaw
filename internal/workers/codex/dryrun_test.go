@@ -3,10 +3,12 @@ package codex
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
 
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workers"
 )
@@ -105,8 +107,8 @@ func TestRunExecutesCommandAndCapturesJSONL(t *testing.T) {
 	if len(result.Events) != 2 {
 		t.Fatalf("len(Events) = %d, want 2", len(result.Events))
 	}
-	if result.Events[0].Type != workers.EventStdoutJSON {
-		t.Fatalf("event type = %q, want %q", result.Events[0].Type, workers.EventStdoutJSON)
+	if result.Events[0].Type != "message" {
+		t.Fatalf("event type = %q, want message", result.Events[0].Type)
 	}
 	var payload map[string]string
 	if err := json.Unmarshal(result.Events[0].Payload, &payload); err != nil {
@@ -114,6 +116,68 @@ func TestRunExecutesCommandAndCapturesJSONL(t *testing.T) {
 	}
 	if payload["type"] != "message" || payload["text"] != "hello" {
 		t.Fatalf("payload = %#v, want message payload", payload)
+	}
+}
+
+func TestRunHandlesLargeJSONLLine(t *testing.T) {
+	largeText := strings.Repeat("x", 70*1024)
+	stdout := []byte(`{"type":"message","text":"` + largeText + `"}` + "\n")
+	worker := newWithRunner("codex", func(ctx context.Context, command string, args []string, prompt string) ([]byte, string, error) {
+		return stdout, "", nil
+	})
+
+	result, err := worker.Run(context.Background(), workers.RunSpec{
+		Task:      taskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if len(result.Events) != 1 {
+		t.Fatalf("len(Events) = %d, want 1", len(result.Events))
+	}
+	if result.Events[0].Type != "message" {
+		t.Fatalf("event type = %q, want message", result.Events[0].Type)
+	}
+}
+
+func TestRunCreatesStdoutAndStderrArtifactsOnCommandError(t *testing.T) {
+	worker := newWithRunner("codex", func(ctx context.Context, command string, args []string, prompt string) ([]byte, string, error) {
+		return []byte(`{"type":"message","text":"partial"}` + "\n"), "boom\n", errors.New("exit 1")
+	})
+
+	result, err := worker.Run(context.Background(), workers.RunSpec{
+		Task:      taskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err == nil {
+		t.Fatal("Run() expected error, got nil")
+	}
+	if result == nil {
+		t.Fatal("Run() result = nil, want partial result with artifacts")
+	}
+
+	want := map[string]struct {
+		kind    artifacts.Kind
+		content string
+	}{
+		"artifacts/stdout.jsonl": {kind: artifacts.KindEvents, content: `{"type":"message","text":"partial"}` + "\n"},
+		"artifacts/stderr.log":   {kind: artifacts.KindLog, content: "boom\n"},
+	}
+	if len(result.Artifacts) != len(want) {
+		t.Fatalf("len(Artifacts) = %d, want %d", len(result.Artifacts), len(want))
+	}
+	for _, artifact := range result.Artifacts {
+		expected, ok := want[artifact.Path]
+		if !ok {
+			t.Fatalf("unexpected artifact path %q", artifact.Path)
+		}
+		if artifact.Kind != expected.kind {
+			t.Fatalf("artifact %s kind = %q, want %q", artifact.Path, artifact.Kind, expected.kind)
+		}
+		if string(artifact.Content) != expected.content {
+			t.Fatalf("artifact %s content = %q, want %q", artifact.Path, artifact.Content, expected.content)
+		}
 	}
 }
 

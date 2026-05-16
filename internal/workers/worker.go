@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/tasks"
 )
 
@@ -26,12 +27,13 @@ type WorkerEvent struct {
 }
 
 type RunResult struct {
-	Worker    string        `json:"worker"`
-	Command   []string      `json:"command"`
-	Workspace string        `json:"workspace"`
-	Sandbox   string        `json:"sandbox"`
-	Events    []WorkerEvent `json:"events"`
-	Stderr    string        `json:"stderr,omitempty"`
+	Worker    string               `json:"worker"`
+	Command   []string             `json:"command"`
+	Workspace string               `json:"workspace"`
+	Sandbox   string               `json:"sandbox"`
+	Events    []WorkerEvent        `json:"events"`
+	Artifacts []artifacts.Artifact `json:"artifacts,omitempty"`
+	Stderr    string               `json:"stderr,omitempty"`
 }
 
 type Worker interface {

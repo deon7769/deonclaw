@@ -9,9 +9,13 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/workers"
 )
+
+const maxJSONLLineSize = 10 * 1024 * 1024
 
 type commandRunner func(context.Context, string, []string, string) ([]byte, string, error)
 
@@ -54,6 +58,7 @@ func (w *Worker) Run(ctx context.Context, spec workers.RunSpec) (*workers.RunRes
 		Workspace: plan.Workspace,
 		Sandbox:   plan.Sandbox,
 		Events:    events,
+		Artifacts: streamArtifacts(stdout, stderr),
 		Stderr:    stderr,
 	}
 	if parseErr != nil {
@@ -112,6 +117,7 @@ func runCommand(ctx context.Context, command string, args []string, prompt strin
 func parseStdoutJSONL(stdout []byte) ([]workers.WorkerEvent, error) {
 	var events []workers.WorkerEvent
 	scanner := bufio.NewScanner(bytes.NewReader(stdout))
+	scanner.Buffer(make([]byte, 64*1024), maxJSONLLineSize)
 	lineNumber := 0
 	for scanner.Scan() {
 		lineNumber++
@@ -124,7 +130,7 @@ func parseStdoutJSONL(stdout []byte) ([]workers.WorkerEvent, error) {
 		}
 		payload := append([]byte(nil), line...)
 		events = append(events, workers.WorkerEvent{
-			Type:    workers.EventStdoutJSON,
+			Type:    eventTypeFromPayload(payload),
 			Worker:  "codex",
 			Payload: json.RawMessage(payload),
 		})
@@ -133,6 +139,39 @@ func parseStdoutJSONL(stdout []byte) ([]workers.WorkerEvent, error) {
 		return events, fmt.Errorf("scan codex stdout jsonl: %w", err)
 	}
 	return events, nil
+}
+
+func eventTypeFromPayload(payload []byte) string {
+	var envelope struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(payload, &envelope); err != nil {
+		return workers.EventStdoutJSON
+	}
+	if strings.TrimSpace(envelope.Type) == "" {
+		return workers.EventStdoutJSON
+	}
+	return envelope.Type
+}
+
+func streamArtifacts(stdout []byte, stderr string) []artifacts.Artifact {
+	now := time.Now().UTC()
+	return []artifacts.Artifact{
+		{
+			ID:        "stdout",
+			Path:      "artifacts/stdout.jsonl",
+			Kind:      artifacts.KindEvents,
+			Content:   append([]byte(nil), stdout...),
+			CreatedAt: now,
+		},
+		{
+			ID:        "stderr",
+			Path:      "artifacts/stderr.log",
+			Kind:      artifacts.KindLog,
+			Content:   []byte(stderr),
+			CreatedAt: now,
+		},
+	}
 }
 
 func sandboxForMode(mode string) (string, error) {

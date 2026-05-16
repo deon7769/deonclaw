@@ -17,5 +17,6 @@ type Artifact struct {
 	RunID     string    `json:"run_id"`
 	Path      string    `json:"path"`
 	Kind      Kind      `json:"kind"`
+	Content   []byte    `json:"content,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 }
