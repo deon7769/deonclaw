@@ -288,47 +288,45 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 		return nil, err
 	}
 
-	files := []struct {
-		idSuffix string
-		name     string
-		kind     artifacts.Kind
-		content  []byte
-	}{
-		{
-			idSuffix: "events",
-			name:     "events.jsonl",
-			kind:     artifacts.KindEvents,
-			content:  workerEventsJSONL(result.Events),
-		},
-		{
-			idSuffix: "stderr",
-			name:     "stderr.log",
-			kind:     artifacts.KindLog,
-			content:  []byte(result.Stderr),
-		},
-		{
-			idSuffix: "summary",
-			name:     "summary.md",
-			kind:     artifacts.KindSummary,
-			content:  codexRunSummary(runID, task, result, status, runErr),
-		},
+	rawStdout, _ := workerArtifactContent(result.Artifacts, "stdout.jsonl")
+	rawStderr, ok := workerArtifactContent(result.Artifacts, "stderr.log")
+	if !ok {
+		rawStderr = []byte(result.Stderr)
 	}
 
-	runArtifacts := make([]artifacts.Artifact, 0, len(files))
-	for _, file := range files {
-		path := filepath.Join(runDir, file.name)
-		if err := os.WriteFile(path, file.content, 0o644); err != nil {
+	writer := runArtifactWriter{
+		runDir:    runDir,
+		runID:     runID,
+		createdAt: createdAt,
+		written:   make(map[string]struct{}),
+	}
+	if err := writer.write("stdout", "stdout.jsonl", artifacts.KindEvents, rawStdout); err != nil {
+		return nil, err
+	}
+	if err := writer.write("events", "events.jsonl", artifacts.KindEvents, workerEventsJSONL(result.Events)); err != nil {
+		return nil, err
+	}
+	if err := writer.write("stderr", "stderr.log", artifacts.KindLog, rawStderr); err != nil {
+		return nil, err
+	}
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr)); err != nil {
+		return nil, err
+	}
+
+	for i, artifact := range result.Artifacts {
+		name := artifactFileName(artifact.Path)
+		if name == "" || isCLIOwnedArtifact(name) {
+			continue
+		}
+		kind := artifact.Kind
+		if kind == "" {
+			kind = artifacts.KindOther
+		}
+		if err := writer.write(fmt.Sprintf("worker-%03d", i+1), name, kind, artifact.Content); err != nil {
 			return nil, err
 		}
-		runArtifacts = append(runArtifacts, artifacts.Artifact{
-			ID:        fmt.Sprintf("%s-artifact-%s", runID, file.idSuffix),
-			RunID:     runID,
-			Path:      path,
-			Kind:      file.kind,
-			CreatedAt: createdAt,
-		})
 	}
-	return runArtifacts, nil
+	return writer.artifacts, nil
 }
 
 func workerEventsJSONL(workerEvents []workers.WorkerEvent) []byte {
@@ -368,6 +366,72 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 		lines = append(lines, fmt.Sprintf("Error: %v", runErr))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+type runArtifactWriter struct {
+	runDir    string
+	runID     string
+	createdAt time.Time
+	written   map[string]struct{}
+	artifacts []artifacts.Artifact
+}
+
+func (w *runArtifactWriter) write(idSuffix string, name string, kind artifacts.Kind, content []byte) error {
+	name = w.uniqueName(name)
+	path := filepath.Join(w.runDir, name)
+	if err := os.WriteFile(path, content, 0o644); err != nil {
+		return err
+	}
+	w.artifacts = append(w.artifacts, artifacts.Artifact{
+		ID:        fmt.Sprintf("%s-artifact-%s", w.runID, idSuffix),
+		RunID:     w.runID,
+		Path:      path,
+		Kind:      kind,
+		CreatedAt: w.createdAt,
+	})
+	return nil
+}
+
+func (w *runArtifactWriter) uniqueName(name string) string {
+	if _, ok := w.written[name]; !ok {
+		w.written[name] = struct{}{}
+		return name
+	}
+	ext := filepath.Ext(name)
+	stem := strings.TrimSuffix(name, ext)
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d%s", stem, i, ext)
+		if _, ok := w.written[candidate]; !ok {
+			w.written[candidate] = struct{}{}
+			return candidate
+		}
+	}
+}
+
+func workerArtifactContent(workerArtifacts []artifacts.Artifact, name string) ([]byte, bool) {
+	for _, artifact := range workerArtifacts {
+		if artifactFileName(artifact.Path) == name {
+			return append([]byte(nil), artifact.Content...), true
+		}
+	}
+	return nil, false
+}
+
+func artifactFileName(path string) string {
+	name := filepath.Base(filepath.Clean(path))
+	if name == "." || name == string(filepath.Separator) {
+		return ""
+	}
+	return name
+}
+
+func isCLIOwnedArtifact(name string) bool {
+	switch name {
+	case "stdout.jsonl", "stderr.log", "events.jsonl", "summary.md":
+		return true
+	default:
+		return false
+	}
 }
 
 func saveWorkerEvents(ctx context.Context, db store.Store, runID string, workerEvents []workers.WorkerEvent, timestamp time.Time) error {

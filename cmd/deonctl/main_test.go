@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/runs"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/workers"
@@ -90,6 +91,7 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	}
 
 	runDir := filepath.Join(artifactsDir, "run-test-001")
+	assertFileContent(t, filepath.Join(runDir, "stdout.jsonl"), "")
 	assertFileContent(t, filepath.Join(runDir, "events.jsonl"), `{"type":"message","text":"ok"}`+"\n")
 	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "stderr line\n")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
@@ -127,6 +129,7 @@ func TestRunWorkerCodexRun(t *testing.T) {
 		t.Fatalf("ArtifactsByRun() error = %v", err)
 	}
 	wantArtifactPaths := map[string]bool{
+		filepath.Join(runDir, "stdout.jsonl"): false,
 		filepath.Join(runDir, "events.jsonl"): false,
 		filepath.Join(runDir, "stderr.log"):   false,
 		filepath.Join(runDir, "summary.md"):   false,
@@ -141,6 +144,91 @@ func TestRunWorkerCodexRun(t *testing.T) {
 		if !seen {
 			t.Fatalf("artifact path %q was not persisted", path)
 		}
+	}
+}
+
+func TestRunWorkerCodexRunPreservesRawStdoutWhenJSONLIsInvalid(t *testing.T) {
+	rawStdout := "{not-json}\n"
+	setCodexWorkerFactory(t, func() workers.Worker {
+		return fakeWorker{
+			runResult: &workers.RunResult{
+				Workspace: ".",
+				Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+				Artifacts: []artifacts.Artifact{
+					{ID: "stdout", Path: "artifacts/stdout.jsonl", Kind: artifacts.KindEvents, Content: []byte(rawStdout)},
+					{ID: "stderr", Path: "artifacts/stderr.log", Kind: artifacts.KindLog, Content: []byte("parse warning\n")},
+					{ID: "trace", Path: "artifacts/trace.txt", Kind: artifacts.KindOther, Content: []byte("raw trace\n")},
+				},
+				Stderr: "parse warning\n",
+			},
+			runErr: errors.New("parse codex stdout jsonl line 1: invalid JSON"),
+		}
+	})
+	setRunID(t, "run-invalid-json-001")
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"worker",
+		"codex",
+		"run",
+		writeTaskFile(t, "codex"),
+		"--store",
+		storePath,
+		"--artifacts-dir",
+		artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "invalid JSON") {
+		t.Fatalf("stderr = %q, want parse error", stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-invalid-json-001")
+	assertFileContent(t, filepath.Join(runDir, "stdout.jsonl"), rawStdout)
+	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "parse warning\n")
+	assertFileContent(t, filepath.Join(runDir, "trace.txt"), "raw trace\n")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: failed")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	gotArtifacts, err := db.ArtifactsByRun(context.Background(), "run-invalid-json-001")
+	if err != nil {
+		t.Fatalf("ArtifactsByRun() error = %v", err)
+	}
+	wantStdoutPath := filepath.Join(runDir, "stdout.jsonl")
+	wantTracePath := filepath.Join(runDir, "trace.txt")
+	var sawStdout bool
+	var sawTrace bool
+	for _, artifact := range gotArtifacts {
+		if artifact.Path == wantStdoutPath {
+			sawStdout = true
+			if artifact.Kind != artifacts.KindEvents {
+				t.Fatalf("stdout artifact kind = %q, want %q", artifact.Kind, artifacts.KindEvents)
+			}
+		}
+		if artifact.Path == wantTracePath {
+			sawTrace = true
+			if artifact.Kind != artifacts.KindOther {
+				t.Fatalf("trace artifact kind = %q, want %q", artifact.Kind, artifacts.KindOther)
+			}
+		}
+	}
+	if !sawStdout {
+		t.Fatalf("stdout artifact path %q was not persisted", wantStdoutPath)
+	}
+	if !sawTrace {
+		t.Fatalf("trace artifact path %q was not persisted", wantTracePath)
 	}
 }
 
