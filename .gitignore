@@ -1,0 +1,26 @@
+# Local environment and credentials
+.env
+.env.*
+*.pem
+*.key
+
+# Local databases and runtime outputs
+*.db
+*.sqlite
+*.sqlite3
+/runs/
+/artifacts/
+/logs/
+/tmp/
+/temp/
+
+# Memory vaults and local domain data
+/mysecondbrain/
+/escalasoft_brain/
+/memory/
+
+# Editor and OS files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

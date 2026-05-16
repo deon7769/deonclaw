@@ -1,0 +1,39 @@
+id: codex-smoke-001
+title: "Codex worker smoke test"
+domain: general
+worker: codex
+
+goal: >
+  Read the repository and produce a short structured summary.
+  Do not edit files.
+
+mode: read_only
+
+workspace:
+  strategy: local_repo
+  path: .
+
+memory:
+  scope: none
+
+allowed_paths: []
+
+forbidden_paths:
+  - mysecondbrain/**
+  - escalasoft_brain/**
+  - .env
+  - secrets/**
+  - ~/.codex/**
+  - ~/.config/**
+
+expected_outputs:
+  - artifacts/summary.md
+  - artifacts/events.jsonl
+  - artifacts/stderr.log
+
+definition_of_done:
+  - Codex runs through DeonClaw adapter
+  - stdout JSONL is captured
+  - stderr log is captured
+  - final summary is extracted
+  - no files are modified

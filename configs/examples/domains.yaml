@@ -1,0 +1,23 @@
+domains:
+  general:
+    type: canonical_memory
+    root: /vault/mysecondbrain
+    default: true
+    read_only_for_workers: true
+
+  escalasoft:
+    type: isolated_domain
+    root: /domains/escalasoft_brain
+    default: false
+    read_only_for_general_agents: true
+    bridge_files:
+      - /vault/mysecondbrain/memory/context/escalasoft-operacao.md
+      - /vault/mysecondbrain/memory/context/escalasoft-docs-strategy.md
+      - /vault/mysecondbrain/memory/projects/consultoria-escalasoft.md
+    structured_data:
+      historical_sqlite: /data/escalasoft-sqlite/escalasoft_docs.db
+      live_sqlite: /data/escalasoft-live/escalasoft_live_docs.sqlite
+    staging:
+      - /tmp/drive-escalasoft-docs
+      - /tmp/escalasoft-live
+    default_agent: escalasoft-agent

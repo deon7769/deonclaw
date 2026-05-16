@@ -1,0 +1,26 @@
+skill_policy:
+  default_update_mode: proposal_only
+
+  states:
+    - draft
+    - active
+    - deprecated
+    - archived
+
+  protected_skills:
+    - second-brain-agent-onboarding
+    - git-second-brain
+
+  renewal_triggers:
+    - repeated_agent_failure
+    - changed_tool_behavior
+    - changed_domain_policy
+    - stale_instruction
+    - better_validation_method
+    - user_correction_repeated
+
+  proposal_required_fields:
+    - reason
+    - evidence
+    - expected_change
+    - validation_plan
