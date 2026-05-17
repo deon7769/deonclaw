@@ -42,6 +42,7 @@ func TestRunWorkerCodexDryRun(t *testing.T) {
 }
 
 func TestRunWorkerCodexRun(t *testing.T) {
+	cleanupCalled := false
 	setCodexWorkerFactory(t, func() workers.Worker {
 		return fakeWorker{
 			runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
@@ -70,6 +71,15 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	storePath := filepath.Join(tempDir, "deonclaw.db")
 	artifactsDir := filepath.Join(tempDir, "artifacts")
 	wantWorkspace := filepath.Join(artifactsDir, "run-test-001", "workspace")
+	setWorkspaceManager(t, fakeWorkspacePreparer{
+		cleanupFunc: func(ctx context.Context, workspace *runtime.Workspace) error {
+			cleanupCalled = true
+			if workspace.Path != wantWorkspace {
+				t.Fatalf("cleanup workspace path = %q, want %q", workspace.Path, wantWorkspace)
+			}
+			return nil
+		},
+	})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -110,6 +120,11 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "stderr line\n")
 	assertFileContent(t, filepath.Join(runDir, "diff.patch"), "")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: removed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: succeeded")
+	if !cleanupCalled {
+		t.Fatal("workspace cleanup was not called for succeeded run")
+	}
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {
@@ -190,6 +205,12 @@ func TestRunWorkerCodexRunPreservesRawStdoutWhenJSONLIsInvalid(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
 	artifactsDir := filepath.Join(tempDir, "artifacts")
+	setWorkspaceManager(t, fakeWorkspacePreparer{
+		cleanupFunc: func(ctx context.Context, workspace *runtime.Workspace) error {
+			t.Fatal("workspace cleanup should not run for failed run")
+			return nil
+		},
+	})
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -250,6 +271,73 @@ func TestRunWorkerCodexRunPreservesRawStdoutWhenJSONLIsInvalid(t *testing.T) {
 	}
 	if !sawTrace {
 		t.Fatalf("trace artifact path %q was not persisted", wantTracePath)
+	}
+}
+
+func TestRunWorkerCodexRunKeepsStatusWhenCleanupFails(t *testing.T) {
+	setCodexWorkerFactory(t, func() workers.Worker {
+		return fakeWorker{
+			runResult: &workers.RunResult{
+				Workspace: ".",
+				Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+				Events: []workers.WorkerEvent{
+					{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
+				},
+			},
+		}
+	})
+	setRunID(t, "run-cleanup-failed-001")
+	setGitDiff(t, "")
+	setGitSnapshot(t, &git.Snapshot{}, &git.Snapshot{})
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	setWorkspaceManager(t, fakeWorkspacePreparer{
+		cleanupFunc: func(ctx context.Context, workspace *runtime.Workspace) error {
+			return errors.New("remove failed")
+		},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"worker",
+		"codex",
+		"run",
+		writeTaskFile(t, "codex"),
+		"--store",
+		storePath,
+		"--artifacts-dir",
+		artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "workspace cleanup warning: workspace cleanup failed: remove failed") {
+		t.Fatalf("stderr = %q, want cleanup warning", stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-cleanup-failed-001")
+	assertFileContains(t, filepath.Join(runDir, "stderr.log"), "workspace cleanup warning: workspace cleanup failed: remove failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: kept")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: succeeded")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup warning: workspace cleanup failed: remove failed")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	gotRun, err := db.Run(context.Background(), "run-cleanup-failed-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != runs.StatusSucceeded {
+		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusSucceeded)
 	}
 }
 
@@ -336,6 +424,12 @@ index 1111111..2222222 100644
 			tempDir := t.TempDir()
 			storePath := filepath.Join(tempDir, "deonclaw.db")
 			artifactsDir := filepath.Join(tempDir, "artifacts")
+			setWorkspaceManager(t, fakeWorkspacePreparer{
+				cleanupFunc: func(ctx context.Context, workspace *runtime.Workspace) error {
+					t.Fatal("workspace cleanup should not run for policy_failed run")
+					return nil
+				},
+			})
 
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
@@ -361,6 +455,8 @@ index 1111111..2222222 100644
 			assertFileContent(t, filepath.Join(runDir, "diff.patch"), tt.diff)
 			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: policy_failed")
 			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Policy: "+tt.want)
+			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: kept")
+			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: policy_failed")
 
 			db, err := storepkg.OpenSQLite(storePath)
 			if err != nil {
@@ -443,6 +539,8 @@ func TestRunWorkerCodexRunPersistsFailureArtifacts(t *testing.T) {
 	assertFileContent(t, filepath.Join(runDir, "events.jsonl"), `{"type":"message","text":"partial"}`+"\n")
 	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "boom\n")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: kept")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: failed")
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {
@@ -590,9 +688,26 @@ func setGitSnapshot(t *testing.T, baseline *git.Snapshot, postRun *git.Snapshot)
 	}
 }
 
-type fakeWorkspacePreparer struct{}
+func setWorkspaceManager(t *testing.T, manager workspacePreparer) {
+	t.Helper()
+	oldFactory := workspaceManagerFactory
+	t.Cleanup(func() {
+		workspaceManagerFactory = oldFactory
+	})
+	workspaceManagerFactory = func() workspacePreparer {
+		return manager
+	}
+}
 
-func (fakeWorkspacePreparer) Prepare(ctx context.Context, spec runtime.WorkspaceSpec) (*runtime.Workspace, error) {
+type fakeWorkspacePreparer struct {
+	prepareFunc func(context.Context, runtime.WorkspaceSpec) (*runtime.Workspace, error)
+	cleanupFunc func(context.Context, *runtime.Workspace) error
+}
+
+func (f fakeWorkspacePreparer) Prepare(ctx context.Context, spec runtime.WorkspaceSpec) (*runtime.Workspace, error) {
+	if f.prepareFunc != nil {
+		return f.prepareFunc(ctx, spec)
+	}
 	sourcePath := strings.TrimSpace(spec.SourcePath)
 	if sourcePath == "" {
 		sourcePath = "."
@@ -610,6 +725,13 @@ func (fakeWorkspacePreparer) Prepare(ctx context.Context, spec runtime.Workspace
 		SourcePath: sourcePath,
 		Method:     runtime.MethodGitWorktree,
 	}, nil
+}
+
+func (f fakeWorkspacePreparer) Cleanup(ctx context.Context, workspace *runtime.Workspace) error {
+	if f.cleanupFunc != nil {
+		return f.cleanupFunc(ctx, workspace)
+	}
+	return nil
 }
 
 func assertFileContent(t *testing.T, path string, want string) {

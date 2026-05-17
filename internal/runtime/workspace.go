@@ -121,6 +121,50 @@ func (m *WorkspaceManager) prepareGitWorktree(ctx context.Context, sourcePath st
 	return nil
 }
 
+func (m *WorkspaceManager) Cleanup(ctx context.Context, workspace *Workspace) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if workspace == nil {
+		return errors.New("workspace is required")
+	}
+
+	sourcePath := strings.TrimSpace(workspace.SourcePath)
+	if sourcePath == "" {
+		return errors.New("workspace source path is required")
+	}
+	workspacePath := strings.TrimSpace(workspace.Path)
+	if workspacePath == "" {
+		return errors.New("workspace path is required")
+	}
+
+	switch workspace.Method {
+	case MethodGitWorktree:
+		return m.removeGitWorktree(ctx, sourcePath, workspacePath)
+	case MethodCopy:
+		return errors.New("copy workspace cleanup is not implemented")
+	default:
+		return fmt.Errorf("unsupported workspace method %q", workspace.Method)
+	}
+}
+
+func (m *WorkspaceManager) removeGitWorktree(ctx context.Context, sourcePath string, workspacePath string) error {
+	_, stderr, err := m.runner(ctx, "git", []string{
+		"-C", sourcePath,
+		"worktree", "remove",
+		workspacePath,
+		"--force",
+	})
+	if err != nil {
+		message := strings.TrimSpace(stderr)
+		if message != "" {
+			return fmt.Errorf("remove git worktree workspace: %w: %s", err, message)
+		}
+		return fmt.Errorf("remove git worktree workspace: %w", err)
+	}
+	return nil
+}
+
 func runCommand(ctx context.Context, command string, args []string) ([]byte, string, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 

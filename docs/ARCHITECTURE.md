@@ -68,6 +68,7 @@ Initial runtime:
 
 - local workspace directories
 - isolated per-run workspace, initially via Git worktree
+- workspace cleanup policy: remove succeeded runs, keep failed and policy_failed runs
 - copy-based workspace remains a future implementation option
 
 Later runtime:

@@ -95,6 +95,62 @@ func TestWorkspaceManagerReturnsWorktreeError(t *testing.T) {
 	}
 }
 
+func TestWorkspaceManagerRemovesGitWorktree(t *testing.T) {
+	var gotCommand string
+	var gotArgs []string
+
+	manager := newWorkspaceManager(MethodGitWorktree, func(ctx context.Context, command string, args []string) ([]byte, string, error) {
+		gotCommand = command
+		gotArgs = append(gotArgs, args...)
+		return nil, "", nil
+	})
+
+	sourcePath := t.TempDir()
+	workspacePath := filepath.Join(t.TempDir(), "workspace")
+	err := manager.Cleanup(context.Background(), &Workspace{
+		Path:       workspacePath,
+		SourcePath: sourcePath,
+		Method:     MethodGitWorktree,
+	})
+	if err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+
+	wantArgs := []string{
+		"-C", sourcePath,
+		"worktree", "remove",
+		workspacePath,
+		"--force",
+	}
+	if gotCommand != "git" {
+		t.Fatalf("command = %q, want git", gotCommand)
+	}
+	if !reflect.DeepEqual(gotArgs, wantArgs) {
+		t.Fatalf("args = %#v, want %#v", gotArgs, wantArgs)
+	}
+}
+
+func TestWorkspaceManagerReturnsCleanupError(t *testing.T) {
+	manager := newWorkspaceManager(MethodGitWorktree, func(ctx context.Context, command string, args []string) ([]byte, string, error) {
+		return nil, "fatal: worktree contains modified files\n", errors.New("exit 128")
+	})
+
+	err := manager.Cleanup(context.Background(), &Workspace{
+		Path:       filepath.Join(t.TempDir(), "workspace"),
+		SourcePath: t.TempDir(),
+		Method:     MethodGitWorktree,
+	})
+	if err == nil {
+		t.Fatal("Cleanup() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "remove git worktree workspace") {
+		t.Fatalf("error = %v, want cleanup context", err)
+	}
+	if !strings.Contains(err.Error(), "fatal: worktree contains modified files") {
+		t.Fatalf("error = %v, want git stderr", err)
+	}
+}
+
 func TestWorkspaceManagerDocumentsCopyAsFutureMethod(t *testing.T) {
 	manager := newWorkspaceManager(MethodCopy, func(ctx context.Context, command string, args []string) ([]byte, string, error) {
 		t.Fatal("runner should not be called")

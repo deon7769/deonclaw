@@ -48,6 +48,7 @@ var gitSnapshotRunner = git.TakeSnapshot
 
 type workspacePreparer interface {
 	Prepare(context.Context, runtime.WorkspaceSpec) (*runtime.Workspace, error)
+	Cleanup(context.Context, *runtime.Workspace) error
 }
 
 var workspaceManagerFactory = func() workspacePreparer {
@@ -232,7 +233,8 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	preparedWorkspace, err := workspaceManagerFactory().Prepare(ctx, runtime.WorkspaceSpec{
+	workspaceManager := workspaceManagerFactory()
+	preparedWorkspace, err := workspaceManager.Prepare(ctx, runtime.WorkspaceSpec{
 		RunID:      runID,
 		SourcePath: workspace,
 		RootDir:    opts.artifactsDir,
@@ -316,6 +318,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	if !policyResult.OK() {
 		runRecord.Status = runs.StatusPolicyFailed
 	}
+	cleanup := cleanupWorkspace(ctx, workspaceManager, preparedWorkspace, runRecord.Status)
 	runRecord.UpdatedAt = finishedAt
 	runRecord.FinishedAt = &finishedAt
 
@@ -324,7 +327,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, diffPatch, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, cleanup, diffPatch, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -342,6 +345,9 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 
 	if result != nil && result.Stderr != "" {
 		fmt.Fprintf(stderr, "%s", result.Stderr)
+	}
+	if cleanup.Warning != "" {
+		fmt.Fprintf(stderr, "workspace cleanup warning: %s\n", cleanup.Warning)
 	}
 	if !policyResult.OK() {
 		fmt.Fprintf(stderr, "policy failed: %s\n", policySummary)
@@ -381,7 +387,7 @@ func captureGitDiff(ctx context.Context, workspace string) ([]byte, error) {
 	return diff, nil
 }
 
-func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, diffPatch []byte, createdAt time.Time) ([]artifacts.Artifact, error) {
+func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, cleanup workspaceCleanup, diffPatch []byte, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -390,6 +396,9 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 	rawStderr, ok := workerArtifactContent(result.Artifacts, "stderr.log")
 	if !ok {
 		rawStderr = []byte(result.Stderr)
+	}
+	if cleanup.Warning != "" {
+		rawStderr = append(rawStderr, []byte(fmt.Sprintf("workspace cleanup warning: %s\n", cleanup.Warning))...)
 	}
 
 	writer := runArtifactWriter{
@@ -410,7 +419,7 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 	if err := writer.write("diff", "diff.patch", artifacts.KindDiff, diffPatch); err != nil {
 		return nil, err
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary)); err != nil {
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, cleanup)); err != nil {
 		return nil, err
 	}
 
@@ -447,7 +456,30 @@ func workerEventsJSONL(workerEvents []workers.WorkerEvent) []byte {
 	return output.Bytes()
 }
 
-func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string) []byte {
+type workspaceCleanup struct {
+	Action  string
+	Reason  runs.RunStatus
+	Warning string
+}
+
+func cleanupWorkspace(ctx context.Context, manager workspacePreparer, workspace *runtime.Workspace, status runs.RunStatus) workspaceCleanup {
+	cleanup := workspaceCleanup{
+		Action: "kept",
+		Reason: status,
+	}
+	if status != runs.StatusSucceeded {
+		return cleanup
+	}
+
+	if err := manager.Cleanup(ctx, workspace); err != nil {
+		cleanup.Warning = fmt.Sprintf("workspace cleanup failed: %v", err)
+		return cleanup
+	}
+	cleanup.Action = "removed"
+	return cleanup
+}
+
+func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, cleanup workspaceCleanup) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -463,9 +495,14 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 		fmt.Sprintf("Command: %s", strings.Join(result.Command, " ")),
 		fmt.Sprintf("Events: %d", len(result.Events)),
 		fmt.Sprintf("Policy: %s", policySummary),
+		fmt.Sprintf("Workspace cleanup: %s", cleanup.Action),
+		fmt.Sprintf("Cleanup reason: %s", cleanup.Reason),
 	}
 	if runErr != nil {
 		lines = append(lines, fmt.Sprintf("Error: %v", runErr))
+	}
+	if cleanup.Warning != "" {
+		lines = append(lines, fmt.Sprintf("Cleanup warning: %s", cleanup.Warning))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
 }

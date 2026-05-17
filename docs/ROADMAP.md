@@ -51,6 +51,7 @@ Deliverables:
 - workspace manager
 - dirty baseline failure by default
 - future explicit override flag: `--allow-dirty-baseline`
+- workspace cleanup policy after run completion
 - allowed/forbidden path checks
 - diff capture
 - policy failure state
