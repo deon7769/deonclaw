@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
+	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/workers"
@@ -53,6 +55,7 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	})
 	setRunID(t, "run-test-001")
 	setGitDiff(t, "")
+	setGitSnapshot(t, &git.Snapshot{}, &git.Snapshot{})
 
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -169,6 +172,7 @@ func TestRunWorkerCodexRunPreservesRawStdoutWhenJSONLIsInvalid(t *testing.T) {
 	})
 	setRunID(t, "run-invalid-json-001")
 	setGitDiff(t, "")
+	setGitSnapshot(t, &git.Snapshot{}, &git.Snapshot{})
 
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -303,6 +307,18 @@ index 1111111..2222222 100644
 			})
 			setRunID(t, tt.runID)
 			setGitDiff(t, tt.diff)
+			changedInDiff := policy.ChangedPathsFromGitDiff([]byte(tt.diff))
+			postSnapshot := &git.Snapshot{
+				Entries: make([]git.FileEntry, 0, len(changedInDiff)),
+			}
+			for _, p := range changedInDiff {
+				postSnapshot.Entries = append(postSnapshot.Entries, git.FileEntry{
+					Path:     p,
+					Staged:   git.StatusUntracked,
+					Unstaged: git.StatusUntracked,
+				})
+			}
+			setGitSnapshot(t, &git.Snapshot{}, postSnapshot)
 
 			tempDir := t.TempDir()
 			storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -384,6 +400,7 @@ func TestRunWorkerCodexRunPersistsFailureArtifacts(t *testing.T) {
 	})
 	setRunID(t, "run-failed-001")
 	setGitDiff(t, "")
+	setGitSnapshot(t, &git.Snapshot{}, &git.Snapshot{})
 
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -539,6 +556,22 @@ func setGitDiff(t *testing.T, diff string) {
 	}
 }
 
+func setGitSnapshot(t *testing.T, baseline *git.Snapshot, postRun *git.Snapshot) {
+	t.Helper()
+	oldRunner := gitSnapshotRunner
+	t.Cleanup(func() {
+		gitSnapshotRunner = oldRunner
+	})
+	callCount := 0
+	gitSnapshotRunner = func(ctx context.Context, workspace string) (*git.Snapshot, error) {
+		callCount++
+		if callCount == 1 {
+			return baseline, nil
+		}
+		return postRun, nil
+	}
+}
+
 func assertFileContent(t *testing.T, path string, want string) {
 	t.Helper()
 	got, err := os.ReadFile(path)
@@ -614,4 +647,172 @@ func (f fakeWorker) DryRun(context.Context, workers.RunSpec) (*workers.WorkerEve
 
 func (f fakeWorker) Run(context.Context, workers.RunSpec) (*workers.RunResult, error) {
 	return f.runResult, f.runErr
+}
+
+func TestRunCodexRunDetectsChangedPathsFromSnapshotDiff(t *testing.T) {
+	setCodexWorkerFactory(t, func() workers.Worker {
+		return fakeWorker{
+			runResult: &workers.RunResult{
+				Workspace: ".",
+				Command:   []string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--cd", ".", "-"},
+				Events: []workers.WorkerEvent{
+					{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
+				},
+			},
+		}
+	})
+	setRunID(t, "run-snapshot-001")
+	setGitDiff(t, "")
+	postSnapshot := &git.Snapshot{
+		Entries: []git.FileEntry{
+			{Path: "internal/tasks/task.go", Staged: git.StatusModified, Unstaged: git.StatusUnmodified},
+			{Path: "newfile.go", Staged: git.StatusUntracked, Unstaged: git.StatusUntracked},
+		},
+	}
+	setGitSnapshot(t, &git.Snapshot{}, postSnapshot)
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	taskPath := writeTaskFileWithPolicy(t, "codex", "workspace_write", []string{"internal/**", "newfile.go"}, []string{"secrets/**"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"worker",
+		"codex",
+		"run",
+		taskPath,
+		"--store",
+		storePath,
+		"--artifacts-dir",
+		artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	gotRun, err := db.Run(context.Background(), "run-snapshot-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != runs.StatusSucceeded {
+		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusSucceeded)
+	}
+}
+
+func TestRunCodexRunDetectsDirtyBaseline(t *testing.T) {
+	setCodexWorkerFactory(t, func() workers.Worker {
+		return fakeWorker{
+			runResult: &workers.RunResult{
+				Workspace: ".",
+				Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+				Events: []workers.WorkerEvent{
+					{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
+				},
+			},
+		}
+	})
+	setRunID(t, "run-dirty-001")
+	setGitDiff(t, "")
+	dirtySnapshot := &git.Snapshot{
+		Entries: []git.FileEntry{
+			{Path: "existing-dirty.go", Staged: git.StatusModified, Unstaged: git.StatusUnmodified},
+		},
+	}
+	setGitSnapshot(t, dirtySnapshot, &git.Snapshot{})
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"worker",
+		"codex",
+		"run",
+		writeTaskFile(t, "codex"),
+		"--store",
+		storePath,
+		"--artifacts-dir",
+		artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "workspace is dirty before run") {
+		t.Fatalf("stderr = %q, want dirty baseline warning", stderr.String())
+	}
+}
+
+func TestRunCodexRunPolicyUsesSnapshotPathsNotJustDiff(t *testing.T) {
+	setCodexWorkerFactory(t, func() workers.Worker {
+		return fakeWorker{
+			runResult: &workers.RunResult{
+				Workspace: ".",
+				Command:   []string{"codex", "exec", "--json", "--sandbox", "workspace-write", "--cd", ".", "-"},
+				Events: []workers.WorkerEvent{
+					{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
+				},
+			},
+		}
+	})
+	setRunID(t, "run-untracked-001")
+	setGitDiff(t, "")
+	postSnapshot := &git.Snapshot{
+		Entries: []git.FileEntry{
+			{Path: "secrets/leaked.key", Staged: git.StatusUntracked, Unstaged: git.StatusUntracked},
+		},
+	}
+	setGitSnapshot(t, &git.Snapshot{}, postSnapshot)
+
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	taskPath := writeTaskFileWithPolicy(t, "codex", "workspace_write", []string{"internal/**"}, []string{"secrets/**"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"worker",
+		"codex",
+		"run",
+		taskPath,
+		"--store",
+		storePath,
+		"--artifacts-dir",
+		artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1 (policy failure)", code)
+	}
+	if !strings.Contains(stderr.String(), `secrets/leaked.key matches forbidden path "secrets/**"`) {
+		t.Fatalf("stderr = %q, want untracked forbidden path violation", stderr.String())
+	}
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	gotRun, err := db.Run(context.Background(), "run-untracked-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != runs.StatusPolicyFailed {
+		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusPolicyFailed)
+	}
 }

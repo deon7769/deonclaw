@@ -15,6 +15,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/config"
 	"github.com/deon7769/deonclaw/internal/events"
+	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/store"
@@ -41,6 +42,8 @@ var runIDFactory = func() string {
 }
 
 var gitDiffRunner = captureGitDiff
+
+var gitSnapshotRunner = git.TakeSnapshot
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -204,12 +207,27 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	runID := runIDFactory()
 	runDir := filepath.Join(opts.artifactsDir, runID)
 	now := time.Now().UTC()
+
+	workspace := strings.TrimSpace(task.Workspace.Path)
+	if workspace == "" {
+		workspace = "."
+	}
+
+	baseline, snapErr := gitSnapshotRunner(ctx, workspace)
+	if snapErr != nil {
+		fmt.Fprintf(stderr, "capture pre-run snapshot: %v\n", snapErr)
+		return 1
+	}
+	if !baseline.IsClean() {
+		fmt.Fprintf(stderr, "workspace is dirty before run (baseline recorded: %d changed file(s))\n", len(baseline.Entries))
+	}
+
 	runRecord := &runs.Run{
 		ID:            runID,
 		TaskID:        task.ID,
 		Status:        runs.StatusRunning,
 		Worker:        "codex",
-		WorkspacePath: task.Workspace.Path,
+		WorkspacePath: workspace,
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	}
@@ -242,17 +260,32 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		}
 	}
 
-	workspace := result.Workspace
+	workspace = result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
 	}
+
 	diffPatch, diffErr := gitDiffRunner(ctx, workspace)
 	if diffErr != nil && runErr == nil {
 		runErr = fmt.Errorf("capture git diff: %w", diffErr)
 	}
+
+	postRun, snapPostErr := gitSnapshotRunner(ctx, workspace)
+	if snapPostErr != nil && runErr == nil {
+		runErr = fmt.Errorf("capture post-run snapshot: %w", snapPostErr)
+	}
+
+	var changedPaths []string
+	if snapPostErr == nil {
+		changeDiff := git.Diff{Before: baseline, After: postRun}
+		changedPaths = changeDiff.ChangedPaths()
+	} else {
+		changedPaths = policy.ChangedPathsFromGitDiff(diffPatch)
+	}
+
 	policyResult := policy.EvaluateChangedPaths(
 		task.Mode,
-		policy.ChangedPathsFromGitDiff(diffPatch),
+		changedPaths,
 		task.AllowedPaths,
 		task.ForbiddenPaths,
 	)
