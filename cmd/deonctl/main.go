@@ -295,9 +295,12 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	var changedPaths []string
+	var changedFiles []changedFile
 	if snapPostErr == nil {
 		changeDiff := git.Diff{Before: baseline, After: postRun}
 		changedPaths = changeDiff.ChangedPaths()
+		changedFiles = changedFilesFromSnapshot(baseline, postRun)
+		diffPatch = appendUntrackedMetadata(diffPatch, changedFiles)
 	} else {
 		changedPaths = policy.ChangedPathsFromGitDiff(diffPatch)
 	}
@@ -327,7 +330,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, cleanup, diffPatch, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -372,7 +375,27 @@ func captureGitDiff(ctx context.Context, workspace string) ([]byte, error) {
 		workspace = "."
 	}
 
-	cmd := exec.CommandContext(ctx, "git", "-C", workspace, "diff", "--binary")
+	unstaged, err := captureGitDiffWithArgs(ctx, workspace, []string{"diff", "--binary"})
+	if err != nil {
+		return nil, err
+	}
+	staged, err := captureGitDiffWithArgs(ctx, workspace, []string{"diff", "--cached", "--binary"})
+	if err != nil {
+		return nil, err
+	}
+
+	var diff bytes.Buffer
+	diff.Write(unstaged)
+	if len(unstaged) > 0 && len(staged) > 0 && !bytes.HasSuffix(unstaged, []byte("\n")) {
+		diff.WriteByte('\n')
+	}
+	diff.Write(staged)
+	return diff.Bytes(), nil
+}
+
+func captureGitDiffWithArgs(ctx context.Context, workspace string, args []string) ([]byte, error) {
+	commandArgs := append([]string{"-C", workspace}, args...)
+	cmd := exec.CommandContext(ctx, "git", commandArgs...)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 
@@ -387,7 +410,7 @@ func captureGitDiff(ctx context.Context, workspace string) ([]byte, error) {
 	return diff, nil
 }
 
-func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, cleanup workspaceCleanup, diffPatch []byte, createdAt time.Time) ([]artifacts.Artifact, error) {
+func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []changedFile, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -419,7 +442,18 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 	if err := writer.write("diff", "diff.patch", artifacts.KindDiff, diffPatch); err != nil {
 		return nil, err
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, cleanup)); err != nil {
+	if changedFiles == nil {
+		changedFiles = []changedFile{}
+	}
+	changedFilesJSON, err := json.MarshalIndent(changedFiles, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	changedFilesJSON = append(changedFilesJSON, '\n')
+	if err := writer.write("changed-files", "changed-files.json", artifacts.KindOther, changedFilesJSON); err != nil {
+		return nil, err
+	}
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, changedPathCount, cleanup)); err != nil {
 		return nil, err
 	}
 
@@ -479,7 +513,80 @@ func cleanupWorkspace(ctx context.Context, manager workspacePreparer, workspace 
 	return cleanup
 }
 
-func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, cleanup workspaceCleanup) []byte {
+type changedFile struct {
+	Path     string `json:"path"`
+	Staged   string `json:"staged"`
+	Unstaged string `json:"unstaged"`
+	Source   string `json:"source"`
+}
+
+func changedFilesFromSnapshot(before *git.Snapshot, after *git.Snapshot) []changedFile {
+	if after == nil {
+		return nil
+	}
+
+	beforeSet := make(map[string]struct{})
+	if before != nil {
+		for _, entry := range before.Entries {
+			beforeSet[entry.Path] = struct{}{}
+		}
+	}
+
+	seen := make(map[string]struct{})
+	changedFiles := make([]changedFile, 0, len(after.Entries))
+	for _, entry := range after.Entries {
+		if _, inBefore := beforeSet[entry.Path]; inBefore {
+			continue
+		}
+		if _, already := seen[entry.Path]; already {
+			continue
+		}
+		seen[entry.Path] = struct{}{}
+		changedFiles = append(changedFiles, changedFile{
+			Path:     entry.Path,
+			Staged:   string(entry.Staged),
+			Unstaged: string(entry.Unstaged),
+			Source:   "snapshot",
+		})
+	}
+	return changedFiles
+}
+
+func appendUntrackedMetadata(diffPatch []byte, changedFiles []changedFile) []byte {
+	var untracked []changedFile
+	for _, changed := range changedFiles {
+		if changed.Staged == string(git.StatusUntracked) && changed.Unstaged == string(git.StatusUntracked) {
+			untracked = append(untracked, changed)
+		}
+	}
+	if len(untracked) == 0 {
+		return diffPatch
+	}
+
+	var output bytes.Buffer
+	output.Write(diffPatch)
+	if len(diffPatch) > 0 && !bytes.HasSuffix(diffPatch, []byte("\n")) {
+		output.WriteByte('\n')
+	}
+	if len(diffPatch) > 0 {
+		output.WriteByte('\n')
+	}
+	output.WriteString("# Untracked files from snapshot\n")
+	for _, changed := range untracked {
+		output.WriteString("# path: ")
+		output.WriteString(changed.Path)
+		output.WriteString(" staged: ")
+		output.WriteString(changed.Staged)
+		output.WriteString(" unstaged: ")
+		output.WriteString(changed.Unstaged)
+		output.WriteString(" source: ")
+		output.WriteString(changed.Source)
+		output.WriteByte('\n')
+	}
+	return output.Bytes()
+}
+
+func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -495,6 +602,7 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 		fmt.Sprintf("Command: %s", strings.Join(result.Command, " ")),
 		fmt.Sprintf("Events: %d", len(result.Events)),
 		fmt.Sprintf("Policy: %s", policySummary),
+		fmt.Sprintf("Changed paths: %d", changedPathCount),
 		fmt.Sprintf("Workspace cleanup: %s", cleanup.Action),
 		fmt.Sprintf("Cleanup reason: %s", cleanup.Reason),
 	}
@@ -566,7 +674,7 @@ func artifactFileName(path string) string {
 
 func isCLIOwnedArtifact(name string) bool {
 	switch name {
-	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "summary.md":
+	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "summary.md":
 		return true
 	default:
 		return false

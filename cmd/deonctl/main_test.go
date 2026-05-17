@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -38,6 +40,39 @@ func TestRunWorkerCodexDryRun(t *testing.T) {
 	}
 	if !strings.Contains(output, "command: codex exec --json --sandbox read-only --cd . -") {
 		t.Fatalf("stdout = %q, want planned command", output)
+	}
+}
+
+func TestCaptureGitDiffIncludesStagedAndUnstagedChanges(t *testing.T) {
+	repo := t.TempDir()
+	runGitTestCommand(t, repo, "init")
+	runGitTestCommand(t, repo, "config", "user.email", "test@example.com")
+	runGitTestCommand(t, repo, "config", "user.name", "Test User")
+
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("old\n"), 0o600); err != nil {
+		t.Fatalf("write tracked file: %v", err)
+	}
+	runGitTestCommand(t, repo, "add", "tracked.txt")
+	runGitTestCommand(t, repo, "commit", "-m", "initial")
+
+	if err := os.WriteFile(filepath.Join(repo, "tracked.txt"), []byte("new\n"), 0o600); err != nil {
+		t.Fatalf("modify tracked file: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "staged.txt"), []byte("staged\n"), 0o600); err != nil {
+		t.Fatalf("write staged file: %v", err)
+	}
+	runGitTestCommand(t, repo, "add", "staged.txt")
+
+	diff, err := captureGitDiff(context.Background(), repo)
+	if err != nil {
+		t.Fatalf("captureGitDiff() error = %v", err)
+	}
+	diffText := string(diff)
+	if !strings.Contains(diffText, "diff --git a/tracked.txt b/tracked.txt") {
+		t.Fatalf("diff = %q, want unstaged tracked diff", diffText)
+	}
+	if !strings.Contains(diffText, "diff --git a/staged.txt b/staged.txt") {
+		t.Fatalf("diff = %q, want staged file diff", diffText)
 	}
 }
 
@@ -119,7 +154,9 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	assertFileContent(t, filepath.Join(runDir, "events.jsonl"), `{"type":"message","text":"ok"}`+"\n")
 	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "stderr line\n")
 	assertFileContent(t, filepath.Join(runDir, "diff.patch"), "")
+	assertFileContent(t, filepath.Join(runDir, "changed-files.json"), "[]\n")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: removed")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: succeeded")
 	if !cleanupCalled {
@@ -162,11 +199,12 @@ func TestRunWorkerCodexRun(t *testing.T) {
 		t.Fatalf("ArtifactsByRun() error = %v", err)
 	}
 	wantArtifactPaths := map[string]bool{
-		filepath.Join(runDir, "stdout.jsonl"): false,
-		filepath.Join(runDir, "events.jsonl"): false,
-		filepath.Join(runDir, "stderr.log"):   false,
-		filepath.Join(runDir, "diff.patch"):   false,
-		filepath.Join(runDir, "summary.md"):   false,
+		filepath.Join(runDir, "stdout.jsonl"):       false,
+		filepath.Join(runDir, "events.jsonl"):       false,
+		filepath.Join(runDir, "stderr.log"):         false,
+		filepath.Join(runDir, "diff.patch"):         false,
+		filepath.Join(runDir, "changed-files.json"): false,
+		filepath.Join(runDir, "summary.md"):         false,
 	}
 	for _, artifact := range gotArtifacts {
 		if _, ok := wantArtifactPaths[artifact.Path]; !ok {
@@ -415,8 +453,8 @@ index 1111111..2222222 100644
 			for _, p := range changedInDiff {
 				postSnapshot.Entries = append(postSnapshot.Entries, git.FileEntry{
 					Path:     p,
-					Staged:   git.StatusUntracked,
-					Unstaged: git.StatusUntracked,
+					Staged:   git.StatusUnmodified,
+					Unstaged: git.StatusModified,
 				})
 			}
 			setGitSnapshot(t, &git.Snapshot{}, postSnapshot)
@@ -452,9 +490,11 @@ index 1111111..2222222 100644
 			}
 
 			runDir := filepath.Join(artifactsDir, tt.runID)
-			assertFileContent(t, filepath.Join(runDir, "diff.patch"), tt.diff)
+			assertFileContains(t, filepath.Join(runDir, "diff.patch"), tt.diff)
+			assertFileContains(t, filepath.Join(runDir, "changed-files.json"), `"source": "snapshot"`)
 			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: policy_failed")
 			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Policy: "+tt.want)
+			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 1")
 			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: kept")
 			assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: policy_failed")
 
@@ -477,7 +517,9 @@ index 1111111..2222222 100644
 				t.Fatalf("ArtifactsByRun() error = %v", err)
 			}
 			wantDiffPath := filepath.Join(runDir, "diff.patch")
+			wantChangedFilesPath := filepath.Join(runDir, "changed-files.json")
 			var sawDiff bool
+			var sawChangedFiles bool
 			for _, artifact := range gotArtifacts {
 				if artifact.Path == wantDiffPath {
 					sawDiff = true
@@ -485,9 +527,18 @@ index 1111111..2222222 100644
 						t.Fatalf("diff artifact kind = %q, want %q", artifact.Kind, artifacts.KindDiff)
 					}
 				}
+				if artifact.Path == wantChangedFilesPath {
+					sawChangedFiles = true
+					if artifact.Kind != artifacts.KindOther {
+						t.Fatalf("changed-files artifact kind = %q, want %q", artifact.Kind, artifacts.KindOther)
+					}
+				}
 			}
 			if !sawDiff {
 				t.Fatalf("diff artifact path %q was not persisted", wantDiffPath)
+			}
+			if !sawChangedFiles {
+				t.Fatalf("changed-files artifact path %q was not persisted", wantChangedFilesPath)
 			}
 		})
 	}
@@ -756,6 +807,39 @@ func assertFileContains(t *testing.T, path string, want string) {
 	}
 }
 
+func assertChangedFile(t *testing.T, path string, wantPath string, wantStaged string, wantUnstaged string, wantSource string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+
+	var changedFiles []changedFile
+	if err := json.Unmarshal(got, &changedFiles); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", path, err)
+	}
+	for _, changed := range changedFiles {
+		if changed.Path != wantPath {
+			continue
+		}
+		if changed.Staged != wantStaged || changed.Unstaged != wantUnstaged || changed.Source != wantSource {
+			t.Fatalf("changed file %+v, want staged=%q unstaged=%q source=%q", changed, wantStaged, wantUnstaged, wantSource)
+		}
+		return
+	}
+	t.Fatalf("changed file %q not found in %q: %s", wantPath, path, got)
+}
+
+func runGitTestCommand(t *testing.T, repo string, args ...string) {
+	t.Helper()
+	cmd := exec.Command("git", args...)
+	cmd.Dir = repo
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, output)
+	}
+}
+
 func writeTaskFileWithPolicy(t *testing.T, worker string, mode string, allowedPaths []string, forbiddenPaths []string) string {
 	t.Helper()
 
@@ -859,6 +943,13 @@ func TestRunCodexRunDetectsChangedPathsFromSnapshotDiff(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
 	}
+
+	runDir := filepath.Join(artifactsDir, "run-snapshot-001")
+	assertChangedFile(t, filepath.Join(runDir, "changed-files.json"), "internal/tasks/task.go", string(git.StatusModified), string(git.StatusUnmodified), "snapshot")
+	assertChangedFile(t, filepath.Join(runDir, "changed-files.json"), "newfile.go", string(git.StatusUntracked), string(git.StatusUntracked), "snapshot")
+	assertFileContains(t, filepath.Join(runDir, "diff.patch"), "# Untracked files from snapshot")
+	assertFileContains(t, filepath.Join(runDir, "diff.patch"), "# path: newfile.go staged: ? unstaged: ? source: snapshot")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 2")
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {
@@ -970,6 +1061,11 @@ func TestRunCodexRunPolicyUsesSnapshotPathsNotJustDiff(t *testing.T) {
 	if !strings.Contains(stderr.String(), `secrets/leaked.key matches forbidden path "secrets/**"`) {
 		t.Fatalf("stderr = %q, want untracked forbidden path violation", stderr.String())
 	}
+
+	runDir := filepath.Join(artifactsDir, "run-untracked-001")
+	assertChangedFile(t, filepath.Join(runDir, "changed-files.json"), "secrets/leaked.key", string(git.StatusUntracked), string(git.StatusUntracked), "snapshot")
+	assertFileContains(t, filepath.Join(runDir, "diff.patch"), "# path: secrets/leaked.key staged: ? unstaged: ? source: snapshot")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 1")
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {
