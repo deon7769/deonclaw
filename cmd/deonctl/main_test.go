@@ -13,6 +13,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
+	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/workers"
 )
@@ -43,13 +44,21 @@ func TestRunWorkerCodexDryRun(t *testing.T) {
 func TestRunWorkerCodexRun(t *testing.T) {
 	setCodexWorkerFactory(t, func() workers.Worker {
 		return fakeWorker{
-			runResult: &workers.RunResult{
-				Workspace: ".",
-				Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
-				Events: []workers.WorkerEvent{
-					{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
-				},
-				Stderr: "stderr line\n",
+			runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+				if spec.Workspace == "." {
+					t.Fatal("worker received source repo workspace")
+				}
+				if !strings.HasSuffix(spec.Workspace, filepath.Join("run-test-001", "workspace")) {
+					t.Fatalf("worker workspace = %q, want isolated run workspace", spec.Workspace)
+				}
+				return &workers.RunResult{
+					Workspace: spec.Workspace,
+					Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					Events: []workers.WorkerEvent{
+						{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
+					},
+					Stderr: "stderr line\n",
+				}, nil
 			},
 		}
 	})
@@ -60,6 +69,7 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
 	artifactsDir := filepath.Join(tempDir, "artifacts")
+	wantWorkspace := filepath.Join(artifactsDir, "run-test-001", "workspace")
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -81,10 +91,10 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	if !strings.Contains(output, "run_id: run-test-001") {
 		t.Fatalf("stdout = %q, want run id", output)
 	}
-	if !strings.Contains(output, "workspace: .") {
+	if !strings.Contains(output, "workspace: "+wantWorkspace) {
 		t.Fatalf("stdout = %q, want workspace", output)
 	}
-	if !strings.Contains(output, "command: codex exec --json --sandbox read-only --cd . -") {
+	if !strings.Contains(output, "command: codex exec --json --sandbox read-only --cd "+wantWorkspace+" -") {
 		t.Fatalf("stdout = %q, want command", output)
 	}
 	if !strings.Contains(output, "events: 1") {
@@ -113,6 +123,9 @@ func TestRunWorkerCodexRun(t *testing.T) {
 	}
 	if gotRun.Status != runs.StatusSucceeded {
 		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusSucceeded)
+	}
+	if gotRun.WorkspacePath != wantWorkspace {
+		t.Fatalf("run workspace path = %q, want %q", gotRun.WorkspacePath, wantWorkspace)
 	}
 	if gotRun.TaskID != "worker-mismatch-001" {
 		t.Fatalf("run task id = %q, want task id", gotRun.TaskID)
@@ -559,8 +572,10 @@ func setGitDiff(t *testing.T, diff string) {
 func setGitSnapshot(t *testing.T, baseline *git.Snapshot, postRun *git.Snapshot) {
 	t.Helper()
 	oldRunner := gitSnapshotRunner
+	oldWorkspaceFactory := workspaceManagerFactory
 	t.Cleanup(func() {
 		gitSnapshotRunner = oldRunner
+		workspaceManagerFactory = oldWorkspaceFactory
 	})
 	callCount := 0
 	gitSnapshotRunner = func(ctx context.Context, workspace string) (*git.Snapshot, error) {
@@ -570,6 +585,31 @@ func setGitSnapshot(t *testing.T, baseline *git.Snapshot, postRun *git.Snapshot)
 		}
 		return postRun, nil
 	}
+	workspaceManagerFactory = func() workspacePreparer {
+		return fakeWorkspacePreparer{}
+	}
+}
+
+type fakeWorkspacePreparer struct{}
+
+func (fakeWorkspacePreparer) Prepare(ctx context.Context, spec runtime.WorkspaceSpec) (*runtime.Workspace, error) {
+	sourcePath := strings.TrimSpace(spec.SourcePath)
+	if sourcePath == "" {
+		sourcePath = "."
+	}
+	sourcePath, err := filepath.Abs(sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	workspacePath, err := filepath.Abs(filepath.Join(spec.RootDir, spec.RunID, "workspace"))
+	if err != nil {
+		return nil, err
+	}
+	return &runtime.Workspace{
+		Path:       workspacePath,
+		SourcePath: sourcePath,
+		Method:     runtime.MethodGitWorktree,
+	}, nil
 }
 
 func assertFileContent(t *testing.T, path string, want string) {
@@ -637,6 +677,7 @@ func yamlStringList(values []string) string {
 
 type fakeWorker struct {
 	dryRunEvent *workers.WorkerEvent
+	runFunc     func(context.Context, workers.RunSpec) (*workers.RunResult, error)
 	runResult   *workers.RunResult
 	runErr      error
 }
@@ -645,7 +686,10 @@ func (f fakeWorker) DryRun(context.Context, workers.RunSpec) (*workers.WorkerEve
 	return f.dryRunEvent, nil
 }
 
-func (f fakeWorker) Run(context.Context, workers.RunSpec) (*workers.RunResult, error) {
+func (f fakeWorker) Run(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+	if f.runFunc != nil {
+		return f.runFunc(ctx, spec)
+	}
 	return f.runResult, f.runErr
 }
 
@@ -710,16 +754,10 @@ func TestRunCodexRunDetectsChangedPathsFromSnapshotDiff(t *testing.T) {
 }
 
 func TestRunCodexRunDetectsDirtyBaseline(t *testing.T) {
+	workerCalled := false
 	setCodexWorkerFactory(t, func() workers.Worker {
-		return fakeWorker{
-			runResult: &workers.RunResult{
-				Workspace: ".",
-				Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
-				Events: []workers.WorkerEvent{
-					{Type: "message", Worker: "codex", Payload: []byte(`{"type":"message","text":"ok"}`)},
-				},
-			},
-		}
+		workerCalled = true
+		return fakeWorker{}
 	})
 	setRunID(t, "run-dirty-001")
 	setGitDiff(t, "")
@@ -747,11 +785,20 @@ func TestRunCodexRunDetectsDirtyBaseline(t *testing.T) {
 		artifactsDir,
 	}, &stdout, &stderr)
 
-	if code != 0 {
-		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
 	}
 	if !strings.Contains(stderr.String(), "workspace is dirty before run") {
-		t.Fatalf("stderr = %q, want dirty baseline warning", stderr.String())
+		t.Fatalf("stderr = %q, want dirty baseline failure", stderr.String())
+	}
+	if workerCalled {
+		t.Fatal("worker was called for dirty baseline")
+	}
+	if _, err := os.Stat(storePath); !os.IsNotExist(err) {
+		t.Fatalf("store path exists after dirty baseline failure: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(artifactsDir, "run-dirty-001")); !os.IsNotExist(err) {
+		t.Fatalf("run artifacts dir exists after dirty baseline failure: %v", err)
 	}
 }
 

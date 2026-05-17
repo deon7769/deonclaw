@@ -67,6 +67,8 @@ Workspace and runtime execution.
 Initial runtime:
 
 - local workspace directories
+- isolated per-run workspace, initially via Git worktree
+- copy-based workspace remains a future implementation option
 
 Later runtime:
 

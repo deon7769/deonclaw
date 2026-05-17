@@ -49,6 +49,8 @@ Goal: allow safe workspace-write execution.
 Deliverables:
 
 - workspace manager
+- dirty baseline failure by default
+- future explicit override flag: `--allow-dirty-baseline`
 - allowed/forbidden path checks
 - diff capture
 - policy failure state

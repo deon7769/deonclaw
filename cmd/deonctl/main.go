@@ -18,6 +18,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
+	"github.com/deon7769/deonclaw/internal/runtime"
 	"github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workers"
@@ -44,6 +45,14 @@ var runIDFactory = func() string {
 var gitDiffRunner = captureGitDiff
 
 var gitSnapshotRunner = git.TakeSnapshot
+
+type workspacePreparer interface {
+	Prepare(context.Context, runtime.WorkspaceSpec) (*runtime.Workspace, error)
+}
+
+var workspaceManagerFactory = func() workspacePreparer {
+	return runtime.NewWorkspaceManager()
+}
 
 func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
@@ -219,8 +228,20 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	if !baseline.IsClean() {
-		fmt.Fprintf(stderr, "workspace is dirty before run (baseline recorded: %d changed file(s))\n", len(baseline.Entries))
+		fmt.Fprintln(stderr, "workspace is dirty before run")
+		return 1
 	}
+
+	preparedWorkspace, err := workspaceManagerFactory().Prepare(ctx, runtime.WorkspaceSpec{
+		RunID:      runID,
+		SourcePath: workspace,
+		RootDir:    opts.artifactsDir,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "prepare workspace failed: %v\n", err)
+		return 1
+	}
+	workspace = preparedWorkspace.Path
 
 	runRecord := &runs.Run{
 		ID:            runID,
@@ -251,19 +272,15 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	worker := codexWorkerFactory()
 	result, runErr := worker.Run(ctx, workers.RunSpec{
 		Task:      task,
-		Workspace: task.Workspace.Path,
+		Workspace: workspace,
 	})
 	if result == nil {
 		result = &workers.RunResult{
 			Worker:    "codex",
-			Workspace: task.Workspace.Path,
+			Workspace: workspace,
 		}
 	}
-
-	workspace = result.Workspace
-	if workspace == "" {
-		workspace = task.Workspace.Path
-	}
+	result.Workspace = workspace
 
 	diffPatch, diffErr := gitDiffRunner(ctx, workspace)
 	if diffErr != nil && runErr == nil {
