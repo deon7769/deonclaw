@@ -3,6 +3,7 @@ package store
 import (
 	"context"
 	"errors"
+	"time"
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/events"
@@ -21,5 +22,7 @@ type Store interface {
 	EventsByRun(context.Context, string) ([]events.Event, error)
 	SaveArtifact(context.Context, *artifacts.Artifact) error
 	ArtifactsByRun(context.Context, string) ([]artifacts.Artifact, error)
+	PrunableArtifacts(context.Context, time.Time) ([]artifacts.PruneCandidate, error)
+	DeleteArtifacts(context.Context, []string) error
 	Close() error
 }

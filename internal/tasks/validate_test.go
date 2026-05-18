@@ -81,6 +81,24 @@ func TestValidateAllowsEmptyAllowedPathsForReadOnly(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidValidationCommand(t *testing.T) {
+	task := validTask()
+	task.Validation.Commands = []ValidationCommand{
+		{Name: "go-test", TimeoutSeconds: -1},
+	}
+
+	err := Validate(task)
+	if err == nil {
+		t.Fatal("Validate() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "validation.commands[0].command is required") {
+		t.Fatalf("error = %v, want command requirement", err)
+	}
+	if !strings.Contains(err.Error(), "validation.commands[0].timeout_seconds must not be negative") {
+		t.Fatalf("error = %v, want timeout requirement", err)
+	}
+}
+
 func validTask() *Task {
 	return &Task{
 		ID:     "valid-task-001",

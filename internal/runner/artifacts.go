@@ -2,6 +2,8 @@ package runner
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -15,7 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, createdAt time.Time) ([]artifacts.Artifact, error) {
+func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -35,6 +37,7 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 		createdAt: createdAt,
 		written:   make(map[string]struct{}),
 	}
+	artifactCount := 9 + countWorkerArtifacts(result.Artifacts)
 	if err := writer.write("stdout", "stdout.jsonl", artifacts.KindEvents, rawStdout); err != nil {
 		return nil, err
 	}
@@ -58,7 +61,14 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 	if err := writer.write("changed-files", "changed-files.json", artifacts.KindOther, changedFilesJSON); err != nil {
 		return nil, err
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, changedPathCount, cleanup)); err != nil {
+	if err := writer.write("validation-log", "validation.log", artifacts.KindLog, validationLog(validation)); err != nil {
+		return nil, err
+	}
+	validationJSONData, err := validationJSON(validation)
+	if err != nil {
+		return nil, err
+	}
+	if err := writer.write("validation-json", "validation.json", artifacts.KindOther, validationJSONData); err != nil {
 		return nil, err
 	}
 
@@ -74,6 +84,16 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 		if err := writer.write(fmt.Sprintf("worker-%03d", i+1), name, kind, artifact.Content); err != nil {
 			return nil, err
 		}
+	}
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, artifactCount)); err != nil {
+		return nil, err
+	}
+	manifest, err := artifactManifestJSON(writer.artifacts)
+	if err != nil {
+		return nil, err
+	}
+	if err := writer.write("artifact-manifest", "artifact-manifest.json", artifacts.KindOther, manifest); err != nil {
+		return nil, err
 	}
 	return writer.artifacts, nil
 }
@@ -109,11 +129,14 @@ func (w *runArtifactWriter) write(idSuffix string, name string, kind artifacts.K
 	if err := os.WriteFile(path, content, 0o644); err != nil {
 		return err
 	}
+	hash := sha256.Sum256(content)
 	w.artifacts = append(w.artifacts, artifacts.Artifact{
 		ID:        fmt.Sprintf("%s-artifact-%s", w.runID, idSuffix),
 		RunID:     w.runID,
 		Path:      path,
 		Kind:      kind,
+		SizeBytes: int64(len(content)),
+		SHA256:    hex.EncodeToString(hash[:]),
 		CreatedAt: w.createdAt,
 	})
 	return nil
@@ -154,9 +177,51 @@ func artifactFileName(path string) string {
 
 func isCLIOwnedArtifact(name string) bool {
 	switch name {
-	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "summary.md":
+	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "validation.log", "validation.json", "summary.md", "artifact-manifest.json":
 		return true
 	default:
 		return false
 	}
+}
+
+func countWorkerArtifacts(workerArtifacts []artifacts.Artifact) int {
+	var count int
+	for _, artifact := range workerArtifacts {
+		name := artifactFileName(artifact.Path)
+		if name == "" || isCLIOwnedArtifact(name) {
+			continue
+		}
+		count++
+	}
+	return count
+}
+
+type artifactManifest struct {
+	Artifacts []artifactManifestEntry `json:"artifacts"`
+}
+
+type artifactManifestEntry struct {
+	Path      string         `json:"path"`
+	Kind      artifacts.Kind `json:"kind"`
+	SizeBytes int64          `json:"size_bytes"`
+	SHA256    string         `json:"sha256"`
+}
+
+func artifactManifestJSON(runArtifacts []artifacts.Artifact) ([]byte, error) {
+	manifest := artifactManifest{
+		Artifacts: make([]artifactManifestEntry, 0, len(runArtifacts)),
+	}
+	for _, artifact := range runArtifacts {
+		manifest.Artifacts = append(manifest.Artifacts, artifactManifestEntry{
+			Path:      artifact.Path,
+			Kind:      artifact.Kind,
+			SizeBytes: artifact.SizeBytes,
+			SHA256:    artifact.SHA256,
+		})
+	}
+	data, err := json.MarshalIndent(manifest, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }

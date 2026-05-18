@@ -18,5 +18,8 @@ type Artifact struct {
 	Path      string    `json:"path"`
 	Kind      Kind      `json:"kind"`
 	Content   []byte    `json:"content,omitempty"`
+	SizeBytes int64     `json:"size_bytes"`
+	SHA256    string    `json:"sha256"`
+	Keep      bool      `json:"keep"`
 	CreatedAt time.Time `json:"created_at"`
 }

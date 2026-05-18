@@ -48,6 +48,7 @@ type CodexRunner struct {
 	RunIDFactory            RunIDFactory
 	GitDiffRunner           GitDiffRunner
 	GitSnapshotRunner       GitSnapshotRunner
+	ValidationRunner        ValidationRunner
 	WorkspaceManagerFactory WorkspaceManagerFactory
 }
 
@@ -61,6 +62,7 @@ func NewCodexRunner() CodexRunner {
 		},
 		GitDiffRunner:     CaptureGitDiff,
 		GitSnapshotRunner: git.TakeSnapshot,
+		ValidationRunner:  RunValidationCommands,
 		WorkspaceManagerFactory: func() WorkspacePreparer {
 			return runtime.NewWorkspaceManager()
 		},
@@ -154,6 +156,16 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	}
 	result.Workspace = workspace
 
+	validationResult := skippedValidation(task.Validation.Commands, "worker failed")
+	var validationErr error
+	if runErr == nil {
+		validationResult = r.ValidationRunner(ctx, workspace, task.Validation.Commands)
+		validationErr = validationFailureError(validationResult)
+		if validationErr != nil {
+			runErr = validationErr
+		}
+	}
+
 	diffPatch, diffErr := r.GitDiffRunner(ctx, workspace)
 	if diffErr != nil && runErr == nil {
 		runErr = fmt.Errorf("capture git diff: %w", diffErr)
@@ -200,7 +212,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -224,6 +236,10 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	}
 	if !policyResult.OK() {
 		fmt.Fprintf(stderr, "policy failed: %s\n", policySummary)
+		return 1
+	}
+	if validationErr != nil {
+		fmt.Fprintf(stderr, "validation failed: %v\n", validationErr)
 		return 1
 	}
 	if runErr != nil {
@@ -252,6 +268,9 @@ func (r CodexRunner) withDefaults() CodexRunner {
 	}
 	if r.GitSnapshotRunner == nil {
 		r.GitSnapshotRunner = defaults.GitSnapshotRunner
+	}
+	if r.ValidationRunner == nil {
+		r.ValidationRunner = defaults.ValidationRunner
 	}
 	if r.WorkspaceManagerFactory == nil {
 		r.WorkspaceManagerFactory = defaults.WorkspaceManagerFactory

@@ -35,4 +35,8 @@ func normalize(task *Task) {
 	task.Workspace.Strategy = strings.TrimSpace(task.Workspace.Strategy)
 	task.Workspace.Path = strings.TrimSpace(task.Workspace.Path)
 	task.Memory.Scope = strings.TrimSpace(task.Memory.Scope)
+	for i := range task.Validation.Commands {
+		task.Validation.Commands[i].Name = strings.TrimSpace(task.Validation.Commands[i].Name)
+		task.Validation.Commands[i].Command = strings.TrimSpace(task.Validation.Commands[i].Command)
+	}
 }

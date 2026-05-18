@@ -28,6 +28,52 @@ func TestParseValidFixture(t *testing.T) {
 	}
 }
 
+func TestParseValidationCommands(t *testing.T) {
+	task, err := Parse([]byte(`id: validation-task-001
+title: Validation task
+domain: general
+worker: codex
+goal: Run validation
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+validation:
+  commands:
+    - name: go-test
+      command: go
+      args:
+        - test
+        - ./...
+      timeout_seconds: 300
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - validation runs
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(task.Validation.Commands) != 1 {
+		t.Fatalf("len(validation.commands) = %d, want 1", len(task.Validation.Commands))
+	}
+	command := task.Validation.Commands[0]
+	if command.Name != "go-test" || command.Command != "go" || command.TimeoutSeconds != 300 {
+		t.Fatalf("validation command = %#v, want go-test/go/300", command)
+	}
+	if len(command.Args) != 2 || command.Args[0] != "test" || command.Args[1] != "./..." {
+		t.Fatalf("validation args = %#v, want test ./...", command.Args)
+	}
+	if err := Validate(task); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestLoadCodexSmokeExample(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "examples", "tasks", "codex-smoke.yaml")
 	if _, err := os.Stat(path); err != nil {

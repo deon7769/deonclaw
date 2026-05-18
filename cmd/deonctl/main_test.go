@@ -2,10 +2,17 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/deon7769/deonclaw/internal/artifacts"
+	"github.com/deon7769/deonclaw/internal/runs"
+	storepkg "github.com/deon7769/deonclaw/internal/store"
+	"github.com/deon7769/deonclaw/internal/tasks"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -125,6 +132,131 @@ func TestParseCodexRunOptions(t *testing.T) {
 	}
 	if opts.artifactsDir != "artifacts" {
 		t.Fatalf("artifactsDir = %q, want artifacts", opts.artifactsDir)
+	}
+}
+
+func TestRunArtifactsPruneDryRun(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	artifactPath := filepath.Join(artifactsDir, "run-old", "summary.md")
+	if err := os.MkdirAll(filepath.Dir(artifactPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(artifactPath, []byte("summary\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	task := &tasks.Task{
+		ID:     "task-001",
+		Title:  "Task",
+		Domain: "general",
+		Worker: "codex",
+		Goal:   "Test prune",
+		Mode:   "read_only",
+		Workspace: tasks.WorkspaceSpec{
+			Strategy: "local_repo",
+			Path:     ".",
+		},
+		Memory: tasks.MemorySpec{
+			Scope: "none",
+		},
+		ForbiddenPaths:   []string{"secrets/**"},
+		ExpectedOutputs:  []string{"artifacts/summary.md"},
+		DefinitionOfDone: []string{"dry-run lists artifacts"},
+	}
+	if err := db.SaveTask(ctx, task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+	oldTime := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
+	runRecord := &runs.Run{
+		ID:            "run-old",
+		TaskID:        task.ID,
+		Status:        runs.StatusSucceeded,
+		Worker:        "codex",
+		WorkspacePath: "workspace",
+		CreatedAt:     oldTime,
+		UpdatedAt:     oldTime,
+	}
+	if err := db.SaveRun(ctx, runRecord); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+	if err := db.SaveArtifact(ctx, &artifacts.Artifact{
+		ID:        "artifact-old",
+		RunID:     runRecord.ID,
+		Path:      artifactPath,
+		Kind:      artifacts.KindSummary,
+		SizeBytes: 8,
+		CreatedAt: oldTime,
+	}); err != nil {
+		t.Fatalf("SaveArtifact() error = %v", err)
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"artifacts",
+		"prune",
+		"--store",
+		storePath,
+		"--artifacts-dir",
+		artifactsDir,
+		"--older-than",
+		"30d",
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{"dry_run: true", "older_than: 30d", "candidates: 1", "deleted: 0", "skipped: 0"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+	if _, err := os.Stat(artifactPath); err != nil {
+		t.Fatalf("artifact file was removed in dry-run: %v", err)
+	}
+
+	db, err = storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	gotArtifacts, err := db.ArtifactsByRun(ctx, runRecord.ID)
+	if err != nil {
+		t.Fatalf("ArtifactsByRun() error = %v", err)
+	}
+	if len(gotArtifacts) != 1 {
+		t.Fatalf("len(artifacts) = %d, want 1 after dry-run", len(gotArtifacts))
+	}
+}
+
+func TestParseArtifactPruneOptions(t *testing.T) {
+	opts, err := parseArtifactPruneOptions([]string{"--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--older-than", "30d", "--dry-run"})
+	if err != nil {
+		t.Fatalf("parseArtifactPruneOptions() error = %v", err)
+	}
+	if opts.storePath != "deonclaw.db" {
+		t.Fatalf("storePath = %q, want deonclaw.db", opts.storePath)
+	}
+	if opts.artifactsDir != "artifacts" {
+		t.Fatalf("artifactsDir = %q, want artifacts", opts.artifactsDir)
+	}
+	if opts.olderThan != 30*24*time.Hour {
+		t.Fatalf("olderThan = %s, want 720h", opts.olderThan)
+	}
+	if !opts.dryRun {
+		t.Fatal("dryRun = false, want true")
 	}
 }
 

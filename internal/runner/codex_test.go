@@ -17,6 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
+	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
@@ -129,8 +130,14 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "stderr line\n")
 	assertFileContent(t, filepath.Join(runDir, "diff.patch"), "")
 	assertFileContent(t, filepath.Join(runDir, "changed-files.json"), "[]\n")
+	assertFileContains(t, filepath.Join(runDir, "validation.log"), "Validation: skipped")
+	assertValidationStatus(t, filepath.Join(runDir, "validation.json"), ValidationSkipped, 0)
+	assertArtifactManifestContains(t, filepath.Join(runDir, "artifact-manifest.json"), filepath.Join(runDir, "validation.json"), artifacts.KindOther)
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 0")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: skipped")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation commands: 0")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 9")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: removed")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: succeeded")
 	if !cleanupCalled {
@@ -173,16 +180,25 @@ func TestCodexRunnerRun(t *testing.T) {
 		t.Fatalf("ArtifactsByRun() error = %v", err)
 	}
 	wantArtifactPaths := map[string]bool{
-		filepath.Join(runDir, "stdout.jsonl"):       false,
-		filepath.Join(runDir, "events.jsonl"):       false,
-		filepath.Join(runDir, "stderr.log"):         false,
-		filepath.Join(runDir, "diff.patch"):         false,
-		filepath.Join(runDir, "changed-files.json"): false,
-		filepath.Join(runDir, "summary.md"):         false,
+		filepath.Join(runDir, "stdout.jsonl"):           false,
+		filepath.Join(runDir, "events.jsonl"):           false,
+		filepath.Join(runDir, "stderr.log"):             false,
+		filepath.Join(runDir, "diff.patch"):             false,
+		filepath.Join(runDir, "changed-files.json"):     false,
+		filepath.Join(runDir, "validation.log"):         false,
+		filepath.Join(runDir, "validation.json"):        false,
+		filepath.Join(runDir, "summary.md"):             false,
+		filepath.Join(runDir, "artifact-manifest.json"): false,
 	}
 	for _, artifact := range gotArtifacts {
 		if _, ok := wantArtifactPaths[artifact.Path]; !ok {
 			t.Fatalf("unexpected artifact path %q", artifact.Path)
+		}
+		if len(artifact.SHA256) != 64 {
+			t.Fatalf("artifact %q sha256 = %q, want 64 hex chars", artifact.Path, artifact.SHA256)
+		}
+		if artifact.Path == filepath.Join(runDir, "validation.log") && artifact.SizeBytes == 0 {
+			t.Fatalf("validation.log size_bytes = 0, want persisted non-zero size")
 		}
 		wantArtifactPaths[artifact.Path] = true
 	}
@@ -190,6 +206,237 @@ func TestCodexRunnerRun(t *testing.T) {
 		if !seen {
 			t.Fatalf("artifact path %q was not persisted", path)
 		}
+	}
+}
+
+func TestCodexRunnerRunValidationCommandSuccess(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	wantWorkspace := filepath.Join(artifactsDir, "run-validation-success-001", "workspace")
+	validationCalled := false
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-validation-success-001",
+		ValidationRunner: func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) ValidationResult {
+			validationCalled = true
+			if workspace != wantWorkspace {
+				t.Fatalf("validation workspace = %q, want %q", workspace, wantWorkspace)
+			}
+			if len(commands) != 1 || commands[0].Name != "go-test" {
+				t.Fatalf("validation commands = %#v, want go-test command", commands)
+			}
+			return validationPassed(commands, "go-test")
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFileWithValidation(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !validationCalled {
+		t.Fatal("validation runner was not called")
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-validation-success-001")
+	assertValidationStatus(t, filepath.Join(runDir, "validation.json"), ValidationPassed, 1)
+	assertFileContains(t, filepath.Join(runDir, "validation.log"), "Validation: passed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: passed")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	gotRun, err := db.Run(context.Background(), "run-validation-success-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != runs.StatusSucceeded {
+		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusSucceeded)
+	}
+	assertPersistedArtifact(t, db, "run-validation-success-001", filepath.Join(runDir, "validation.json"))
+	assertPersistedArtifact(t, db, "run-validation-success-001", filepath.Join(runDir, "artifact-manifest.json"))
+}
+
+func TestCodexRunnerRunValidationCommandFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-validation-failed-001",
+		ValidationRunner: func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) ValidationResult {
+			return validationFailed(commands, "go-test")
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFileWithValidation(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `validation failed: validation command "go-test" failed with exit code 1`) {
+		t.Fatalf("stderr = %q, want validation failure", stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-validation-failed-001")
+	assertValidationStatus(t, filepath.Join(runDir, "validation.json"), ValidationFailed, 1)
+	assertFileContains(t, filepath.Join(runDir, "validation.log"), `Validation error: validation command "go-test" failed with exit code 1`)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), `Validation error: validation command "go-test" failed with exit code 1`)
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	gotRun, err := db.Run(context.Background(), "run-validation-failed-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != runs.StatusFailed {
+		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusFailed)
+	}
+}
+
+func TestCodexRunnerRunSkipsValidationWhenWorkerFails(t *testing.T) {
+	validationCalled := false
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-validation-skipped-worker-failed-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runResult: &workers.RunResult{
+					Workspace: ".",
+					Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+					Stderr:    "boom\n",
+				},
+				runErr: errors.New("exit 1"),
+			}
+		},
+		ValidationRunner: func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) ValidationResult {
+			validationCalled = true
+			return validationPassed(commands, "go-test")
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFileWithValidation(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run() exit code = %d, want 1", code)
+	}
+	if validationCalled {
+		t.Fatal("validation runner was called after worker failure")
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-validation-skipped-worker-failed-001")
+	assertValidationStatus(t, filepath.Join(runDir, "validation.json"), ValidationSkipped, 1)
+	assertFileContains(t, filepath.Join(runDir, "validation.log"), "Skipped reason: worker failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: skipped")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation commands: 1")
+}
+
+func TestCodexRunnerRunPolicyFailureOverridesValidationFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	validationCalled := false
+	snapshotCalls := 0
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-validation-policy-failed-001",
+		ValidationRunner: func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) ValidationResult {
+			validationCalled = true
+			return validationFailed(commands, "go-test")
+		},
+		GitSnapshotRunner: func(ctx context.Context, workspace string) (*git.Snapshot, error) {
+			snapshotCalls++
+			if snapshotCalls == 1 {
+				if validationCalled {
+					t.Fatal("validation ran before baseline snapshot")
+				}
+				return &git.Snapshot{}, nil
+			}
+			if !validationCalled {
+				t.Fatal("post-run snapshot was captured before validation")
+			}
+			return &git.Snapshot{
+				Entries: []git.FileEntry{
+					{Path: "secrets/from-validation.txt", Staged: git.StatusUntracked, Unstaged: git.StatusUntracked},
+				},
+			}, nil
+		},
+	})
+	taskPath := writeTaskFileWithValidationAndPolicy(t, "codex", "workspace_write", []string{"internal/**"}, []string{"secrets/**"})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     taskPath,
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `policy failed: secrets/from-validation.txt matches forbidden path "secrets/**"`) {
+		t.Fatalf("stderr = %q, want policy failure", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "validation failed:") {
+		t.Fatalf("stderr = %q, validation failure should not outrank policy failure", stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-validation-policy-failed-001")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: policy_failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: failed")
+	assertChangedFile(t, filepath.Join(runDir, "changed-files.json"), "secrets/from-validation.txt", string(git.StatusUntracked), string(git.StatusUntracked), "snapshot")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	gotRun, err := db.Run(context.Background(), "run-validation-policy-failed-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != runs.StatusPolicyFailed {
+		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusPolicyFailed)
 	}
 }
 
@@ -774,12 +1021,14 @@ func TestCodexRunnerRunPolicyUsesSnapshotPathsNotJustDiff(t *testing.T) {
 }
 
 type testCodexRunnerOptions struct {
-	RunID            string
-	WorkerFactory    func() workers.Worker
-	Diff             string
-	Baseline         *git.Snapshot
-	PostRun          *git.Snapshot
-	WorkspaceManager WorkspacePreparer
+	RunID             string
+	WorkerFactory     func() workers.Worker
+	Diff              string
+	Baseline          *git.Snapshot
+	PostRun           *git.Snapshot
+	GitSnapshotRunner GitSnapshotRunner
+	ValidationRunner  ValidationRunner
+	WorkspaceManager  WorkspacePreparer
 }
 
 func testCodexRunner(t *testing.T, opts testCodexRunnerOptions) CodexRunner {
@@ -800,6 +1049,16 @@ func testCodexRunner(t *testing.T, opts testCodexRunnerOptions) CodexRunner {
 		workspaceManager = fakeWorkspacePreparer{}
 	}
 	callCount := 0
+	gitSnapshotRunner := opts.GitSnapshotRunner
+	if gitSnapshotRunner == nil {
+		gitSnapshotRunner = func(ctx context.Context, workspace string) (*git.Snapshot, error) {
+			callCount++
+			if callCount == 1 {
+				return opts.Baseline, nil
+			}
+			return opts.PostRun, nil
+		}
+	}
 	return CodexRunner{
 		WorkerFactory: workerFactory,
 		RunIDFactory: func() string {
@@ -808,13 +1067,8 @@ func testCodexRunner(t *testing.T, opts testCodexRunnerOptions) CodexRunner {
 		GitDiffRunner: func(context.Context, string) ([]byte, error) {
 			return []byte(opts.Diff), nil
 		},
-		GitSnapshotRunner: func(ctx context.Context, workspace string) (*git.Snapshot, error) {
-			callCount++
-			if callCount == 1 {
-				return opts.Baseline, nil
-			}
-			return opts.PostRun, nil
-		},
+		GitSnapshotRunner: gitSnapshotRunner,
+		ValidationRunner:  opts.ValidationRunner,
 		WorkspaceManagerFactory: func() WorkspacePreparer {
 			return workspaceManager
 		},
@@ -840,6 +1094,9 @@ func (f fakeWorkspacePreparer) Prepare(ctx context.Context, spec runtime.Workspa
 	}
 	workspacePath, err := filepath.Abs(filepath.Join(spec.RootDir, spec.RunID, "workspace"))
 	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
 		return nil, err
 	}
 	return &runtime.Workspace{
@@ -902,6 +1159,37 @@ definition_of_done:
 	return path
 }
 
+func writeTaskFileWithValidation(t *testing.T, worker string) string {
+	t.Helper()
+	return writeTaskFileContent(t, `id: validation-task-001
+title: "Validation task"
+domain: general
+worker: `+worker+`
+goal: "Do not execute"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+validation:
+  commands:
+    - name: go-test
+      command: go
+      args:
+        - test
+        - ./...
+      timeout_seconds: 300
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - validation executes
+`)
+}
+
 func writeTaskFileWithPolicy(t *testing.T, worker string, mode string, allowedPaths []string, forbiddenPaths []string) string {
 	t.Helper()
 
@@ -923,6 +1211,47 @@ allowed_paths:
 definition_of_done:
   - command fails before worker execution
 `
+	path := filepath.Join(t.TempDir(), "task.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write task file: %v", err)
+	}
+	return path
+}
+
+func writeTaskFileWithValidationAndPolicy(t *testing.T, worker string, mode string, allowedPaths []string, forbiddenPaths []string) string {
+	t.Helper()
+
+	content := `id: task-validation-` + strings.ReplaceAll(mode, "_", "-") + `-001
+title: "Validation policy task"
+domain: general
+worker: ` + worker + `
+goal: "Do not execute"
+mode: ` + mode + `
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+validation:
+  commands:
+    - name: go-test
+      command: go
+      args:
+        - test
+        - ./...
+      timeout_seconds: 300
+allowed_paths:
+` + yamlStringList(allowedPaths) + `forbidden_paths:
+` + yamlStringList(forbiddenPaths) + `expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - validation executes
+`
+	return writeTaskFileContent(t, content)
+}
+
+func writeTaskFileContent(t *testing.T, content string) string {
+	t.Helper()
 	path := filepath.Join(t.TempDir(), "task.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write task file: %v", err)
@@ -986,6 +1315,110 @@ func assertChangedFile(t *testing.T, path string, wantPath string, wantStaged st
 		return
 	}
 	t.Fatalf("changed file %q not found in %q: %s", wantPath, path, got)
+}
+
+func assertValidationStatus(t *testing.T, path string, wantStatus string, wantCommandCount int) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+
+	var result ValidationResult
+	if err := json.Unmarshal(got, &result); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", path, err)
+	}
+	if result.Status != wantStatus {
+		t.Fatalf("validation status = %q, want %q", result.Status, wantStatus)
+	}
+	if result.CommandCount != wantCommandCount {
+		t.Fatalf("validation command_count = %d, want %d", result.CommandCount, wantCommandCount)
+	}
+}
+
+func assertArtifactManifestContains(t *testing.T, path string, wantPath string, wantKind artifacts.Kind) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+
+	var manifest artifactManifest
+	if err := json.Unmarshal(got, &manifest); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", path, err)
+	}
+	for _, artifact := range manifest.Artifacts {
+		if artifact.Path != wantPath {
+			continue
+		}
+		if artifact.Kind != wantKind {
+			t.Fatalf("manifest artifact kind = %q, want %q", artifact.Kind, wantKind)
+		}
+		if len(artifact.SHA256) != 64 {
+			t.Fatalf("manifest artifact sha256 = %q, want 64 hex chars", artifact.SHA256)
+		}
+		return
+	}
+	t.Fatalf("artifact %q not found in manifest %q", wantPath, path)
+}
+
+func assertPersistedArtifact(t *testing.T, db *storepkg.SQLiteStore, runID string, wantPath string) {
+	t.Helper()
+	gotArtifacts, err := db.ArtifactsByRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("ArtifactsByRun() error = %v", err)
+	}
+	for _, artifact := range gotArtifacts {
+		if artifact.Path != wantPath {
+			continue
+		}
+		if len(artifact.SHA256) != 64 {
+			t.Fatalf("artifact %q sha256 = %q, want 64 hex chars", artifact.Path, artifact.SHA256)
+		}
+		return
+	}
+	t.Fatalf("artifact %q was not persisted", wantPath)
+}
+
+func validationPassed(commands []tasks.ValidationCommand, name string) ValidationResult {
+	return ValidationResult{
+		Status:       ValidationPassed,
+		CommandCount: len(commands),
+		Commands: []ValidationCommandResult{
+			{
+				Name:           name,
+				Command:        "go",
+				Args:           []string{"test", "./..."},
+				TimeoutSeconds: defaultValidationTimeoutSeconds,
+				ExitCode:       0,
+				DurationMS:     1,
+				Status:         ValidationPassed,
+				Stdout:         "ok\n",
+			},
+		},
+	}
+}
+
+func validationFailed(commands []tasks.ValidationCommand, name string) ValidationResult {
+	return ValidationResult{
+		Status:       ValidationFailed,
+		CommandCount: len(commands),
+		Error:        `validation command "` + name + `" failed with exit code 1`,
+		Commands: []ValidationCommandResult{
+			{
+				Name:           name,
+				Command:        "go",
+				Args:           []string{"test", "./..."},
+				TimeoutSeconds: defaultValidationTimeoutSeconds,
+				ExitCode:       1,
+				DurationMS:     1,
+				Status:         ValidationFailed,
+				Stdout:         "fail\n",
+				Stderr:         "boom\n",
+				Error:          "exit status 1",
+			},
+		},
+	}
 }
 
 func runGitTestCommand(t *testing.T, repo string, args ...string) {

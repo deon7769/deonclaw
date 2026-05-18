@@ -49,6 +49,18 @@ func Validate(task *Task) error {
 	if task.Memory.Scope != "" && !config.IsKnownMemoryScope(task.Memory.Scope) {
 		errs = append(errs, fmt.Errorf("memory.scope %q is not supported", task.Memory.Scope))
 	}
+	for i, command := range task.Validation.Commands {
+		prefix := fmt.Sprintf("validation.commands[%d]", i)
+		if strings.TrimSpace(command.Name) == "" {
+			errs = append(errs, fmt.Errorf("%s.name is required", prefix))
+		}
+		if strings.TrimSpace(command.Command) == "" {
+			errs = append(errs, fmt.Errorf("%s.command is required", prefix))
+		}
+		if command.TimeoutSeconds < 0 {
+			errs = append(errs, fmt.Errorf("%s.timeout_seconds must not be negative", prefix))
+		}
+	}
 	if len(task.ForbiddenPaths) == 0 {
 		errs = append(errs, errors.New("forbidden_paths must not be empty"))
 	}

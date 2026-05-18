@@ -37,6 +37,16 @@ func TestSQLiteStorePersistsTaskRunEventAndArtifact(t *testing.T) {
 		Memory: tasks.MemorySpec{
 			Scope: "none",
 		},
+		Validation: tasks.ValidationSpec{
+			Commands: []tasks.ValidationCommand{
+				{
+					Name:           "go-test",
+					Command:        "go",
+					Args:           []string{"test", "./..."},
+					TimeoutSeconds: 300,
+				},
+			},
+		},
 		AllowedPaths:     []string{"internal/store/**"},
 		ForbiddenPaths:   []string{"mysecondbrain/**", "secrets/**"},
 		ExpectedOutputs:  []string{"artifacts/summary.md"},
@@ -103,6 +113,9 @@ func TestSQLiteStorePersistsTaskRunEventAndArtifact(t *testing.T) {
 		RunID:     run.ID,
 		Path:      filepath.Join("artifacts", "summary.md"),
 		Kind:      artifacts.KindSummary,
+		SizeBytes: 12,
+		SHA256:    "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+		Keep:      true,
 		CreatedAt: createdAt,
 	}
 	if err := store.SaveArtifact(ctx, artifact); err != nil {
@@ -115,6 +128,71 @@ func TestSQLiteStorePersistsTaskRunEventAndArtifact(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotArtifacts, []artifacts.Artifact{*artifact}) {
 		t.Fatalf("ArtifactsByRun() = %#v, want %#v", gotArtifacts, []artifacts.Artifact{*artifact})
+	}
+}
+
+func TestSQLiteStorePrunableArtifactsAndDeleteArtifacts(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenSQLite(filepath.Join(t.TempDir(), "deonclaw.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer store.Close()
+
+	task := minimalTask()
+	if err := store.SaveTask(ctx, task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+
+	oldTime := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	newTime := time.Date(2026, 5, 17, 0, 0, 0, 0, time.UTC)
+	cutoff := time.Date(2026, 4, 18, 0, 0, 0, 0, time.UTC)
+	runsToSave := []runs.Run{
+		{ID: "run-succeeded", TaskID: task.ID, Status: runs.StatusSucceeded, Worker: "codex", WorkspacePath: "workspace", CreatedAt: oldTime, UpdatedAt: oldTime},
+		{ID: "run-failed", TaskID: task.ID, Status: runs.StatusFailed, Worker: "codex", WorkspacePath: "workspace", CreatedAt: oldTime, UpdatedAt: oldTime},
+		{ID: "run-policy", TaskID: task.ID, Status: runs.StatusPolicyFailed, Worker: "codex", WorkspacePath: "workspace", CreatedAt: oldTime, UpdatedAt: oldTime},
+	}
+	for i := range runsToSave {
+		if err := store.SaveRun(ctx, &runsToSave[i]); err != nil {
+			t.Fatalf("SaveRun(%q) error = %v", runsToSave[i].ID, err)
+		}
+	}
+
+	artifactsToSave := []artifacts.Artifact{
+		{ID: "old-succeeded", RunID: "run-succeeded", Path: "artifacts/old-succeeded/summary.md", Kind: artifacts.KindSummary, CreatedAt: oldTime},
+		{ID: "new-succeeded", RunID: "run-succeeded", Path: "artifacts/new-succeeded/summary.md", Kind: artifacts.KindSummary, CreatedAt: newTime},
+		{ID: "old-keep", RunID: "run-succeeded", Path: "artifacts/old-keep/summary.md", Kind: artifacts.KindSummary, Keep: true, CreatedAt: oldTime},
+		{ID: "old-failed", RunID: "run-failed", Path: "artifacts/old-failed/summary.md", Kind: artifacts.KindSummary, CreatedAt: oldTime},
+		{ID: "old-policy", RunID: "run-policy", Path: "artifacts/old-policy/summary.md", Kind: artifacts.KindSummary, CreatedAt: oldTime},
+	}
+	for i := range artifactsToSave {
+		if err := store.SaveArtifact(ctx, &artifactsToSave[i]); err != nil {
+			t.Fatalf("SaveArtifact(%q) error = %v", artifactsToSave[i].ID, err)
+		}
+	}
+
+	prunable, err := store.PrunableArtifacts(ctx, cutoff)
+	if err != nil {
+		t.Fatalf("PrunableArtifacts() error = %v", err)
+	}
+	if len(prunable) != 1 {
+		t.Fatalf("len(prunable) = %d, want 1: %#v", len(prunable), prunable)
+	}
+	if prunable[0].Artifact.ID != "old-succeeded" {
+		t.Fatalf("prunable artifact = %q, want old-succeeded", prunable[0].Artifact.ID)
+	}
+
+	if err := store.DeleteArtifacts(ctx, []string{"old-succeeded"}); err != nil {
+		t.Fatalf("DeleteArtifacts() error = %v", err)
+	}
+	gotArtifacts, err := store.ArtifactsByRun(ctx, "run-succeeded")
+	if err != nil {
+		t.Fatalf("ArtifactsByRun() error = %v", err)
+	}
+	for _, artifact := range gotArtifacts {
+		if artifact.ID == "old-succeeded" {
+			t.Fatalf("old-succeeded still exists after DeleteArtifacts")
+		}
 	}
 }
 
@@ -131,5 +209,26 @@ func TestSQLiteStoreReturnsNotFound(t *testing.T) {
 	}
 	if _, err := store.Run(ctx, "missing-run"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Run() error = %v, want ErrNotFound", err)
+	}
+}
+
+func minimalTask() *tasks.Task {
+	return &tasks.Task{
+		ID:     "task-001",
+		Title:  "Persist a task",
+		Domain: "general",
+		Worker: "codex",
+		Goal:   "Exercise store persistence",
+		Mode:   "read_only",
+		Workspace: tasks.WorkspaceSpec{
+			Strategy: "local_repo",
+			Path:     ".",
+		},
+		Memory: tasks.MemorySpec{
+			Scope: "none",
+		},
+		ForbiddenPaths:   []string{"secrets/**"},
+		ExpectedOutputs:  []string{"artifacts/summary.md"},
+		DefinitionOfDone: []string{"records round trip"},
 	}
 }

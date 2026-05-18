@@ -9,7 +9,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup) []byte {
+func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, artifactCount int) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -26,8 +26,14 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 		fmt.Sprintf("Events: %d", len(result.Events)),
 		fmt.Sprintf("Policy: %s", policySummary),
 		fmt.Sprintf("Changed paths: %d", changedPathCount),
+		fmt.Sprintf("Validation: %s", validation.Status),
+		fmt.Sprintf("Validation commands: %d", validation.CommandCount),
+		fmt.Sprintf("Artifacts: %d", artifactCount),
 		fmt.Sprintf("Workspace cleanup: %s", cleanup.Action),
 		fmt.Sprintf("Cleanup reason: %s", cleanup.Reason),
+	}
+	if validation.Error != "" {
+		lines = append(lines, fmt.Sprintf("Validation error: %s", validation.Error))
 	}
 	if runErr != nil {
 		lines = append(lines, fmt.Sprintf("Error: %v", runErr))
