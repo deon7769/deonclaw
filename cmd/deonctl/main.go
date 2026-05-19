@@ -34,7 +34,7 @@ Usage:
   deonctl domains list --config <path>
   deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
   deonctl worker codex dry-run <task-path>
-  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path>
+  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
@@ -375,6 +375,7 @@ type codexRunOptions struct {
 	taskPath     string
 	storePath    string
 	artifactsDir string
+	domainsPath  string
 }
 
 func parseCodexRunOptions(args []string) (codexRunOptions, error) {
@@ -396,6 +397,12 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 				return codexRunOptions{}, fmt.Errorf("missing value for --artifacts-dir")
 			}
 			opts.artifactsDir = args[i+1]
+			i++
+		case "--domains":
+			if i+1 >= len(args) {
+				return codexRunOptions{}, fmt.Errorf("missing value for --domains")
+			}
+			opts.domainsPath = args[i+1]
 			i++
 		default:
 			return codexRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
@@ -422,6 +429,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		TaskPath:     opts.taskPath,
 		StorePath:    opts.storePath,
 		ArtifactsDir: opts.artifactsDir,
+		DomainsPath:  opts.domainsPath,
 	}, stdout, stderr)
 }
 

@@ -209,6 +209,193 @@ func TestCodexRunnerRun(t *testing.T) {
 	}
 }
 
+func TestCodexRunnerRunWithoutDomainsKeepsPromptUnset(t *testing.T) {
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-no-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if spec.Prompt != "" {
+						t.Fatalf("prompt = %q, want empty prompt when --domains is not configured", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	tempDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFile(t, "codex"),
+		StorePath:    filepath.Join(tempDir, "deonclaw.db"),
+		ArtifactsDir: filepath.Join(tempDir, "artifacts"),
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "artifacts", "run-no-context-001", "context-pack.md")); !os.IsNotExist(err) {
+		t.Fatalf("context-pack.md exists without --domains: %v", err)
+	}
+}
+
+func TestCodexRunnerRunWithGeneralContextPack(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	bridgePath := filepath.Join(tempDir, "escalasoft-bridge.md")
+	if err := os.WriteFile(bridgePath, []byte("Escalasoft isolated bridge content\n"), 0o600); err != nil {
+		t.Fatalf("write bridge file: %v", err)
+	}
+	domainsPath := writeDomainsConfigWithBridge(t, bridgePath)
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-general-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if !strings.Contains(spec.Prompt, "# Task Goal\nDo not execute\n\n# Context Pack\n") {
+						t.Fatalf("prompt = %q, want task goal and context pack sections", spec.Prompt)
+					}
+					if strings.Contains(spec.Prompt, "Escalasoft isolated bridge content") {
+						t.Fatalf("prompt leaked isolated bridge content for general task: %q", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFile(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+		DomainsPath:  domainsPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-general-context-001")
+	contextPath := filepath.Join(runDir, "context-pack.md")
+	assertFileContains(t, contextPath, "domain: general")
+	assertFileNotContains(t, contextPath, "Escalasoft isolated bridge content")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 10")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	assertPersistedArtifactWithMetadata(t, db, "run-general-context-001", contextPath)
+}
+
+func TestCodexRunnerRunWithEscalasoftContextPack(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	bridgePath := filepath.Join(tempDir, "escalasoft-bridge.md")
+	bridgeContent := "Escalasoft explicit bridge content\n"
+	if err := os.WriteFile(bridgePath, []byte(bridgeContent), 0o600); err != nil {
+		t.Fatalf("write bridge file: %v", err)
+	}
+	domainsPath := writeDomainsConfigWithBridge(t, bridgePath)
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-escalasoft-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if !strings.Contains(spec.Prompt, "# Task Goal\nReview Escalasoft task\n\n# Context Pack\n") {
+						t.Fatalf("prompt = %q, want task goal and context pack sections", spec.Prompt)
+					}
+					if !strings.Contains(spec.Prompt, bridgeContent) {
+						t.Fatalf("prompt = %q, want explicit bridge content", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFileWithDomainAndGoal(t, "codex", "escalasoft", "Review Escalasoft task"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+		DomainsPath:  domainsPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-escalasoft-context-001")
+	contextPath := filepath.Join(runDir, "context-pack.md")
+	assertFileContains(t, contextPath, "domain: escalasoft")
+	assertFileContains(t, contextPath, bridgeContent)
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	assertPersistedArtifactWithMetadata(t, db, "run-escalasoft-context-001", contextPath)
+}
+
+func TestCodexRunnerRunContextPackWarningsAppearInSummary(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	missingBridgePath := filepath.Join(tempDir, "missing-bridge.md")
+	domainsPath := writeDomainsConfigWithBridge(t, missingBridgePath)
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID:    "run-context-warning-001",
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFileWithDomainAndGoal(t, "codex", "escalasoft", "Review Escalasoft task"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+		DomainsPath:  domainsPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-context-warning-001")
+	assertFileContains(t, filepath.Join(runDir, "context-pack.md"), "bridge file not found")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Context pack warnings: 1")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Context pack warning: bridge file not found")
+}
+
 func TestCodexRunnerRunValidationCommandSuccess(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -1159,6 +1346,56 @@ definition_of_done:
 	return path
 }
 
+func writeTaskFileWithDomainAndGoal(t *testing.T, worker string, domain string, goal string) string {
+	t.Helper()
+	return writeTaskFileContent(t, `id: context-task-`+domain+`
+title: "Context task `+domain+`"
+domain: `+domain+`
+worker: `+worker+`
+goal: "`+goal+`"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: domain
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - context pack is available
+`)
+}
+
+func writeDomainsConfigWithBridge(t *testing.T, bridgePath string) string {
+	t.Helper()
+	content := `domains:
+  general:
+    type: canonical_memory
+    root: /vault/mysecondbrain
+    default: true
+
+  escalasoft:
+    type: isolated_domain
+    root: /domains/escalasoft_brain
+    default: false
+    bridge_files:
+      - ` + filepath.ToSlash(bridgePath) + `
+    structured_data:
+      historical_sqlite: /data/escalasoft.db
+    staging:
+      - /tmp/escalasoft
+    default_agent: escalasoft-agent
+`
+	path := filepath.Join(t.TempDir(), "domains.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write domains file: %v", err)
+	}
+	return path
+}
+
 func writeTaskFileWithValidation(t *testing.T, worker string) string {
 	t.Helper()
 	return writeTaskFileContent(t, `id: validation-task-001
@@ -1294,6 +1531,17 @@ func assertFileContains(t *testing.T, path string, want string) {
 	}
 }
 
+func assertFileNotContains(t *testing.T, path string, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	if strings.Contains(string(got), want) {
+		t.Fatalf("ReadFile(%q) = %q, did not want %q", path, got, want)
+	}
+}
+
 func assertChangedFile(t *testing.T, path string, wantPath string, wantStaged string, wantUnstaged string, wantSource string) {
 	t.Helper()
 	got, err := os.ReadFile(path)
@@ -1371,6 +1619,27 @@ func assertPersistedArtifact(t *testing.T, db *storepkg.SQLiteStore, runID strin
 	for _, artifact := range gotArtifacts {
 		if artifact.Path != wantPath {
 			continue
+		}
+		if len(artifact.SHA256) != 64 {
+			t.Fatalf("artifact %q sha256 = %q, want 64 hex chars", artifact.Path, artifact.SHA256)
+		}
+		return
+	}
+	t.Fatalf("artifact %q was not persisted", wantPath)
+}
+
+func assertPersistedArtifactWithMetadata(t *testing.T, db *storepkg.SQLiteStore, runID string, wantPath string) {
+	t.Helper()
+	gotArtifacts, err := db.ArtifactsByRun(context.Background(), runID)
+	if err != nil {
+		t.Fatalf("ArtifactsByRun() error = %v", err)
+	}
+	for _, artifact := range gotArtifacts {
+		if artifact.Path != wantPath {
+			continue
+		}
+		if artifact.SizeBytes <= 0 {
+			t.Fatalf("artifact %q size_bytes = %d, want > 0", artifact.Path, artifact.SizeBytes)
 		}
 		if len(artifact.SHA256) != 64 {
 			t.Fatalf("artifact %q sha256 = %q, want 64 hex chars", artifact.Path, artifact.SHA256)

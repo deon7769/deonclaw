@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deon7769/deonclaw/internal/contextpack"
 	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/policy"
@@ -41,6 +42,7 @@ type CodexRunOptions struct {
 	TaskPath     string
 	StorePath    string
 	ArtifactsDir string
+	DomainsPath  string
 }
 
 type CodexRunner struct {
@@ -84,6 +86,23 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	if err := ensureTaskWorker(task, "codex"); err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
+	}
+
+	var contextPackMarkdown []byte
+	var contextPackWarnings []string
+	var prompt string
+	if strings.TrimSpace(opts.DomainsPath) != "" {
+		pack, err := (contextpack.Builder{}).Build(ctx, contextpack.BuildOptions{
+			TaskPath:    opts.TaskPath,
+			DomainsPath: opts.DomainsPath,
+		})
+		if err != nil {
+			fmt.Fprintf(stderr, "context pack failed: %v\n", err)
+			return 1
+		}
+		contextPackMarkdown = pack.Markdown()
+		contextPackWarnings = append(contextPackWarnings, pack.Warnings...)
+		prompt = fmt.Sprintf("# Task Goal\n%s\n\n# Context Pack\n%s", task.Goal, contextPackMarkdown)
 	}
 
 	runID := r.RunIDFactory()
@@ -147,6 +166,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	result, runErr := worker.Run(ctx, workers.RunSpec{
 		Task:      task,
 		Workspace: workspace,
+		Prompt:    prompt,
 	})
 	if result == nil {
 		result = &workers.RunResult{
@@ -212,7 +232,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1

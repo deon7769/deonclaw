@@ -206,7 +206,7 @@ func TestRunWorkerCodexRunRejectsBadArguments(t *testing.T) {
 }
 
 func TestParseCodexRunOptions(t *testing.T) {
-	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts"})
+	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml"})
 	if err != nil {
 		t.Fatalf("parseCodexRunOptions() error = %v", err)
 	}
@@ -218,6 +218,9 @@ func TestParseCodexRunOptions(t *testing.T) {
 	}
 	if opts.artifactsDir != "artifacts" {
 		t.Fatalf("artifactsDir = %q, want artifacts", opts.artifactsDir)
+	}
+	if opts.domainsPath != "domains.yaml" {
+		t.Fatalf("domainsPath = %q, want domains.yaml", opts.domainsPath)
 	}
 }
 

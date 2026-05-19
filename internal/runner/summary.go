@@ -9,7 +9,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, artifactCount int) []byte {
+func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, contextPackWarnings []string, artifactCount int) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -34,6 +34,12 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 	}
 	if validation.Error != "" {
 		lines = append(lines, fmt.Sprintf("Validation error: %s", validation.Error))
+	}
+	if len(contextPackWarnings) > 0 {
+		lines = append(lines, fmt.Sprintf("Context pack warnings: %d", len(contextPackWarnings)))
+		for _, warning := range contextPackWarnings {
+			lines = append(lines, fmt.Sprintf("Context pack warning: %s", warning))
+		}
 	}
 	if runErr != nil {
 		lines = append(lines, fmt.Sprintf("Error: %v", runErr))
