@@ -101,6 +101,33 @@ func TestRunDomainsList(t *testing.T) {
 	}
 }
 
+func TestRunContextBuild(t *testing.T) {
+	taskPath := writeTaskFile(t, "codex")
+	domainsPath := writeDomainsConfigFile(t)
+	outputPath := filepath.Join(t.TempDir(), "context.md")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"context", "build", "--task", taskPath, "--domains", domainsPath, "--output", outputPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "context pack written:") {
+		t.Fatalf("stdout = %q, want context pack written output", stdout.String())
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile(output) error = %v", err)
+	}
+	output := string(data)
+	for _, want := range []string{"id: worker-mismatch-001", "domain: general", "context sources"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("output = %q, want %q", output, want)
+		}
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

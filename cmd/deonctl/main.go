@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -12,6 +13,7 @@ import (
 
 	artifactspkg "github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/config"
+	"github.com/deon7769/deonclaw/internal/contextpack"
 	"github.com/deon7769/deonclaw/internal/domains"
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/runner"
@@ -30,6 +32,7 @@ Usage:
   deonctl task validate <path>
   deonctl domains validate --config <path>
   deonctl domains list --config <path>
+  deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path>
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -106,6 +109,24 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
+	case "context":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "build":
+			opts, err := parseContextBuildOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runContextBuild(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
 	case "worker":
 		if len(args) < 4 || args[1] != "codex" {
 			fmt.Fprint(stderr, usage)
@@ -160,6 +181,79 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprint(stderr, usage)
 		return 2
 	}
+}
+
+type contextBuildOptions struct {
+	taskPath    string
+	domainsPath string
+	outputPath  string
+}
+
+func parseContextBuildOptions(args []string) (contextBuildOptions, error) {
+	var opts contextBuildOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--task":
+			if i+1 >= len(args) {
+				return contextBuildOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskPath = args[i+1]
+			i++
+		case "--domains":
+			if i+1 >= len(args) {
+				return contextBuildOptions{}, fmt.Errorf("missing value for --domains")
+			}
+			opts.domainsPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return contextBuildOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return contextBuildOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.taskPath == "" {
+		return contextBuildOptions{}, fmt.Errorf("missing --task")
+	}
+	if opts.domainsPath == "" {
+		return contextBuildOptions{}, fmt.Errorf("missing --domains")
+	}
+	if opts.outputPath == "" {
+		return contextBuildOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runContextBuild(opts contextBuildOptions, stdout io.Writer, stderr io.Writer) int {
+	pack, err := (contextpack.Builder{}).Build(context.Background(), contextpack.BuildOptions{
+		TaskPath:    opts.taskPath,
+		DomainsPath: opts.domainsPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "context build failed: %v\n", err)
+		return 1
+	}
+
+	outputDir := filepath.Dir(opts.outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			fmt.Fprintf(stderr, "context build failed: %v\n", err)
+			return 1
+		}
+	}
+	if err := os.WriteFile(opts.outputPath, pack.Markdown(), 0o600); err != nil {
+		fmt.Fprintf(stderr, "context build failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "context pack written: %s\n", opts.outputPath)
+	if len(pack.Warnings) > 0 {
+		fmt.Fprintf(stdout, "warnings: %d\n", len(pack.Warnings))
+	}
+	return 0
 }
 
 func runTaskValidate(path string, stdout io.Writer, stderr io.Writer) int {
