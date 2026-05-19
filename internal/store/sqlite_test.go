@@ -2,10 +2,12 @@ package store
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -131,6 +133,57 @@ func TestSQLiteStorePersistsTaskRunEventAndArtifact(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreBootstrapsSchemaMigrations(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenSQLite(filepath.Join(t.TempDir(), "deonclaw.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer store.Close()
+
+	var appliedAt string
+	err = store.db.QueryRowContext(ctx, `SELECT applied_at FROM schema_migrations WHERE version = ?`, currentSchemaVersion).Scan(&appliedAt)
+	if err != nil {
+		t.Fatalf("schema_migrations current version query error = %v", err)
+	}
+	if appliedAt == "" {
+		t.Fatal("schema_migrations applied_at is empty")
+	}
+}
+
+func TestSQLiteStoreKeepsEnsureColumnCompatibilityWithLegacyArtifactsTable(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "deonclaw.db")
+	rawDB, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatalf("sql.Open() error = %v", err)
+	}
+	if _, err := rawDB.ExecContext(ctx, `CREATE TABLE artifacts (
+		id TEXT PRIMARY KEY,
+		run_id TEXT NOT NULL,
+		path TEXT NOT NULL,
+		kind TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	)`); err != nil {
+		t.Fatalf("create legacy artifacts table: %v", err)
+	}
+	if err := rawDB.Close(); err != nil {
+		t.Fatalf("legacy db Close() error = %v", err)
+	}
+
+	store, err := OpenSQLite(path)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer store.Close()
+
+	for _, column := range []string{"size_bytes", "sha256", "keep"} {
+		if !sqliteColumnExists(t, store.db, "artifacts", column) {
+			t.Fatalf("legacy artifacts table missing migrated column %q", column)
+		}
+	}
+}
+
 func TestSQLiteStorePrunableArtifactsAndDeleteArtifacts(t *testing.T) {
 	ctx := context.Background()
 	store, err := OpenSQLite(filepath.Join(t.TempDir(), "deonclaw.db"))
@@ -196,6 +249,65 @@ func TestSQLiteStorePrunableArtifactsAndDeleteArtifacts(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreListArtifactsFiltersByRunAndStatus(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenSQLite(filepath.Join(t.TempDir(), "deonclaw.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer store.Close()
+
+	task := minimalTask()
+	if err := store.SaveTask(ctx, task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+
+	createdAt := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	runsToSave := []runs.Run{
+		{ID: "run-succeeded", TaskID: task.ID, Status: runs.StatusSucceeded, Worker: "codex", WorkspacePath: "workspace", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: "run-failed", TaskID: task.ID, Status: runs.StatusFailed, Worker: "codex", WorkspacePath: "workspace", CreatedAt: createdAt, UpdatedAt: createdAt},
+	}
+	for i := range runsToSave {
+		if err := store.SaveRun(ctx, &runsToSave[i]); err != nil {
+			t.Fatalf("SaveRun(%q) error = %v", runsToSave[i].ID, err)
+		}
+	}
+
+	artifactsToSave := []artifacts.Artifact{
+		{ID: "artifact-succeeded", RunID: "run-succeeded", Path: "artifacts/run-succeeded/summary.md", Kind: artifacts.KindSummary, SizeBytes: 12, SHA256: strings.Repeat("a", 64), CreatedAt: createdAt},
+		{ID: "artifact-failed", RunID: "run-failed", Path: "artifacts/run-failed/stderr.log", Kind: artifacts.KindLog, SizeBytes: 9, SHA256: strings.Repeat("b", 64), Keep: true, CreatedAt: createdAt.Add(time.Second)},
+	}
+	for i := range artifactsToSave {
+		if err := store.SaveArtifact(ctx, &artifactsToSave[i]); err != nil {
+			t.Fatalf("SaveArtifact(%q) error = %v", artifactsToSave[i].ID, err)
+		}
+	}
+
+	allArtifacts, err := store.ListArtifacts(ctx, ArtifactListFilter{})
+	if err != nil {
+		t.Fatalf("ListArtifacts() error = %v", err)
+	}
+	if len(allArtifacts) != 2 {
+		t.Fatalf("len(allArtifacts) = %d, want 2", len(allArtifacts))
+	}
+
+	runArtifacts, err := store.ListArtifacts(ctx, ArtifactListFilter{RunID: "run-succeeded"})
+	if err != nil {
+		t.Fatalf("ListArtifacts(run) error = %v", err)
+	}
+	if len(runArtifacts) != 1 || runArtifacts[0].ID != "artifact-succeeded" {
+		t.Fatalf("runArtifacts = %#v, want artifact-succeeded", runArtifacts)
+	}
+
+	failedArtifacts, err := store.ListArtifacts(ctx, ArtifactListFilter{Status: runs.StatusFailed})
+	if err != nil {
+		t.Fatalf("ListArtifacts(status) error = %v", err)
+	}
+	if len(failedArtifacts) != 1 || failedArtifacts[0].ID != "artifact-failed" {
+		t.Fatalf("failedArtifacts = %#v, want artifact-failed", failedArtifacts)
+	}
+}
+
 func TestSQLiteStoreReturnsNotFound(t *testing.T) {
 	ctx := context.Background()
 	store, err := OpenSQLite(filepath.Join(t.TempDir(), "deonclaw.db"))
@@ -210,6 +322,34 @@ func TestSQLiteStoreReturnsNotFound(t *testing.T) {
 	if _, err := store.Run(ctx, "missing-run"); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Run() error = %v, want ErrNotFound", err)
 	}
+}
+
+func sqliteColumnExists(t *testing.T, db *sql.DB, table string, column string) bool {
+	t.Helper()
+	rows, err := db.Query(`PRAGMA table_info(` + table + `)`)
+	if err != nil {
+		t.Fatalf("PRAGMA table_info(%s) error = %v", table, err)
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue sql.NullString
+		var primaryKey int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &primaryKey); err != nil {
+			t.Fatalf("scan table info: %v", err)
+		}
+		if name == column {
+			return true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("table info rows error = %v", err)
+	}
+	return false
 }
 
 func minimalTask() *tasks.Task {

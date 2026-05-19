@@ -7,12 +7,14 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"text/tabwriter"
 	"time"
 
 	artifactspkg "github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/config"
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/runner"
+	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
@@ -27,6 +29,7 @@ Usage:
   deonctl task validate <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path>
+  deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
 
@@ -110,6 +113,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 2
 		}
 		switch args[1] {
+		case "list":
+			opts, err := parseArtifactListOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runArtifactList(opts, stdout, stderr)
 		case "prune":
 			opts, err := parseArtifactPruneOptions(args[2:])
 			if err != nil {
@@ -226,6 +237,44 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	}, stdout, stderr)
 }
 
+type artifactListOptions struct {
+	storePath string
+	runID     string
+	status    runs.RunStatus
+}
+
+func parseArtifactListOptions(args []string) (artifactListOptions, error) {
+	var opts artifactListOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return artifactListOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--run":
+			if i+1 >= len(args) {
+				return artifactListOptions{}, fmt.Errorf("missing value for --run")
+			}
+			opts.runID = args[i+1]
+			i++
+		case "--status":
+			if i+1 >= len(args) {
+				return artifactListOptions{}, fmt.Errorf("missing value for --status")
+			}
+			opts.status = runs.RunStatus(args[i+1])
+			i++
+		default:
+			return artifactListOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" {
+		return artifactListOptions{}, fmt.Errorf("missing --store")
+	}
+	return opts, nil
+}
+
 type artifactPruneOptions struct {
 	storePath    string
 	artifactsDir string
@@ -277,6 +326,46 @@ func parseArtifactPruneOptions(args []string) (artifactPruneOptions, error) {
 		return artifactPruneOptions{}, fmt.Errorf("missing --older-than")
 	}
 	return opts, nil
+}
+
+func runArtifactList(opts artifactListOptions, stdout io.Writer, stderr io.Writer) int {
+	db, err := storepkg.OpenSQLite(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "open store failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+
+	result, err := db.ListArtifacts(context.Background(), storepkg.ArtifactListFilter{
+		RunID:  opts.runID,
+		Status: opts.status,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "artifact list failed: %v\n", err)
+		return 1
+	}
+
+	table := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "artifact_id\trun_id\tkind\tpath\tsize_bytes\tsha256\tkeep\tcreated_at")
+	for _, artifact := range result {
+		fmt.Fprintf(
+			table,
+			"%s\t%s\t%s\t%s\t%d\t%s\t%t\t%s\n",
+			artifact.ID,
+			artifact.RunID,
+			artifact.Kind,
+			artifact.Path,
+			artifact.SizeBytes,
+			artifact.SHA256,
+			artifact.Keep,
+			artifact.CreatedAt.Format(time.RFC3339Nano),
+		)
+	}
+	if err := table.Flush(); err != nil {
+		fmt.Fprintf(stderr, "artifact list failed: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 func parseRetentionDuration(value string) (time.Duration, error) {

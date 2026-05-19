@@ -19,6 +19,8 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
+const currentSchemaVersion = 1
+
 func OpenSQLite(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -41,6 +43,10 @@ func (s *SQLiteStore) Close() error {
 func (s *SQLiteStore) bootstrap(ctx context.Context) error {
 	statements := []string{
 		`PRAGMA foreign_keys = ON`,
+		`CREATE TABLE IF NOT EXISTS schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		)`,
 		`CREATE TABLE IF NOT EXISTS tasks (
 			id TEXT PRIMARY KEY,
 			title TEXT NOT NULL,
@@ -108,6 +114,17 @@ func (s *SQLiteStore) bootstrap(ctx context.Context) error {
 	}
 	if err := s.ensureColumn(ctx, "artifacts", "keep", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
+	}
+	if err := s.recordSchemaMigration(ctx, currentSchemaVersion); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *SQLiteStore) recordSchemaMigration(ctx context.Context, version int) error {
+	_, err := s.db.ExecContext(ctx, `INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (?, ?)`, version, formatTime(time.Now().UTC()))
+	if err != nil {
+		return fmt.Errorf("record schema migration %d: %w", version, err)
 	}
 	return nil
 }
@@ -427,6 +444,48 @@ func (s *SQLiteStore) ArtifactsByRun(ctx context.Context, runID string) ([]artif
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("list artifacts for run %q: %w", runID, err)
+	}
+	return result, nil
+}
+
+func (s *SQLiteStore) ListArtifacts(ctx context.Context, filter ArtifactListFilter) ([]artifacts.Artifact, error) {
+	status := string(filter.Status)
+	rows, err := s.db.QueryContext(ctx, `SELECT
+		a.id, a.run_id, a.path, a.kind, a.size_bytes, a.sha256, a.keep, a.created_at
+		FROM artifacts a
+		INNER JOIN runs r ON r.id = a.run_id
+		WHERE (? = '' OR a.run_id = ?)
+		  AND (? = '' OR r.status = ?)
+		ORDER BY a.created_at, a.id`,
+		filter.RunID,
+		filter.RunID,
+		status,
+		status,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list artifacts: %w", err)
+	}
+	defer rows.Close()
+
+	var result []artifacts.Artifact
+	for rows.Next() {
+		var artifact artifacts.Artifact
+		var kind string
+		var createdAt string
+		var keep int
+		if err := rows.Scan(&artifact.ID, &artifact.RunID, &artifact.Path, &kind, &artifact.SizeBytes, &artifact.SHA256, &keep, &createdAt); err != nil {
+			return nil, fmt.Errorf("scan artifact: %w", err)
+		}
+		artifact.Kind = artifacts.Kind(kind)
+		artifact.Keep = keep != 0
+		artifact.CreatedAt, err = parseTime(createdAt)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, artifact)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list artifacts: %w", err)
 	}
 	return result, nil
 }

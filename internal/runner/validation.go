@@ -1,7 +1,6 @@
 package runner
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -15,6 +14,7 @@ import (
 )
 
 const defaultValidationTimeoutSeconds = 300
+const defaultValidationOutputLimitBytes = 1024 * 1024
 
 const (
 	ValidationPassed  = "passed"
@@ -35,16 +35,20 @@ type ValidationResult struct {
 }
 
 type ValidationCommandResult struct {
-	Name           string   `json:"name"`
-	Command        string   `json:"command"`
-	Args           []string `json:"args,omitempty"`
-	TimeoutSeconds int      `json:"timeout_seconds"`
-	ExitCode       int      `json:"exit_code"`
-	DurationMS     int64    `json:"duration_ms"`
-	Status         string   `json:"status"`
-	Stdout         string   `json:"stdout"`
-	Stderr         string   `json:"stderr"`
-	Error          string   `json:"error,omitempty"`
+	Name                string   `json:"name"`
+	Command             string   `json:"command"`
+	Args                []string `json:"args,omitempty"`
+	TimeoutSeconds      int      `json:"timeout_seconds"`
+	ExitCode            int      `json:"exit_code"`
+	DurationMS          int64    `json:"duration_ms"`
+	Status              string   `json:"status"`
+	Stdout              string   `json:"stdout"`
+	Stderr              string   `json:"stderr"`
+	StdoutTruncated     bool     `json:"stdout_truncated,omitempty"`
+	StderrTruncated     bool     `json:"stderr_truncated,omitempty"`
+	StdoutOriginalBytes int      `json:"stdout_original_bytes,omitempty"`
+	StderrOriginalBytes int      `json:"stderr_original_bytes,omitempty"`
+	Error               string   `json:"error,omitempty"`
 }
 
 func RunValidationCommands(ctx context.Context, workspace string, commands []tasks.ValidationCommand) ValidationResult {
@@ -90,8 +94,8 @@ func runValidationCommand(ctx context.Context, workspace string, command tasks.V
 	cmd := exec.CommandContext(commandCtx, command.Command, command.Args...)
 	cmd.Dir = workspace
 
-	var stdout bytes.Buffer
-	var stderr bytes.Buffer
+	stdout := newLimitedOutput(defaultValidationOutputLimitBytes)
+	stderr := newLimitedOutput(defaultValidationOutputLimitBytes)
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
 
@@ -109,6 +113,14 @@ func runValidationCommand(ctx context.Context, workspace string, command tasks.V
 		Status:         ValidationPassed,
 		Stdout:         stdout.String(),
 		Stderr:         stderr.String(),
+	}
+	if stdout.Truncated() {
+		commandResult.StdoutTruncated = true
+		commandResult.StdoutOriginalBytes = stdout.OriginalBytes()
+	}
+	if stderr.Truncated() {
+		commandResult.StderrTruncated = true
+		commandResult.StderrOriginalBytes = stderr.OriginalBytes()
 	}
 	if err == nil {
 		return commandResult
@@ -193,6 +205,18 @@ func validationLog(result ValidationResult) []byte {
 		output.WriteString("Duration ms: ")
 		output.WriteString(strconv.FormatInt(command.DurationMS, 10))
 		output.WriteByte('\n')
+		if command.StdoutTruncated {
+			output.WriteString("Stdout truncated: true\n")
+			output.WriteString("Stdout original bytes: ")
+			output.WriteString(strconv.Itoa(command.StdoutOriginalBytes))
+			output.WriteByte('\n')
+		}
+		if command.StderrTruncated {
+			output.WriteString("Stderr truncated: true\n")
+			output.WriteString("Stderr original bytes: ")
+			output.WriteString(strconv.Itoa(command.StderrOriginalBytes))
+			output.WriteByte('\n')
+		}
 		if command.Error != "" {
 			output.WriteString("Error: ")
 			output.WriteString(command.Error)
@@ -218,4 +242,42 @@ func displayCommand(command string, args []string) string {
 		parts = append(parts, strconv.Quote(arg))
 	}
 	return strings.Join(parts, " ")
+}
+
+type limitedOutput struct {
+	limit int
+	data  []byte
+	bytes int
+}
+
+func newLimitedOutput(limit int) limitedOutput {
+	return limitedOutput{
+		limit: limit,
+		data:  make([]byte, 0, limit),
+	}
+}
+
+func (o *limitedOutput) Write(p []byte) (int, error) {
+	written := len(p)
+	o.bytes += written
+	remaining := o.limit - len(o.data)
+	if remaining > 0 {
+		if len(p) > remaining {
+			p = p[:remaining]
+		}
+		o.data = append(o.data, p...)
+	}
+	return written, nil
+}
+
+func (o *limitedOutput) String() string {
+	return string(o.data)
+}
+
+func (o *limitedOutput) Truncated() bool {
+	return o.bytes > len(o.data)
+}
+
+func (o *limitedOutput) OriginalBytes() int {
+	return o.bytes
 }

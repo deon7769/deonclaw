@@ -22,7 +22,13 @@ type Store interface {
 	EventsByRun(context.Context, string) ([]events.Event, error)
 	SaveArtifact(context.Context, *artifacts.Artifact) error
 	ArtifactsByRun(context.Context, string) ([]artifacts.Artifact, error)
+	ListArtifacts(context.Context, ArtifactListFilter) ([]artifacts.Artifact, error)
 	PrunableArtifacts(context.Context, time.Time) ([]artifacts.PruneCandidate, error)
 	DeleteArtifacts(context.Context, []string) error
 	Close() error
+}
+
+type ArtifactListFilter struct {
+	RunID  string
+	Status runs.RunStatus
 }

@@ -241,6 +241,111 @@ func TestRunArtifactsPruneDryRun(t *testing.T) {
 	}
 }
 
+func TestRunArtifactsList(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+
+	task := &tasks.Task{
+		ID:     "task-001",
+		Title:  "Task",
+		Domain: "general",
+		Worker: "codex",
+		Goal:   "List artifacts",
+		Mode:   "read_only",
+		Workspace: tasks.WorkspaceSpec{
+			Strategy: "local_repo",
+			Path:     ".",
+		},
+		Memory: tasks.MemorySpec{
+			Scope: "none",
+		},
+		ForbiddenPaths:   []string{"secrets/**"},
+		ExpectedOutputs:  []string{"artifacts/summary.md"},
+		DefinitionOfDone: []string{"artifacts are listed"},
+	}
+	if err := db.SaveTask(ctx, task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+
+	createdAt := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	runRecords := []runs.Run{
+		{ID: "run-succeeded", TaskID: task.ID, Status: runs.StatusSucceeded, Worker: "codex", WorkspacePath: "workspace", CreatedAt: createdAt, UpdatedAt: createdAt},
+		{ID: "run-failed", TaskID: task.ID, Status: runs.StatusFailed, Worker: "codex", WorkspacePath: "workspace", CreatedAt: createdAt, UpdatedAt: createdAt},
+	}
+	for i := range runRecords {
+		if err := db.SaveRun(ctx, &runRecords[i]); err != nil {
+			t.Fatalf("SaveRun() error = %v", err)
+		}
+	}
+	artifactRecords := []artifacts.Artifact{
+		{
+			ID:        "artifact-summary",
+			RunID:     "run-succeeded",
+			Path:      filepath.Join("artifacts", "run-succeeded", "summary.md"),
+			Kind:      artifacts.KindSummary,
+			SizeBytes: 12,
+			SHA256:    strings.Repeat("a", 64),
+			CreatedAt: createdAt,
+		},
+		{
+			ID:        "artifact-stderr",
+			RunID:     "run-failed",
+			Path:      filepath.Join("artifacts", "run-failed", "stderr.log"),
+			Kind:      artifacts.KindLog,
+			SizeBytes: 9,
+			SHA256:    strings.Repeat("b", 64),
+			Keep:      true,
+			CreatedAt: createdAt.Add(time.Second),
+		},
+	}
+	for i := range artifactRecords {
+		if err := db.SaveArtifact(ctx, &artifactRecords[i]); err != nil {
+			t.Fatalf("SaveArtifact() error = %v", err)
+		}
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"artifacts", "list", "--store", storePath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"artifact_id", "run_id", "kind", "path", "size_bytes", "sha256", "keep", "created_at", "artifact-summary", "artifact-stderr"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"artifacts", "list", "--store", storePath, "--run", "run-succeeded"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(--run) exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "artifact-summary") || strings.Contains(stdout.String(), "artifact-stderr") {
+		t.Fatalf("stdout with --run = %q, want only artifact-summary", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{"artifacts", "list", "--store", storePath, "--status", string(runs.StatusFailed)}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run(--status) exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "artifact-stderr") || strings.Contains(stdout.String(), "artifact-summary") {
+		t.Fatalf("stdout with --status = %q, want only artifact-stderr", stdout.String())
+	}
+}
+
 func TestParseArtifactPruneOptions(t *testing.T) {
 	opts, err := parseArtifactPruneOptions([]string{"--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--older-than", "30d", "--dry-run"})
 	if err != nil {
