@@ -2,7 +2,10 @@ package contextpack
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"sort"
 	"strconv"
@@ -12,6 +15,8 @@ import (
 	"github.com/deon7769/deonclaw/internal/tasks"
 )
 
+const defaultMaxSourceBytes = 262144
+
 type ContextPack struct {
 	Task     tasks.Task
 	Domain   domains.DomainConfig
@@ -20,17 +25,22 @@ type ContextPack struct {
 }
 
 type ContextSource struct {
-	Kind    string
-	Path    string
-	Domain  string
-	Content string
+	Kind      string
+	Path      string
+	Domain    string
+	Exists    bool
+	SizeBytes int64
+	SHA256    string
+	Truncated bool
+	Content   string
 }
 
 type Builder struct{}
 
 type BuildOptions struct {
-	TaskPath    string
-	DomainsPath string
+	TaskPath       string
+	DomainsPath    string
+	MaxSourceBytes int64
 }
 
 func (b Builder) Build(ctx context.Context, opts BuildOptions) (*ContextPack, error) {
@@ -42,6 +52,10 @@ func (b Builder) Build(ctx context.Context, opts BuildOptions) (*ContextPack, er
 	}
 	if strings.TrimSpace(opts.DomainsPath) == "" {
 		return nil, fmt.Errorf("domains path is required")
+	}
+	maxSourceBytes := opts.MaxSourceBytes
+	if maxSourceBytes <= 0 {
+		maxSourceBytes = defaultMaxSourceBytes
 	}
 
 	task, err := tasks.LoadFromFile(opts.TaskPath)
@@ -68,32 +82,33 @@ func (b Builder) Build(ctx context.Context, opts BuildOptions) (*ContextPack, er
 	pack := &ContextPack{
 		Task:   *task,
 		Domain: domain,
-		Sources: []ContextSource{
-			{Kind: "task", Path: opts.TaskPath, Domain: task.Domain},
-			{Kind: "domains_config", Path: opts.DomainsPath, Domain: task.Domain},
-		},
 	}
+
+	taskSource, err := readContextSource(opts.TaskPath, "task", task.Domain, maxSourceBytes, false)
+	if err != nil {
+		return nil, err
+	}
+	domainsSource, err := readContextSource(opts.DomainsPath, "domains_config", task.Domain, maxSourceBytes, false)
+	if err != nil {
+		return nil, err
+	}
+	pack.Sources = []ContextSource{taskSource, domainsSource}
 
 	if domain.IsIsolated() {
 		for _, bridgePath := range domain.BridgeFiles {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
-			source := ContextSource{
-				Kind:   "bridge_file",
-				Path:   bridgePath,
-				Domain: domain.Name,
-			}
-			data, err := os.ReadFile(bridgePath)
+			source, err := readContextSource(bridgePath, "bridge_file", domain.Name, maxSourceBytes, true)
 			if err != nil {
-				if os.IsNotExist(err) {
-					pack.Warnings = append(pack.Warnings, fmt.Sprintf("bridge file not found: %s", bridgePath))
-					pack.Sources = append(pack.Sources, source)
-					continue
-				}
-				return nil, fmt.Errorf("read bridge file %q: %w", bridgePath, err)
+				return nil, err
 			}
-			source.Content = string(data)
+			if !source.Exists {
+				pack.Warnings = append(pack.Warnings, fmt.Sprintf("bridge file not found: %s", bridgePath))
+			}
+			if source.Truncated {
+				pack.Warnings = append(pack.Warnings, fmt.Sprintf("bridge file %s truncated to %d bytes from %d bytes", bridgePath, maxSourceBytes, source.SizeBytes))
+			}
 			pack.Sources = append(pack.Sources, source)
 		}
 	}
@@ -177,6 +192,18 @@ func (p *ContextPack) Markdown() []byte {
 		output.WriteString("  path: ")
 		output.WriteString(source.Path)
 		output.WriteByte('\n')
+		output.WriteString("  exists: ")
+		output.WriteString(strconv.FormatBool(source.Exists))
+		output.WriteByte('\n')
+		output.WriteString("  size_bytes: ")
+		output.WriteString(strconv.FormatInt(source.SizeBytes, 10))
+		output.WriteByte('\n')
+		output.WriteString("  sha256: ")
+		output.WriteString(source.SHA256)
+		output.WriteByte('\n')
+		output.WriteString("  truncated: ")
+		output.WriteString(strconv.FormatBool(source.Truncated))
+		output.WriteByte('\n')
 		if source.Domain != "" {
 			output.WriteString("  domain: ")
 			output.WriteString(source.Domain)
@@ -205,6 +232,66 @@ func (p *ContextPack) Markdown() []byte {
 	}
 
 	return []byte(output.String())
+}
+
+func readContextSource(path string, kind string, domain string, maxBytes int64, includeContent bool) (ContextSource, error) {
+	source := ContextSource{
+		Kind:   kind,
+		Path:   path,
+		Domain: domain,
+	}
+
+	file, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return source, nil
+		}
+		return source, fmt.Errorf("read context source %q: %w", path, err)
+	}
+	defer file.Close()
+
+	info, err := file.Stat()
+	if err != nil {
+		return source, fmt.Errorf("inspect context source %q: %w", path, err)
+	}
+	source.Exists = true
+	source.SizeBytes = info.Size()
+
+	hasher := sha256.New()
+	content := make([]byte, 0, int(minInt64(source.SizeBytes, maxBytes)))
+	remaining := maxBytes
+	buffer := make([]byte, 32*1024)
+	for {
+		n, readErr := file.Read(buffer)
+		if n > 0 {
+			chunk := buffer[:n]
+			if _, err := hasher.Write(chunk); err != nil {
+				return source, fmt.Errorf("hash context source %q: %w", path, err)
+			}
+			if includeContent && remaining > 0 {
+				take := n
+				if int64(take) > remaining {
+					take = int(remaining)
+				}
+				content = append(content, chunk[:take]...)
+				remaining -= int64(take)
+			}
+		}
+		if readErr == nil {
+			continue
+		}
+		if readErr == io.EOF {
+			break
+		}
+		return source, fmt.Errorf("read context source %q: %w", path, readErr)
+	}
+
+	source.SHA256 = hex.EncodeToString(hasher.Sum(nil))
+	if includeContent {
+		source.Content = string(content)
+		source.Truncated = source.SizeBytes > int64(len(content))
+	}
+	return source, nil
 }
 
 func writeField(output *strings.Builder, key string, value string) {
@@ -237,4 +324,11 @@ func sortedMapKeys(values map[string]string) []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+func minInt64(a int64, b int64) int64 {
+	if a < b {
+		return a
+	}
+	return b
 }
