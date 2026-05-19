@@ -12,6 +12,7 @@ import (
 
 	artifactspkg "github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/config"
+	"github.com/deon7769/deonclaw/internal/domains"
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runs"
@@ -27,6 +28,8 @@ const usage = `deonctl - DeonClaw control CLI
 Usage:
   deonctl version
   deonctl task validate <path>
+  deonctl domains validate --config <path>
+  deonctl domains list --config <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path>
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -79,6 +82,26 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runTaskValidate(args[2], stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "domains":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		opts, err := parseDomainsOptions(args[2:])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			return runDomainsValidate(opts, stdout, stderr)
+		case "list":
+			return runDomainsList(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -150,6 +173,77 @@ func runTaskValidate(path string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	fmt.Fprintf(stdout, "task %s: valid\n", task.ID)
+	return 0
+}
+
+type domainsOptions struct {
+	configPath string
+}
+
+func parseDomainsOptions(args []string) (domainsOptions, error) {
+	var opts domainsOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return domainsOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		default:
+			return domainsOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return domainsOptions{}, fmt.Errorf("missing --config")
+	}
+	return opts, nil
+}
+
+func loadAndValidateDomains(path string) (*domains.DomainsConfig, error) {
+	config, err := domains.LoadFromFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := domains.Validate(config); err != nil {
+		return nil, err
+	}
+	return config, nil
+}
+
+func runDomainsValidate(opts domainsOptions, stdout io.Writer, stderr io.Writer) int {
+	config, err := loadAndValidateDomains(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "domains validation failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "domains config valid: %d domains\n", len(config.Domains))
+	return 0
+}
+
+func runDomainsList(opts domainsOptions, stdout io.Writer, stderr io.Writer) int {
+	config, err := loadAndValidateDomains(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "domains validation failed: %v\n", err)
+		return 1
+	}
+
+	table := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(table, "name\ttype\troot\tdefault\tisolated\tdefault_agent")
+	for _, domain := range config.List() {
+		fmt.Fprintf(table, "%s\t%s\t%s\t%t\t%t\t%s\n",
+			domain.Name,
+			domain.Type,
+			domain.Root,
+			domain.Default,
+			domain.IsIsolated(),
+			domain.DefaultAgent,
+		)
+	}
+	if err := table.Flush(); err != nil {
+		fmt.Fprintf(stderr, "domains list failed: %v\n", err)
+		return 1
+	}
 	return 0
 }
 

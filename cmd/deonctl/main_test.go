@@ -42,6 +42,65 @@ func TestRunTaskValidate(t *testing.T) {
 	}
 }
 
+func TestRunDomainsValidate(t *testing.T) {
+	configPath := writeDomainsConfigFile(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"domains", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "domains config valid: 2 domains") {
+		t.Fatalf("stdout = %q, want domains valid output", stdout.String())
+	}
+}
+
+func TestRunDomainsValidateRejectsBadArguments(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"domains", "validate"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --config") {
+		t.Fatalf("stderr = %q, want missing --config", stderr.String())
+	}
+}
+
+func TestRunDomainsList(t *testing.T) {
+	configPath := writeDomainsConfigFile(t)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"domains", "list", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"name",
+		"type",
+		"root",
+		"default",
+		"isolated",
+		"default_agent",
+		"general",
+		"canonical_memory",
+		"/vault/mysecondbrain",
+		"escalasoft",
+		"isolated_domain",
+		"/domains/escalasoft_brain",
+		"escalasoft-agent",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -390,6 +449,36 @@ definition_of_done:
 	path := filepath.Join(t.TempDir(), "task.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write task file: %v", err)
+	}
+	return path
+}
+
+func writeDomainsConfigFile(t *testing.T) string {
+	t.Helper()
+
+	content := `domains:
+  general:
+    type: canonical_memory
+    root: /vault/mysecondbrain
+    default: true
+    read_only_for_workers: true
+
+  escalasoft:
+    type: isolated_domain
+    root: /domains/escalasoft_brain
+    default: false
+    read_only_for_general_agents: true
+    bridge_files:
+      - /vault/mysecondbrain/memory/context/escalasoft-operacao.md
+    structured_data:
+      historical_sqlite: /data/escalasoft-sqlite/escalasoft_docs.db
+    staging:
+      - /tmp/drive-escalasoft-docs
+    default_agent: escalasoft-agent
+`
+	path := filepath.Join(t.TempDir(), "domains.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write domains config file: %v", err)
 	}
 	return path
 }
