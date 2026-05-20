@@ -37,7 +37,7 @@ Usage:
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl worker codex dry-run <task-path>
-  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>]
+  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
@@ -593,10 +593,11 @@ func runCodexDryRun(path string, stdout io.Writer, stderr io.Writer) int {
 }
 
 type codexRunOptions struct {
-	taskPath     string
-	storePath    string
-	artifactsDir string
-	domainsPath  string
+	taskPath         string
+	storePath        string
+	artifactsDir     string
+	domainsPath      string
+	memoryPolicyPath string
 }
 
 func parseCodexRunOptions(args []string) (codexRunOptions, error) {
@@ -625,6 +626,12 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 			}
 			opts.domainsPath = args[i+1]
 			i++
+		case "--memory-policy":
+			if i+1 >= len(args) {
+				return codexRunOptions{}, fmt.Errorf("missing value for --memory-policy")
+			}
+			opts.memoryPolicyPath = args[i+1]
+			i++
 		default:
 			return codexRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
@@ -647,10 +654,11 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		WorkspaceManagerFactory: workspaceManagerFactory,
 	}
 	return codexRunner.Run(context.Background(), runner.CodexRunOptions{
-		TaskPath:     opts.taskPath,
-		StorePath:    opts.storePath,
-		ArtifactsDir: opts.artifactsDir,
-		DomainsPath:  opts.domainsPath,
+		TaskPath:         opts.taskPath,
+		StorePath:        opts.storePath,
+		ArtifactsDir:     opts.artifactsDir,
+		DomainsPath:      opts.domainsPath,
+		MemoryPolicyPath: opts.memoryPolicyPath,
 	}, stdout, stderr)
 }
 

@@ -348,7 +348,7 @@ func TestRunWorkerCodexRunRejectsBadArguments(t *testing.T) {
 }
 
 func TestParseCodexRunOptions(t *testing.T) {
-	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml"})
+	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml"})
 	if err != nil {
 		t.Fatalf("parseCodexRunOptions() error = %v", err)
 	}
@@ -363,6 +363,9 @@ func TestParseCodexRunOptions(t *testing.T) {
 	}
 	if opts.domainsPath != "domains.yaml" {
 		t.Fatalf("domainsPath = %q, want domains.yaml", opts.domainsPath)
+	}
+	if opts.memoryPolicyPath != "memory-policy.yaml" {
+		t.Fatalf("memoryPolicyPath = %q, want memory-policy.yaml", opts.memoryPolicyPath)
 	}
 }
 

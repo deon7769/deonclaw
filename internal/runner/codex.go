@@ -39,10 +39,11 @@ type WorkspacePreparer interface {
 type WorkspaceManagerFactory func() WorkspacePreparer
 
 type CodexRunOptions struct {
-	TaskPath     string
-	StorePath    string
-	ArtifactsDir string
-	DomainsPath  string
+	TaskPath         string
+	StorePath        string
+	ArtifactsDir     string
+	DomainsPath      string
+	MemoryPolicyPath string
 }
 
 type CodexRunner struct {
@@ -232,7 +233,13 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, finishedAt)
+	memoryProposalCheck, err := checkMemoryProposal(runDir, result, opts.MemoryPolicyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal check failed: %v\n", err)
+		return 1
+	}
+
+	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, memoryProposalCheck, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1

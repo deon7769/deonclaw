@@ -9,7 +9,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, contextPackWarnings []string, artifactCount int) []byte {
+func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, contextPackWarnings []string, memoryProposal memoryProposalCheck, artifactCount int) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -28,6 +28,9 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 		fmt.Sprintf("Changed paths: %d", changedPathCount),
 		fmt.Sprintf("Validation: %s", validation.Status),
 		fmt.Sprintf("Validation commands: %d", validation.CommandCount),
+		fmt.Sprintf("Memory proposal: %s", memoryProposal.Status),
+		fmt.Sprintf("Memory proposal violations: %d", len(memoryProposal.Violations)),
+		fmt.Sprintf("Memory proposal warnings: %d", len(memoryProposal.Warnings)),
 		fmt.Sprintf("Artifacts: %d", artifactCount),
 		fmt.Sprintf("Workspace cleanup: %s", cleanup.Action),
 		fmt.Sprintf("Cleanup reason: %s", cleanup.Reason),

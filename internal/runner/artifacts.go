@@ -17,7 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, createdAt time.Time) ([]artifacts.Artifact, error) {
+func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, memoryProposal memoryProposalCheck, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -39,6 +39,9 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 	}
 	artifactCount := 9 + countWorkerArtifacts(result.Artifacts)
 	if len(contextPackMarkdown) > 0 {
+		artifactCount++
+	}
+	if len(memoryProposal.LintJSON) > 0 {
 		artifactCount++
 	}
 	if err := writer.write("stdout", "stdout.jsonl", artifacts.KindEvents, rawStdout); err != nil {
@@ -79,6 +82,11 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 			return nil, err
 		}
 	}
+	if len(memoryProposal.LintJSON) > 0 {
+		if err := writer.write("memory-proposal-lint", "memory-proposal-lint.json", artifacts.KindOther, memoryProposal.LintJSON); err != nil {
+			return nil, err
+		}
+	}
 
 	for i, artifact := range result.Artifacts {
 		name := artifactFileName(artifact.Path)
@@ -93,7 +101,7 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 			return nil, err
 		}
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, contextPackWarnings, artifactCount)); err != nil {
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, contextPackWarnings, memoryProposal, artifactCount)); err != nil {
 		return nil, err
 	}
 	manifest, err := artifactManifestJSON(writer.artifacts)
@@ -185,7 +193,7 @@ func artifactFileName(path string) string {
 
 func isCLIOwnedArtifact(name string) bool {
 	switch name {
-	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "validation.log", "validation.json", "context-pack.md", "summary.md", "artifact-manifest.json":
+	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "validation.log", "validation.json", "context-pack.md", "memory-proposal-lint.json", "summary.md", "artifact-manifest.json":
 		return true
 	default:
 		return false

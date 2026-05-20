@@ -13,6 +13,7 @@ import (
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
@@ -394,6 +395,168 @@ func TestCodexRunnerRunContextPackWarningsAppearInSummary(t *testing.T) {
 	assertFileContains(t, filepath.Join(runDir, "context-pack.md"), "bridge file not found")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Context pack warnings: 1")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Context pack warning: bridge file not found")
+}
+
+func TestCodexRunnerRunPreservesMemoryProposalWithoutPolicy(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	targetPath := filepath.Join(tempDir, "should-not-be-written.md")
+	proposalJSON := memoryProposalJSON(t, "mem-run-not-checked", "general", targetPath, memory.OperationAppend)
+	proposalMarkdown := []byte("# Memory Proposal mem-run-not-checked\n")
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-memory-proposal-not-checked-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runResult: &workers.RunResult{
+					Workspace: ".",
+					Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+					Artifacts: []artifacts.Artifact{
+						{Path: "artifacts/memory-proposal.json", Kind: artifacts.KindOther, Content: proposalJSON},
+						{Path: "artifacts/memory-proposal.md", Kind: artifacts.KindOther, Content: proposalMarkdown},
+					},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFile(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-memory-proposal-not-checked-001")
+	assertFileContent(t, filepath.Join(runDir, "memory-proposal.json"), string(proposalJSON))
+	assertFileContent(t, filepath.Join(runDir, "memory-proposal.md"), string(proposalMarkdown))
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal: not_checked")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal violations: 0")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal warnings: 0")
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("proposal target exists, proposal was applied or created unexpectedly: %v", err)
+	}
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	assertPersistedArtifactWithMetadata(t, db, "run-memory-proposal-not-checked-001", filepath.Join(runDir, "memory-proposal.json"))
+}
+
+func TestCodexRunnerRunMemoryProposalLintOK(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	proposalJSON := memoryProposalJSON(t, "mem-run-ok", "escalasoft", "/domains/escalasoft_brain/cases/case-001.md", memory.OperationUpdate)
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-memory-proposal-ok-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runResult: &workers.RunResult{
+					Workspace: ".",
+					Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+					Artifacts: []artifacts.Artifact{
+						{Path: "artifacts/memory-proposal.json", Kind: artifacts.KindOther, Content: proposalJSON},
+					},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:         writeTaskFile(t, "codex"),
+		StorePath:        storePath,
+		ArtifactsDir:     artifactsDir,
+		MemoryPolicyPath: filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-memory-proposal-ok-001")
+	assertMemoryProposalLintStatus(t, filepath.Join(runDir, "memory-proposal-lint.json"), "ok", 0, 0)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal: ok")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal violations: 0")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal warnings: 0")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	assertPersistedArtifactWithMetadata(t, db, "run-memory-proposal-ok-001", filepath.Join(runDir, "memory-proposal-lint.json"))
+}
+
+func TestCodexRunnerRunMemoryProposalLintFailedDoesNotFailRun(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	proposalJSON := memoryProposalJSON(t, "mem-run-failed", "escalasoft", "/vault/mysecondbrain/MEMORY.md", memory.OperationUpdate)
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-memory-proposal-failed-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runResult: &workers.RunResult{
+					Workspace: ".",
+					Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+					Artifacts: []artifacts.Artifact{
+						{Path: "artifacts/memory-proposal.json", Kind: artifacts.KindOther, Content: proposalJSON},
+					},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:         writeTaskFile(t, "codex"),
+		StorePath:        storePath,
+		ArtifactsDir:     artifactsDir,
+		MemoryPolicyPath: filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-memory-proposal-failed-001")
+	assertMemoryProposalLintStatus(t, filepath.Join(runDir, "memory-proposal-lint.json"), "failed", 1, 0)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal: failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal violations:")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal warnings: 0")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	gotRun, err := db.Run(context.Background(), "run-memory-proposal-failed-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Status != runs.StatusSucceeded {
+		t.Fatalf("run status = %q, want %q", gotRun.Status, runs.StatusSucceeded)
+	}
 }
 
 func TestCodexRunnerRunValidationCommandSuccess(t *testing.T) {
@@ -1396,6 +1559,24 @@ func writeDomainsConfigWithBridge(t *testing.T, bridgePath string) string {
 	return path
 }
 
+func memoryProposalJSON(t *testing.T, id string, domain string, targetPath string, operation memory.MemoryOperation) []byte {
+	t.Helper()
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: id,
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     domain,
+		TargetPath: targetPath,
+		Operation:  operation,
+		Reason:     "Worker proposed memory update.",
+	})
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("proposal.JSON() error = %v", err)
+	}
+	return data
+}
+
 func writeTaskFileWithValidation(t *testing.T, worker string) string {
 	t.Helper()
 	return writeTaskFileContent(t, `id: validation-task-001
@@ -1581,6 +1762,32 @@ func assertValidationStatus(t *testing.T, path string, wantStatus string, wantCo
 	}
 	if result.CommandCount != wantCommandCount {
 		t.Fatalf("validation command_count = %d, want %d", result.CommandCount, wantCommandCount)
+	}
+}
+
+func assertMemoryProposalLintStatus(t *testing.T, path string, wantStatus string, minViolations int, wantWarnings int) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+
+	var decoded struct {
+		Status     string   `json:"status"`
+		Violations []string `json:"violations"`
+		Warnings   []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", path, err)
+	}
+	if decoded.Status != wantStatus {
+		t.Fatalf("lint status = %q, want %q; json=%s", decoded.Status, wantStatus, got)
+	}
+	if len(decoded.Violations) < minViolations {
+		t.Fatalf("lint violations = %d, want at least %d; json=%s", len(decoded.Violations), minViolations, got)
+	}
+	if len(decoded.Warnings) != wantWarnings {
+		t.Fatalf("lint warnings = %d, want %d; json=%s", len(decoded.Warnings), wantWarnings, got)
 	}
 }
 

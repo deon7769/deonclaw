@@ -37,10 +37,10 @@ const (
 )
 
 type LintResult struct {
-	ProposalID string
-	Status     LintStatus
-	Violations []string
-	Warnings   []string
+	ProposalID string     `json:"proposal_id"`
+	Status     LintStatus `json:"status"`
+	Violations []string   `json:"violations"`
+	Warnings   []string   `json:"warnings"`
 }
 
 func LoadPolicyFromFile(policyPath string) (*MemoryPolicy, error) {
@@ -62,7 +62,10 @@ func LoadProposalFromFile(proposalPath string) (MemoryProposal, error) {
 	if err != nil {
 		return MemoryProposal{}, fmt.Errorf("read memory proposal %q: %w", proposalPath, err)
 	}
+	return ParseProposalJSON(data)
+}
 
+func ParseProposalJSON(data []byte) (MemoryProposal, error) {
 	var proposal MemoryProposal
 	if err := json.Unmarshal(data, &proposal); err != nil {
 		return MemoryProposal{}, fmt.Errorf("parse memory proposal json: %w", err)
