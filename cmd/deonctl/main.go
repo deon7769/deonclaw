@@ -16,6 +16,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/contextpack"
 	"github.com/deon7769/deonclaw/internal/domains"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
@@ -33,6 +34,7 @@ Usage:
   deonctl domains validate --config <path>
   deonctl domains list --config <path>
   deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
+  deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -127,6 +129,18 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
+	case "memory":
+		if len(args) < 3 || args[1] != "proposal" || args[2] != "new" {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		opts, err := parseMemoryProposalNewOptions(args[3:])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		return runMemoryProposalNew(opts, stdout, stderr)
 	case "worker":
 		if len(args) < 4 || args[1] != "codex" {
 			fmt.Fprint(stderr, usage)
@@ -253,6 +267,131 @@ func runContextBuild(opts contextBuildOptions, stdout io.Writer, stderr io.Write
 	if len(pack.Warnings) > 0 {
 		fmt.Fprintf(stdout, "warnings: %d\n", len(pack.Warnings))
 	}
+	return 0
+}
+
+type memoryProposalNewOptions struct {
+	runID      string
+	taskID     string
+	domain     string
+	targetPath string
+	operation  string
+	reason     string
+	outputPath string
+}
+
+func parseMemoryProposalNewOptions(args []string) (memoryProposalNewOptions, error) {
+	var opts memoryProposalNewOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--run":
+			if i+1 >= len(args) {
+				return memoryProposalNewOptions{}, fmt.Errorf("missing value for --run")
+			}
+			opts.runID = args[i+1]
+			i++
+		case "--task":
+			if i+1 >= len(args) {
+				return memoryProposalNewOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskID = args[i+1]
+			i++
+		case "--domain":
+			if i+1 >= len(args) {
+				return memoryProposalNewOptions{}, fmt.Errorf("missing value for --domain")
+			}
+			opts.domain = args[i+1]
+			i++
+		case "--target":
+			if i+1 >= len(args) {
+				return memoryProposalNewOptions{}, fmt.Errorf("missing value for --target")
+			}
+			opts.targetPath = args[i+1]
+			i++
+		case "--operation":
+			if i+1 >= len(args) {
+				return memoryProposalNewOptions{}, fmt.Errorf("missing value for --operation")
+			}
+			opts.operation = args[i+1]
+			i++
+		case "--reason":
+			if i+1 >= len(args) {
+				return memoryProposalNewOptions{}, fmt.Errorf("missing value for --reason")
+			}
+			opts.reason = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalNewOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return memoryProposalNewOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.runID == "" {
+		return memoryProposalNewOptions{}, fmt.Errorf("missing --run")
+	}
+	if opts.taskID == "" {
+		return memoryProposalNewOptions{}, fmt.Errorf("missing --task")
+	}
+	if opts.domain == "" {
+		return memoryProposalNewOptions{}, fmt.Errorf("missing --domain")
+	}
+	if opts.targetPath == "" {
+		return memoryProposalNewOptions{}, fmt.Errorf("missing --target")
+	}
+	if opts.operation == "" {
+		return memoryProposalNewOptions{}, fmt.Errorf("missing --operation")
+	}
+	if opts.reason == "" {
+		return memoryProposalNewOptions{}, fmt.Errorf("missing --reason")
+	}
+	if opts.outputPath == "" {
+		return memoryProposalNewOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalNew(opts memoryProposalNewOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		RunID:      opts.runID,
+		TaskID:     opts.taskID,
+		Domain:     opts.domain,
+		TargetPath: opts.targetPath,
+		Operation:  memory.MemoryOperation(opts.operation),
+		Reason:     opts.reason,
+		Evidence: []memory.MemoryEvidence{
+			{Type: "run", RunID: opts.runID},
+		},
+	})
+
+	var data []byte
+	var err error
+	if strings.EqualFold(filepath.Ext(opts.outputPath), ".md") {
+		data, err = proposal.Markdown()
+	} else {
+		data, err = proposal.JSON()
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal failed: %v\n", err)
+		return 1
+	}
+
+	outputDir := filepath.Dir(opts.outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			fmt.Fprintf(stderr, "memory proposal failed: %v\n", err)
+			return 1
+		}
+	}
+	if err := os.WriteFile(opts.outputPath, data, 0o600); err != nil {
+		fmt.Fprintf(stderr, "memory proposal failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "memory proposal written: %s\n", opts.outputPath)
 	return 0
 }
 

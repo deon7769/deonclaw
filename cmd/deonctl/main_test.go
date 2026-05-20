@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
+	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runs"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
@@ -125,6 +127,97 @@ func TestRunContextBuild(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output = %q, want %q", output, want)
 		}
+	}
+}
+
+func TestRunMemoryProposalNew(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "memory-proposal.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"memory",
+		"proposal",
+		"new",
+		"--run",
+		"run-001",
+		"--task",
+		"task-001",
+		"--domain",
+		"general",
+		"--target",
+		"memory/context/example.md",
+		"--operation",
+		"append",
+		"--reason",
+		"Capture stable workflow.",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "memory proposal written: "+outputPath) {
+		t.Fatalf("stdout = %q, want proposal written output", stdout.String())
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile(output) error = %v", err)
+	}
+	var proposal memory.MemoryProposal
+	if err := json.Unmarshal(data, &proposal); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v", err)
+	}
+	if proposal.Status != memory.StatusProposed {
+		t.Fatalf("status = %q, want %q", proposal.Status, memory.StatusProposed)
+	}
+	if proposal.Operation != memory.OperationAppend {
+		t.Fatalf("operation = %q, want append", proposal.Operation)
+	}
+	if proposal.Domain != "general" || proposal.TargetPath != "memory/context/example.md" {
+		t.Fatalf("proposal = %#v, want domain and target", proposal)
+	}
+	if len(proposal.Evidence) != 1 || proposal.Evidence[0].RunID != "run-001" {
+		t.Fatalf("evidence = %#v, want run evidence", proposal.Evidence)
+	}
+	if len(proposal.Patches) != 1 || proposal.Patches[0].TargetPath != "memory/context/example.md" {
+		t.Fatalf("patches = %#v, want target patch", proposal.Patches)
+	}
+}
+
+func TestRunMemoryProposalNewRejectsInvalidOperation(t *testing.T) {
+	outputPath := filepath.Join(t.TempDir(), "memory-proposal.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"memory",
+		"proposal",
+		"new",
+		"--run",
+		"run-001",
+		"--task",
+		"task-001",
+		"--domain",
+		"general",
+		"--target",
+		"memory/context/example.md",
+		"--operation",
+		"delete",
+		"--reason",
+		"Invalid operation should fail.",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `operation "delete" is not supported`) {
+		t.Fatalf("stderr = %q, want invalid operation", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("output file exists after invalid operation: %v", err)
 	}
 }
 
