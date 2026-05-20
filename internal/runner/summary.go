@@ -38,6 +38,11 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 	if validation.Error != "" {
 		lines = append(lines, fmt.Sprintf("Validation error: %s", validation.Error))
 	}
+	if memoryProposal.ProposalID != "" {
+		lines = append(lines, fmt.Sprintf("Memory proposal id: %s", memoryProposal.ProposalID))
+	}
+	lines = appendSmallDetails(lines, "Memory proposal violation", memoryProposal.Violations)
+	lines = appendSmallDetails(lines, "Memory proposal warning", memoryProposal.Warnings)
 	if len(contextPackWarnings) > 0 {
 		lines = append(lines, fmt.Sprintf("Context pack warnings: %d", len(contextPackWarnings)))
 		for _, warning := range contextPackWarnings {
@@ -51,4 +56,15 @@ func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, 
 		lines = append(lines, fmt.Sprintf("Cleanup warning: %s", cleanup.Warning))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func appendSmallDetails(lines []string, label string, details []string) []string {
+	const maxSummaryDetails = 5
+	if len(details) > maxSummaryDetails {
+		return lines
+	}
+	for _, detail := range details {
+		lines = append(lines, fmt.Sprintf("%s: %s", label, detail))
+	}
+	return lines
 }

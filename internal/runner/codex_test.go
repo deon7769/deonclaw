@@ -492,6 +492,7 @@ func TestCodexRunnerRunMemoryProposalLintOK(t *testing.T) {
 	runDir := filepath.Join(artifactsDir, "run-memory-proposal-ok-001")
 	assertMemoryProposalLintStatus(t, filepath.Join(runDir, "memory-proposal-lint.json"), "ok", 0, 0)
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal: ok")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal id: mem-run-ok")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal violations: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal warnings: 0")
 
@@ -542,7 +543,9 @@ func TestCodexRunnerRunMemoryProposalLintFailedDoesNotFailRun(t *testing.T) {
 	runDir := filepath.Join(artifactsDir, "run-memory-proposal-failed-001")
 	assertMemoryProposalLintStatus(t, filepath.Join(runDir, "memory-proposal-lint.json"), "failed", 1, 0)
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal: failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal id: mem-run-failed")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal violations:")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), `Memory proposal violation: target_path "/vault/mysecondbrain/MEMORY.md"`)
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal warnings: 0")
 
 	db, err := storepkg.OpenSQLite(storePath)
