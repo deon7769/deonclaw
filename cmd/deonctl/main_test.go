@@ -221,6 +221,55 @@ func TestRunMemoryProposalNewRejectsInvalidOperation(t *testing.T) {
 	}
 }
 
+func TestRunMemoryProposalLint(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := filepath.Join(tempDir, "memory-proposal.json")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-lint-001",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "escalasoft",
+		TargetPath: "/domains/escalasoft_brain/cases/case-001.md",
+		Operation:  memory.OperationUpdate,
+		Reason:     "Lint CLI proposal.",
+		CreatedAt:  time.Date(2026, 5, 20, 10, 0, 0, 0, time.UTC),
+	})
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("proposal.JSON() error = %v", err)
+	}
+	if err := os.WriteFile(proposalPath, data, 0o600); err != nil {
+		t.Fatalf("WriteFile(proposal) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"lint",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"proposal_id: mem-cli-lint-001",
+		"status: ok",
+		"violations: 0",
+		"warnings: 0",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

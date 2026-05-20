@@ -35,6 +35,7 @@ Usage:
   deonctl domains list --config <path>
   deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
+  deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -130,17 +131,31 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 2
 		}
 	case "memory":
-		if len(args) < 3 || args[1] != "proposal" || args[2] != "new" {
+		if len(args) < 3 || args[1] != "proposal" {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
-		opts, err := parseMemoryProposalNewOptions(args[3:])
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
+		switch args[2] {
+		case "new":
+			opts, err := parseMemoryProposalNewOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalNew(opts, stdout, stderr)
+		case "lint":
+			opts, err := parseMemoryProposalLintOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalLint(opts, stdout, stderr)
+		default:
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
-		return runMemoryProposalNew(opts, stdout, stderr)
 	case "worker":
 		if len(args) < 4 || args[1] != "codex" {
 			fmt.Fprint(stderr, usage)
@@ -393,6 +408,73 @@ func runMemoryProposalNew(opts memoryProposalNewOptions, stdout io.Writer, stder
 
 	fmt.Fprintf(stdout, "memory proposal written: %s\n", opts.outputPath)
 	return 0
+}
+
+type memoryProposalLintOptions struct {
+	proposalPath string
+	policyPath   string
+}
+
+func parseMemoryProposalLintOptions(args []string) (memoryProposalLintOptions, error) {
+	var opts memoryProposalLintOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--proposal":
+			if i+1 >= len(args) {
+				return memoryProposalLintOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryProposalLintOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		default:
+			return memoryProposalLintOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.proposalPath == "" {
+		return memoryProposalLintOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.policyPath == "" {
+		return memoryProposalLintOptions{}, fmt.Errorf("missing --policy")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalLint(opts memoryProposalLintOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal, err := memory.LoadProposalFromFile(opts.proposalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal lint failed: %v\n", err)
+		return 1
+	}
+	policy, err := memory.LoadPolicyFromFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal lint failed: %v\n", err)
+		return 1
+	}
+
+	result := memory.LintProposal(proposal, policy)
+	printMemoryProposalLintResult(stdout, result)
+	if result.Status == memory.LintStatusFailed {
+		return 1
+	}
+	return 0
+}
+
+func printMemoryProposalLintResult(stdout io.Writer, result memory.LintResult) {
+	fmt.Fprintf(stdout, "proposal_id: %s\n", result.ProposalID)
+	fmt.Fprintf(stdout, "status: %s\n", result.Status)
+	fmt.Fprintf(stdout, "violations: %d\n", len(result.Violations))
+	for _, violation := range result.Violations {
+		fmt.Fprintf(stdout, "- %s\n", violation)
+	}
+	fmt.Fprintf(stdout, "warnings: %d\n", len(result.Warnings))
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(stdout, "- %s\n", warning)
+	}
 }
 
 func runTaskValidate(path string, stdout io.Writer, stderr io.Writer) int {
