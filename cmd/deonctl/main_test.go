@@ -270,6 +270,303 @@ func TestRunMemoryProposalLint(t *testing.T) {
 	}
 }
 
+func TestRunMemoryProposalApplyDryRunAppend(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory-target.md")
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-append",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Preview append.",
+		CreatedAt:  time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "append content\n"},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	output := stdout.String()
+	for _, want := range []string{
+		"proposal_id: mem-cli-apply-append",
+		"domain: general",
+		"target_path: " + targetPath,
+		"operation: append",
+		"status: dry_run_ok",
+		"patch_count: 1",
+		"would append content",
+		"append content",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after dry-run: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyDryRunCreate(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "new-memory.md")
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-create",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationCreate,
+		Reason:     "Preview create.",
+		CreatedAt:  time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationCreate, Content: "new memory\n"},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "would create file") {
+		t.Fatalf("stdout = %q, want create preview", stdout.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after dry-run: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyRejectsLintFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-lint-failed",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "escalasoft",
+		TargetPath: "/vault/mysecondbrain/MEMORY.md",
+		Operation:  memory.OperationUpdate,
+		Reason:     "Should fail lint.",
+		CreatedAt:  time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: "/vault/mysecondbrain/MEMORY.md", Operation: memory.OperationUpdate, Content: "bad\n"},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "status: failed") {
+		t.Fatalf("stdout = %q, want failed preview", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "lint violations:") {
+		t.Fatalf("stdout = %q, want lint violations", stdout.String())
+	}
+}
+
+func TestRunMemoryProposalApplyRequiresDryRun(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-require-dry-run",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: filepath.Join(tempDir, "target.md"),
+		Operation:  memory.OperationAppend,
+		Reason:     "Requires dry-run.",
+		CreatedAt:  time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: filepath.Join(tempDir, "target.md"), Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --dry-run") {
+		t.Fatalf("stderr = %q, want missing --dry-run", stderr.String())
+	}
+}
+
+func TestRunMemoryProposalApplyOutputWritesPreviewJSON(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	outputPath := filepath.Join(tempDir, "apply-preview.json")
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-output",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Preview output.",
+		CreatedAt:  time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--dry-run",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("ReadFile(output) error = %v", err)
+	}
+	var preview memory.ApplyPreview
+	if err := json.Unmarshal(data, &preview); err != nil {
+		t.Fatalf("Unmarshal(output) error = %v", err)
+	}
+	if preview.Status != memory.ApplyStatusDryRunOK {
+		t.Fatalf("preview status = %q, want %q", preview.Status, memory.ApplyStatusDryRunOK)
+	}
+}
+
+func TestRunMemoryProposalApplyRefusesOutputAtTargetPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-output-target",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Do not write preview to target.",
+		CreatedAt:  time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--dry-run",
+		"--output",
+		targetPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write apply preview to target_path") {
+		t.Fatalf("stderr = %q, want target_path refusal", stderr.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after dry-run output refusal: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyInvalidOperationFails(t *testing.T) {
+	tempDir := t.TempDir()
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-invalid-operation",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: filepath.Join(tempDir, "target.md"),
+		Operation:  memory.OperationAppend,
+		Reason:     "Invalid operation.",
+		CreatedAt:  time.Date(2026, 5, 20, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: filepath.Join(tempDir, "target.md"), Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	})
+	proposal.Operation = memory.MemoryOperation("delete")
+	proposal.Patches[0].Operation = memory.MemoryOperation("delete")
+	proposalPath := writeRawJSONFile(t, tempDir, "memory-proposal-invalid.json", proposal)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), `operation "delete" is not supported`) {
+		t.Fatalf("stdout = %q, want invalid operation", stdout.String())
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -654,6 +951,36 @@ func writeDomainsConfigFile(t *testing.T) string {
 	path := filepath.Join(t.TempDir(), "domains.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write domains config file: %v", err)
+	}
+	return path
+}
+
+func writeMemoryProposalFile(t *testing.T, dir string, proposal memory.MemoryProposal) string {
+	t.Helper()
+
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("proposal.JSON() error = %v", err)
+	}
+	path := filepath.Join(dir, "memory-proposal.json")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write memory proposal file: %v", err)
+	}
+	return path
+}
+
+func writeRawJSONFile(t *testing.T, dir string, name string, value any) string {
+	t.Helper()
+
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		t.Fatalf("MarshalIndent() error = %v", err)
+	}
+	data = append(data, '\n')
+
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write raw json file: %v", err)
 	}
 	return path
 }

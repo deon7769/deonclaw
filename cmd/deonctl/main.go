@@ -36,6 +36,7 @@ Usage:
   deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
+  deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -152,6 +153,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMemoryProposalLint(opts, stdout, stderr)
+		case "apply":
+			opts, err := parseMemoryProposalApplyOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalApply(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -474,6 +483,164 @@ func printMemoryProposalLintResult(stdout io.Writer, result memory.LintResult) {
 	fmt.Fprintf(stdout, "warnings: %d\n", len(result.Warnings))
 	for _, warning := range result.Warnings {
 		fmt.Fprintf(stdout, "- %s\n", warning)
+	}
+}
+
+type memoryProposalApplyOptions struct {
+	proposalPath string
+	policyPath   string
+	dryRun       bool
+	outputPath   string
+}
+
+func parseMemoryProposalApplyOptions(args []string) (memoryProposalApplyOptions, error) {
+	var opts memoryProposalApplyOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--proposal":
+			if i+1 >= len(args) {
+				return memoryProposalApplyOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryProposalApplyOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--dry-run":
+			opts.dryRun = true
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalApplyOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return memoryProposalApplyOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.proposalPath == "" {
+		return memoryProposalApplyOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.policyPath == "" {
+		return memoryProposalApplyOptions{}, fmt.Errorf("missing --policy")
+	}
+	if !opts.dryRun {
+		return memoryProposalApplyOptions{}, fmt.Errorf("missing --dry-run")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalApply(opts memoryProposalApplyOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal, err := memory.LoadProposalFromFile(opts.proposalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply failed: %v\n", err)
+		return 1
+	}
+	policy, err := memory.LoadPolicyFromFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply failed: %v\n", err)
+		return 1
+	}
+
+	preview, previewErr := memory.BuildApplyDryRunPreview(proposal, policy)
+	printMemoryProposalApplyPreview(stdout, preview)
+	if opts.outputPath != "" {
+		if outputConflictsWithApplyTarget(opts.outputPath, preview) {
+			fmt.Fprintf(stderr, "memory proposal apply failed: refusing to write apply preview to target_path %q\n", opts.outputPath)
+			return 1
+		}
+		if err := writeApplyPreview(opts.outputPath, preview); err != nil {
+			fmt.Fprintf(stderr, "memory proposal apply failed: %v\n", err)
+			return 1
+		}
+	}
+	if previewErr != nil {
+		return 1
+	}
+	return 0
+}
+
+func outputConflictsWithApplyTarget(outputPath string, preview memory.ApplyPreview) bool {
+	if sameCleanPath(outputPath, preview.TargetPath) {
+		return true
+	}
+	for _, action := range preview.Actions {
+		if sameCleanPath(outputPath, action.TargetPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func sameCleanPath(left string, right string) bool {
+	if strings.TrimSpace(left) == "" || strings.TrimSpace(right) == "" {
+		return false
+	}
+	return filepath.ToSlash(filepath.Clean(left)) == filepath.ToSlash(filepath.Clean(right))
+}
+
+func printMemoryProposalApplyPreview(stdout io.Writer, preview memory.ApplyPreview) {
+	fmt.Fprintf(stdout, "proposal_id: %s\n", preview.ProposalID)
+	fmt.Fprintf(stdout, "domain: %s\n", preview.Domain)
+	fmt.Fprintf(stdout, "target_path: %s\n", preview.TargetPath)
+	fmt.Fprintf(stdout, "operation: %s\n", preview.Operation)
+	fmt.Fprintf(stdout, "status: %s\n", preview.Status)
+
+	fmt.Fprintf(stdout, "lint warnings: %d\n", len(preview.LintWarnings))
+	for _, warning := range preview.LintWarnings {
+		fmt.Fprintf(stdout, "- %s\n", warning)
+	}
+	fmt.Fprintf(stdout, "lint violations: %d\n", len(preview.LintViolations))
+	for _, violation := range preview.LintViolations {
+		fmt.Fprintf(stdout, "- %s\n", violation)
+	}
+
+	fmt.Fprintf(stdout, "patch_count: %d\n", preview.PatchCount)
+	fmt.Fprintf(stdout, "patch warnings: %d\n", len(preview.PatchWarnings))
+	for _, warning := range preview.PatchWarnings {
+		fmt.Fprintf(stdout, "- %s\n", warning)
+	}
+	if len(preview.Actions) == 0 {
+		return
+	}
+
+	fmt.Fprintln(stdout, "actions:")
+	for _, action := range preview.Actions {
+		fmt.Fprintf(stdout, "- %s: %s\n", action.Description, action.TargetPath)
+		if action.Warning != "" {
+			fmt.Fprintf(stdout, "  warning: %s\n", action.Warning)
+		}
+		if action.Content != "" {
+			fmt.Fprintln(stdout, "  content:")
+			writeIndentedText(stdout, action.Content, "    ")
+		}
+	}
+}
+
+func writeApplyPreview(outputPath string, preview memory.ApplyPreview) error {
+	data, err := preview.JSON()
+	if err != nil {
+		return err
+	}
+	outputDir := filepath.Dir(outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(outputPath, data, 0o600)
+}
+
+func writeIndentedText(output io.Writer, value string, prefix string) {
+	lines := strings.Split(value, "\n")
+	for i, line := range lines {
+		if i == len(lines)-1 && line == "" {
+			continue
+		}
+		fmt.Fprintf(output, "%s%s\n", prefix, line)
 	}
 }
 
