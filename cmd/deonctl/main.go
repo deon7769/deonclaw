@@ -603,6 +603,10 @@ func printMemoryProposalApplyPreview(stdout io.Writer, preview memory.ApplyPrevi
 	for _, warning := range preview.PatchWarnings {
 		fmt.Fprintf(stdout, "- %s\n", warning)
 	}
+	fmt.Fprintf(stdout, "patch violations: %d\n", len(preview.PatchViolations))
+	for _, violation := range preview.PatchViolations {
+		fmt.Fprintf(stdout, "- patch[%d] %s %s: %s\n", violation.PatchIndex, violation.Operation, violation.TargetPath, violation.Violation)
+	}
 	if len(preview.Actions) == 0 {
 		return
 	}
@@ -612,6 +616,9 @@ func printMemoryProposalApplyPreview(stdout io.Writer, preview memory.ApplyPrevi
 		fmt.Fprintf(stdout, "- %s: %s\n", action.Description, action.TargetPath)
 		if action.Warning != "" {
 			fmt.Fprintf(stdout, "  warning: %s\n", action.Warning)
+		}
+		for _, violation := range action.Violations {
+			fmt.Fprintf(stdout, "  violation: %s\n", violation)
 		}
 		if action.Content != "" {
 			fmt.Fprintln(stdout, "  content:")

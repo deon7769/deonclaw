@@ -14,16 +14,24 @@ const (
 )
 
 type ApplyPreview struct {
-	ProposalID     string               `json:"proposal_id"`
-	Domain         string               `json:"domain"`
-	TargetPath     string               `json:"target_path"`
-	Operation      MemoryOperation      `json:"operation"`
-	Status         ApplyStatus          `json:"status"`
-	LintWarnings   []string             `json:"lint_warnings"`
-	LintViolations []string             `json:"lint_violations,omitempty"`
-	PatchCount     int                  `json:"patch_count"`
-	PatchWarnings  []string             `json:"patch_warnings,omitempty"`
-	Actions        []ApplyPreviewAction `json:"actions"`
+	ProposalID      string                `json:"proposal_id"`
+	Domain          string                `json:"domain"`
+	TargetPath      string                `json:"target_path"`
+	Operation       MemoryOperation       `json:"operation"`
+	Status          ApplyStatus           `json:"status"`
+	LintWarnings    []string              `json:"lint_warnings"`
+	LintViolations  []string              `json:"lint_violations,omitempty"`
+	PatchCount      int                   `json:"patch_count"`
+	PatchWarnings   []string              `json:"patch_warnings,omitempty"`
+	PatchViolations []ApplyPatchViolation `json:"patch_violations,omitempty"`
+	Actions         []ApplyPreviewAction  `json:"actions"`
+}
+
+type ApplyPatchViolation struct {
+	PatchIndex int             `json:"patch_index"`
+	TargetPath string          `json:"target_path"`
+	Operation  MemoryOperation `json:"operation"`
+	Violation  string          `json:"violation"`
 }
 
 type ApplyPreviewAction struct {
@@ -32,6 +40,8 @@ type ApplyPreviewAction struct {
 	Description string          `json:"description"`
 	Content     string          `json:"content,omitempty"`
 	Warning     string          `json:"warning,omitempty"`
+	Warnings    []string        `json:"warnings,omitempty"`
+	Violations  []string        `json:"violations,omitempty"`
 }
 
 func BuildApplyDryRunPreview(proposal MemoryProposal, policy *MemoryPolicy) (ApplyPreview, error) {
@@ -50,18 +60,28 @@ func BuildApplyDryRunPreview(proposal MemoryProposal, policy *MemoryPolicy) (App
 		return preview, fmt.Errorf("memory proposal lint failed")
 	}
 
-	preview.Status = ApplyStatusDryRunOK
 	preview.PatchCount = len(proposal.Patches)
-	for _, patch := range proposal.Patches {
+	for index, patch := range proposal.Patches {
 		action := buildApplyPreviewAction(proposal, patch)
+		patchLint := lintApplyPatch(proposal, action, policy)
+		for _, warning := range patchLint.Warnings {
+			addApplyPatchWarning(&preview, &action, index, warning)
+		}
+		for _, violation := range patchLint.Violations {
+			addApplyPatchViolation(&preview, &action, index, violation)
+		}
 		if strings.TrimSpace(patch.Content) == "" {
 			warning := fmt.Sprintf("patch for %q has empty content", action.TargetPath)
-			action.Warning = warning
-			preview.PatchWarnings = append(preview.PatchWarnings, warning)
+			addApplyPatchWarning(&preview, &action, index, warning)
 		}
 		preview.Actions = append(preview.Actions, action)
 	}
 
+	if len(preview.PatchViolations) > 0 {
+		return preview, fmt.Errorf("memory proposal patch lint failed")
+	}
+
+	preview.Status = ApplyStatusDryRunOK
 	return preview, nil
 }
 
@@ -90,6 +110,33 @@ func buildApplyPreviewAction(proposal MemoryProposal, patch MemoryPatch) ApplyPr
 		Description: applyPreviewDescription(operation),
 		Content:     patch.Content,
 	}
+}
+
+func lintApplyPatch(proposal MemoryProposal, action ApplyPreviewAction, policy *MemoryPolicy) LintResult {
+	patchProposal := proposal
+	patchProposal.TargetPath = action.TargetPath
+	patchProposal.Operation = action.Operation
+	return LintProposal(patchProposal, policy)
+}
+
+func addApplyPatchWarning(preview *ApplyPreview, action *ApplyPreviewAction, patchIndex int, warning string) {
+	formatted := fmt.Sprintf("patch[%d]: %s", patchIndex, warning)
+	action.Warnings = append(action.Warnings, formatted)
+	if action.Warning == "" {
+		action.Warning = formatted
+	}
+	preview.PatchWarnings = append(preview.PatchWarnings, formatted)
+}
+
+func addApplyPatchViolation(preview *ApplyPreview, action *ApplyPreviewAction, patchIndex int, violation string) {
+	formatted := fmt.Sprintf("patch[%d]: %s", patchIndex, violation)
+	action.Violations = append(action.Violations, formatted)
+	preview.PatchViolations = append(preview.PatchViolations, ApplyPatchViolation{
+		PatchIndex: patchIndex,
+		TargetPath: action.TargetPath,
+		Operation:  action.Operation,
+		Violation:  violation,
+	})
 }
 
 func applyPreviewDescription(operation MemoryOperation) string {
