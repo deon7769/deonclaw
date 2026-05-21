@@ -36,6 +36,53 @@ Lint does not apply the proposal.
 
 Lint failure does not change the run status yet.
 
+## Apply Dry Run
+
+`deonctl memory proposal apply` only supports dry-run previews today:
+
+```bash
+deonctl memory proposal apply \
+  --proposal memory-proposal.json \
+  --policy configs/examples/memory-policy.yaml \
+  --dry-run
+```
+
+`--dry-run` is required.
+
+Real apply does not exist yet.
+
+The command does not write memory files. It builds an apply preview that reports what would happen if a future approved apply step existed.
+
+The proposal lint must pass before the preview can reach `dry_run_ok`. If proposal parsing, structural validation, or policy lint fails, the preview status is `failed`.
+
+Each `MemoryPatch` is also validated individually against the same memory policy before `dry_run_ok` is allowed.
+
+Patch fallback rules:
+
+- empty patch `target_path` uses the proposal `target_path`
+- empty patch `operation` uses the proposal `operation`
+
+Patch policy rules:
+
+- invalid patch `operation` fails the dry-run
+- patch `target_path` matching `protected` fails the dry-run
+- patch `target_path` matching isolated-domain `forbidden_global_write` fails the dry-run
+- patch `target_path` matching `allowed_global_bridge` passes with a warning
+- if any patch fails, the apply preview status is `failed`
+- patch violations are included in the apply preview
+
+The optional `--output` flag writes the preview JSON, not memory:
+
+```bash
+deonctl memory proposal apply \
+  --proposal memory-proposal.json \
+  --policy configs/examples/memory-policy.yaml \
+  --dry-run \
+  --output apply-preview.json
+```
+
+The output file must not be the proposal `target_path` or any effective patch `target_path`. DeonClaw refuses `--output` when it would write the preview to a memory target.
+
 ## Summary Status
 
 Run summaries report one of these memory proposal states:
@@ -62,4 +109,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP stops at artifact preservation and lint reporting.
+The current MVP supports artifact preservation, lint reporting, and apply dry-run previews. It still does not perform real memory apply.
