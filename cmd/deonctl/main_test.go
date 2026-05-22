@@ -1001,6 +1001,251 @@ func TestRunMemoryProposalApproveRefusesOutputAtTargetPath(t *testing.T) {
 	}
 }
 
+func TestRunMemoryProposalApplyPreflightOKWritesOutput(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-preflight-ok",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Preflight ok.",
+		CreatedAt:  time.Date(2026, 5, 22, 14, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+	outputPath := filepath.Join(tempDir, memory.ApplyPreflightJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"apply-preflight",
+		"--proposal",
+		proposalPath,
+		"--approval",
+		approvalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status: preflight_ok") {
+		t.Fatalf("stdout = %q, want preflight_ok", stdout.String())
+	}
+
+	preflight := readApplyPreflightFile(t, outputPath)
+	if preflight.Status != memory.ApplyPreflightStatusOK {
+		t.Fatalf("status = %q, want preflight_ok", preflight.Status)
+	}
+	if preflight.LintStatus != memory.LintStatusOK || preflight.ApplyStatus != memory.ApplyStatusDryRunOK {
+		t.Fatalf("preflight = %#v, want lint/apply ok", preflight)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after preflight: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyPreflightApprovalForDifferentProposalFails(t *testing.T) {
+	tempDir := t.TempDir()
+	proposal := testCLIPreflightProposal(t, tempDir, "mem-cli-preflight-mismatch")
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	approval.ProposalID = "mem-other"
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyPreflight(t, proposalPath, approvalPath, "", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "approval proposal_id") {
+		t.Fatalf("stdout = %q, want proposal_id failure", stdout.String())
+	}
+}
+
+func TestRunMemoryProposalApplyPreflightRejectedDecisionFails(t *testing.T) {
+	tempDir := t.TempDir()
+	proposal := testCLIPreflightProposal(t, tempDir, "mem-cli-preflight-rejected")
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionRejected)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyPreflight(t, proposalPath, approvalPath, "", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "approval decision") {
+		t.Fatalf("stdout = %q, want decision failure", stdout.String())
+	}
+}
+
+func TestRunMemoryProposalApplyPreflightCurrentLintFailureFails(t *testing.T) {
+	tempDir := t.TempDir()
+	proposal := testCLIPreflightProposal(t, tempDir, "mem-cli-preflight-lint-failed")
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposal.TargetPath = "/vault/mysecondbrain/SOUL.md"
+	approval.TargetPath = proposal.TargetPath
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyPreflight(t, proposalPath, approvalPath, "", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "current lint_status") {
+		t.Fatalf("stdout = %q, want current lint failure", stdout.String())
+	}
+}
+
+func TestRunMemoryProposalApplyPreflightCurrentApplyFailureFails(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-preflight-apply-failed",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Preflight apply failed.",
+		CreatedAt:  time.Date(2026, 5, 22, 14, 10, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: "/vault/mysecondbrain/SOUL.md", Operation: memory.OperationUpdate, Content: "bad\n"},
+		},
+	})
+	approval := memory.MemoryApproval{
+		ApprovalID:      "approval-apply-failed",
+		ProposalID:      proposal.ProposalID,
+		RunID:           proposal.RunID,
+		TaskID:          proposal.TaskID,
+		Domain:          proposal.Domain,
+		TargetPath:      proposal.TargetPath,
+		Operation:       proposal.Operation,
+		Reviewer:        "Davi",
+		Decision:        memory.DecisionApproved,
+		Reason:          "Approved before patch changed.",
+		LintStatus:      memory.LintStatusOK,
+		LintWarnings:    []string{},
+		LintViolations:  []string{},
+		ApplyStatus:     memory.ApplyStatusDryRunOK,
+		PatchCount:      1,
+		PatchWarnings:   []string{},
+		PatchViolations: []memory.ApplyPatchViolation{},
+		CreatedAt:       time.Date(2026, 5, 22, 14, 11, 0, 0, time.UTC),
+	}
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyPreflight(t, proposalPath, approvalPath, "", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "current apply_status") {
+		t.Fatalf("stdout = %q, want current apply failure", stdout.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after preflight: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyPreflightApprovalPatchViolationsFail(t *testing.T) {
+	tempDir := t.TempDir()
+	proposal := testCLIPreflightProposal(t, tempDir, "mem-cli-preflight-approval-patch-violations")
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	approval.PatchViolations = []memory.ApplyPatchViolation{
+		{PatchIndex: 0, TargetPath: "/vault/mysecondbrain/SOUL.md", Operation: memory.OperationUpdate, Violation: "protected path"},
+	}
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyPreflight(t, proposalPath, approvalPath, "", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "approval patch_violations") {
+		t.Fatalf("stdout = %q, want approval patch violation failure", stdout.String())
+	}
+}
+
+func TestRunMemoryProposalApplyPreflightRefusesOutputAtTargetPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-preflight-output-target",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Preflight output target.",
+		CreatedAt:  time.Date(2026, 5, 22, 14, 15, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyPreflight(t, proposalPath, approvalPath, targetPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write preflight artifact to target_path") {
+		t.Fatalf("stderr = %q, want target_path refusal", stderr.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after preflight output refusal: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyPreflightRefusesOutputInsideMemoryDomain(t *testing.T) {
+	tempDir := t.TempDir()
+	proposal := testCLIPreflightProposal(t, tempDir, "mem-cli-preflight-output-memory-domain")
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyPreflight(t, proposalPath, approvalPath, "/vault/mysecondbrain/apply-preflight.json", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write preflight artifact inside memory domain") {
+		t.Fatalf("stderr = %q, want memory domain refusal", stderr.String())
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1419,6 +1664,37 @@ func writeRawJSONFile(t *testing.T, dir string, name string, value any) string {
 	return path
 }
 
+func writeMemoryApprovalFile(t *testing.T, dir string, approval memory.MemoryApproval) string {
+	t.Helper()
+
+	data, err := approval.JSON()
+	if err != nil {
+		t.Fatalf("approval.JSON() error = %v", err)
+	}
+	path := filepath.Join(dir, memory.ApprovalJSONArtifactName)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write memory approval file: %v", err)
+	}
+	return path
+}
+
+func readApplyPreflightFile(t *testing.T, path string) memory.ApplyPreflight {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(preflight) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("preflight output is invalid JSON: %s", data)
+	}
+	var preflight memory.ApplyPreflight
+	if err := json.Unmarshal(data, &preflight); err != nil {
+		t.Fatalf("Unmarshal(preflight) error = %v", err)
+	}
+	return preflight
+}
+
 func readMemoryApprovalFile(t *testing.T, path string) memory.MemoryApproval {
 	t.Helper()
 
@@ -1449,4 +1725,65 @@ func writeApprovalTestProposal(t *testing.T, dir string, id string) string {
 		CreatedAt:  time.Date(2026, 5, 22, 12, 15, 0, 0, time.UTC),
 		Patches:    []memory.MemoryPatch{{TargetPath: filepath.Join(dir, "target.md"), Operation: memory.OperationAppend, Content: "content\n"}},
 	}))
+}
+
+func testCLIPreflightProposal(t *testing.T, dir string, id string) memory.MemoryProposal {
+	t.Helper()
+	targetPath := filepath.Join(dir, "target.md")
+	return memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: id,
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "CLI preflight proposal.",
+		CreatedAt:  time.Date(2026, 5, 22, 14, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	})
+}
+
+func loadCLIExamplePolicy(t *testing.T) *memory.MemoryPolicy {
+	t.Helper()
+	policy, err := memory.LoadPolicyFromFile(filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"))
+	if err != nil {
+		t.Fatalf("LoadPolicyFromFile() error = %v", err)
+	}
+	return policy
+}
+
+func buildCLIMemoryApproval(t *testing.T, proposal memory.MemoryProposal, policy *memory.MemoryPolicy, decision memory.ApprovalDecision) memory.MemoryApproval {
+	t.Helper()
+	approval, err := memory.BuildApproval(proposal, policy, memory.NewApprovalOptions{
+		ApprovalID: "approval-" + proposal.ProposalID,
+		Reviewer:   "Davi",
+		Decision:   decision,
+		Reason:     "Approval for preflight.",
+		CreatedAt:  time.Date(2026, 5, 22, 14, 5, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("BuildApproval() error = %v", err)
+	}
+	return approval
+}
+
+func runApplyPreflight(t *testing.T, proposalPath string, approvalPath string, outputPath string, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
+	t.Helper()
+	args := []string{
+		"memory",
+		"proposal",
+		"apply-preflight",
+		"--proposal",
+		proposalPath,
+		"--approval",
+		approvalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+	}
+	if outputPath != "" {
+		args = append(args, "--output", outputPath)
+	}
+	return run(args, stdout, stderr)
 }

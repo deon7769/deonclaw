@@ -38,6 +38,7 @@ Usage:
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
   deonctl memory proposal approve --proposal <path> --policy <path> --reviewer <name> --decision approved|rejected --reason <text> --output <path>
+  deonctl memory proposal apply-preflight --proposal <path> --approval <path> --policy <path> [--output <path>]
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -170,6 +171,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMemoryProposalApprove(opts, stdout, stderr)
+		case "apply-preflight":
+			opts, err := parseMemoryProposalApplyPreflightOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalApplyPreflight(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -625,6 +634,127 @@ func outputConflictsWithApprovalTarget(outputPath string, proposal memory.Memory
 		}
 	}
 	return false
+}
+
+type memoryProposalApplyPreflightOptions struct {
+	proposalPath string
+	approvalPath string
+	policyPath   string
+	outputPath   string
+}
+
+func parseMemoryProposalApplyPreflightOptions(args []string) (memoryProposalApplyPreflightOptions, error) {
+	var opts memoryProposalApplyPreflightOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--proposal":
+			if i+1 >= len(args) {
+				return memoryProposalApplyPreflightOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalPath = args[i+1]
+			i++
+		case "--approval":
+			if i+1 >= len(args) {
+				return memoryProposalApplyPreflightOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryProposalApplyPreflightOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalApplyPreflightOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return memoryProposalApplyPreflightOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.proposalPath == "" {
+		return memoryProposalApplyPreflightOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.approvalPath == "" {
+		return memoryProposalApplyPreflightOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.policyPath == "" {
+		return memoryProposalApplyPreflightOptions{}, fmt.Errorf("missing --policy")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalApplyPreflight(opts memoryProposalApplyPreflightOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal, err := memory.LoadProposalFromFile(opts.proposalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-preflight failed: %v\n", err)
+		return 1
+	}
+	approval, err := memory.LoadApprovalFromFile(opts.approvalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-preflight failed: %v\n", err)
+		return 1
+	}
+	policy, err := memory.LoadPolicyFromFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-preflight failed: %v\n", err)
+		return 1
+	}
+
+	preflight := memory.BuildApplyPreflight(proposal, approval, policy, memory.NewApplyPreflightOptions{})
+	printMemoryProposalApplyPreflight(stdout, preflight)
+	if opts.outputPath != "" {
+		if outputConflictsWithApprovalTarget(opts.outputPath, proposal) {
+			fmt.Fprintf(stderr, "memory proposal apply-preflight failed: refusing to write preflight artifact to target_path %q\n", opts.outputPath)
+			return 1
+		}
+		if outputTouchesMemoryDomain(opts.outputPath, policy) {
+			fmt.Fprintf(stderr, "memory proposal apply-preflight failed: refusing to write preflight artifact inside memory domain %q\n", opts.outputPath)
+			return 1
+		}
+		if err := writeApplyPreflight(opts.outputPath, preflight); err != nil {
+			fmt.Fprintf(stderr, "memory proposal apply-preflight failed: %v\n", err)
+			return 1
+		}
+	}
+	if preflight.Status == memory.ApplyPreflightStatusFailed {
+		return 1
+	}
+	return 0
+}
+
+func printMemoryProposalApplyPreflight(stdout io.Writer, preflight memory.ApplyPreflight) {
+	fmt.Fprintf(stdout, "proposal_id: %s\n", preflight.ProposalID)
+	fmt.Fprintf(stdout, "approval_id: %s\n", preflight.ApprovalID)
+	fmt.Fprintf(stdout, "status: %s\n", preflight.Status)
+	fmt.Fprintf(stdout, "failures: %d\n", len(preflight.Failures))
+	for _, failure := range preflight.Failures {
+		fmt.Fprintf(stdout, "- %s\n", failure)
+	}
+	fmt.Fprintf(stdout, "lint_status: %s\n", preflight.LintStatus)
+	fmt.Fprintf(stdout, "apply_status: %s\n", preflight.ApplyStatus)
+	fmt.Fprintf(stdout, "patch_count: %d\n", preflight.PatchCount)
+	fmt.Fprintf(stdout, "patch violations: %d\n", len(preflight.PatchViolations))
+	for _, violation := range preflight.PatchViolations {
+		fmt.Fprintf(stdout, "- patch[%d] %s %s: %s\n", violation.PatchIndex, violation.Operation, violation.TargetPath, violation.Violation)
+	}
+}
+
+func writeApplyPreflight(outputPath string, preflight memory.ApplyPreflight) error {
+	data, err := preflight.JSON()
+	if err != nil {
+		return err
+	}
+	outputDir := filepath.Dir(outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(outputPath, data, 0o600)
 }
 
 type memoryProposalApplyOptions struct {
