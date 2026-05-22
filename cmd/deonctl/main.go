@@ -607,6 +607,7 @@ func runMemoryProposalApprove(opts memoryProposalApproveOptions, stdout io.Write
 	fmt.Fprintf(stdout, "proposal_id: %s\n", approval.ProposalID)
 	fmt.Fprintf(stdout, "decision: %s\n", approval.Decision)
 	fmt.Fprintf(stdout, "lint_status: %s\n", approval.LintStatus)
+	fmt.Fprintf(stdout, "apply_status: %s\n", approval.ApplyStatus)
 	return 0
 }
 

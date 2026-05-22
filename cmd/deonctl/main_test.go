@@ -627,6 +627,18 @@ func TestRunMemoryProposalApproveApprovedWithLintOKGeneratesApproval(t *testing.
 	if len(approval.LintViolations) != 0 {
 		t.Fatalf("lint_violations = %#v, want none", approval.LintViolations)
 	}
+	if approval.ApplyStatus != memory.ApplyStatusDryRunOK {
+		t.Fatalf("apply_status = %q, want %q", approval.ApplyStatus, memory.ApplyStatusDryRunOK)
+	}
+	if approval.PatchCount != 1 {
+		t.Fatalf("patch_count = %d, want 1", approval.PatchCount)
+	}
+	if approval.PatchWarnings == nil {
+		t.Fatalf("patch_warnings is nil, want JSON array")
+	}
+	if approval.PatchViolations == nil || len(approval.PatchViolations) != 0 {
+		t.Fatalf("patch_violations = %#v, want empty JSON array", approval.PatchViolations)
+	}
 	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
 		t.Fatalf("target file exists after approval: %v", err)
 	}
@@ -728,6 +740,121 @@ func TestRunMemoryProposalApproveRejectedWithLintFailedGeneratesApproval(t *test
 	}
 	if len(approval.LintViolations) == 0 {
 		t.Fatalf("lint_violations = %#v, want violations", approval.LintViolations)
+	}
+	if approval.ApplyStatus != memory.ApplyStatusFailed {
+		t.Fatalf("apply_status = %q, want failed", approval.ApplyStatus)
+	}
+}
+
+func TestRunMemoryProposalApproveApprovedWithPatchViolationFails(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-approve-patch-failed",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Approve patch violation.",
+		CreatedAt:  time.Date(2026, 5, 22, 12, 11, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: "/vault/mysecondbrain/SOUL.md", Operation: memory.OperationUpdate, Content: "bad\n"},
+		},
+	})
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"approve",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer",
+		"Davi",
+		"--decision",
+		"approved",
+		"--reason",
+		"Approve despite patch violation.",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "approved decision requires apply_status dry_run_ok") {
+		t.Fatalf("stderr = %q, want apply status failure", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("approval output exists after failed approve: %v", err)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after approval failure: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApproveRejectedWithPatchViolationGeneratesApproval(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-reject-patch-failed",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Reject patch violation.",
+		CreatedAt:  time.Date(2026, 5, 22, 12, 12, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: "/vault/mysecondbrain/SOUL.md", Operation: memory.OperationUpdate, Content: "bad\n"},
+		},
+	})
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"approve",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer",
+		"Davi",
+		"--decision",
+		"rejected",
+		"--reason",
+		"Patch violates protected path.",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	approval := readMemoryApprovalFile(t, outputPath)
+	if approval.LintStatus != memory.LintStatusOK {
+		t.Fatalf("lint_status = %q, want ok", approval.LintStatus)
+	}
+	if approval.ApplyStatus != memory.ApplyStatusFailed {
+		t.Fatalf("apply_status = %q, want failed", approval.ApplyStatus)
+	}
+	if approval.PatchCount != 1 {
+		t.Fatalf("patch_count = %d, want 1", approval.PatchCount)
+	}
+	if len(approval.PatchViolations) != 1 || !strings.Contains(approval.PatchViolations[0].Violation, "protected path") {
+		t.Fatalf("patch_violations = %#v, want protected path violation", approval.PatchViolations)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after approval: %v", err)
 	}
 }
 

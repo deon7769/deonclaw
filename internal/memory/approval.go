@@ -18,20 +18,24 @@ const (
 )
 
 type MemoryApproval struct {
-	ApprovalID     string           `json:"approval_id"`
-	ProposalID     string           `json:"proposal_id"`
-	RunID          string           `json:"run_id"`
-	TaskID         string           `json:"task_id"`
-	Domain         string           `json:"domain"`
-	TargetPath     string           `json:"target_path"`
-	Operation      MemoryOperation  `json:"operation"`
-	Reviewer       string           `json:"reviewer"`
-	Decision       ApprovalDecision `json:"decision"`
-	Reason         string           `json:"reason"`
-	LintStatus     LintStatus       `json:"lint_status"`
-	LintWarnings   []string         `json:"lint_warnings"`
-	LintViolations []string         `json:"lint_violations"`
-	CreatedAt      time.Time        `json:"created_at"`
+	ApprovalID      string                `json:"approval_id"`
+	ProposalID      string                `json:"proposal_id"`
+	RunID           string                `json:"run_id"`
+	TaskID          string                `json:"task_id"`
+	Domain          string                `json:"domain"`
+	TargetPath      string                `json:"target_path"`
+	Operation       MemoryOperation       `json:"operation"`
+	Reviewer        string                `json:"reviewer"`
+	Decision        ApprovalDecision      `json:"decision"`
+	Reason          string                `json:"reason"`
+	LintStatus      LintStatus            `json:"lint_status"`
+	LintWarnings    []string              `json:"lint_warnings"`
+	LintViolations  []string              `json:"lint_violations"`
+	ApplyStatus     ApplyStatus           `json:"apply_status"`
+	PatchCount      int                   `json:"patch_count"`
+	PatchWarnings   []string              `json:"patch_warnings"`
+	PatchViolations []ApplyPatchViolation `json:"patch_violations"`
+	CreatedAt       time.Time             `json:"created_at"`
 }
 
 type NewApprovalOptions struct {
@@ -54,21 +58,26 @@ func BuildApproval(proposal MemoryProposal, policy *MemoryPolicy, opts NewApprov
 	}
 
 	lint := LintProposal(proposal, policy)
+	applyPreview, _ := BuildApplyDryRunPreview(proposal, policy)
 	approval := MemoryApproval{
-		ApprovalID:     approvalID,
-		ProposalID:     proposal.ProposalID,
-		RunID:          proposal.RunID,
-		TaskID:         proposal.TaskID,
-		Domain:         proposal.Domain,
-		TargetPath:     proposal.TargetPath,
-		Operation:      proposal.Operation,
-		Reviewer:       strings.TrimSpace(opts.Reviewer),
-		Decision:       ApprovalDecision(strings.TrimSpace(string(opts.Decision))),
-		Reason:         strings.TrimSpace(opts.Reason),
-		LintStatus:     lint.Status,
-		LintWarnings:   cloneApprovalStrings(lint.Warnings),
-		LintViolations: cloneApprovalStrings(lint.Violations),
-		CreatedAt:      createdAt.UTC(),
+		ApprovalID:      approvalID,
+		ProposalID:      proposal.ProposalID,
+		RunID:           proposal.RunID,
+		TaskID:          proposal.TaskID,
+		Domain:          proposal.Domain,
+		TargetPath:      proposal.TargetPath,
+		Operation:       proposal.Operation,
+		Reviewer:        strings.TrimSpace(opts.Reviewer),
+		Decision:        ApprovalDecision(strings.TrimSpace(string(opts.Decision))),
+		Reason:          strings.TrimSpace(opts.Reason),
+		LintStatus:      lint.Status,
+		LintWarnings:    cloneApprovalStrings(lint.Warnings),
+		LintViolations:  cloneApprovalStrings(lint.Violations),
+		ApplyStatus:     applyPreview.Status,
+		PatchCount:      applyPreview.PatchCount,
+		PatchWarnings:   cloneApprovalStrings(applyPreview.PatchWarnings),
+		PatchViolations: cloneApplyPatchViolations(applyPreview.PatchViolations),
+		CreatedAt:       createdAt.UTC(),
 	}
 
 	if err := approval.Validate(); err != nil {
@@ -76,6 +85,9 @@ func BuildApproval(proposal MemoryProposal, policy *MemoryPolicy, opts NewApprov
 	}
 	if approval.Decision == DecisionApproved && lint.Status != LintStatusOK {
 		return MemoryApproval{}, fmt.Errorf("approved decision requires proposal lint status ok, got %s", lint.Status)
+	}
+	if approval.Decision == DecisionApproved && (approval.ApplyStatus != ApplyStatusDryRunOK || len(approval.PatchViolations) > 0) {
+		return MemoryApproval{}, fmt.Errorf("approved decision requires apply_status dry_run_ok with no patch violations, got %s with %d patch violations", approval.ApplyStatus, len(approval.PatchViolations))
 	}
 	return approval, nil
 }
@@ -102,6 +114,12 @@ func (a MemoryApproval) Validate() error {
 	}
 	if !validLintStatus(a.LintStatus) {
 		errs = append(errs, fmt.Errorf("lint_status %q is not supported", a.LintStatus))
+	}
+	if !validApplyStatus(a.ApplyStatus) {
+		errs = append(errs, fmt.Errorf("apply_status %q is not supported", a.ApplyStatus))
+	}
+	if a.PatchCount < 0 {
+		errs = append(errs, fmt.Errorf("patch_count cannot be negative"))
 	}
 	if a.CreatedAt.IsZero() {
 		errs = append(errs, fmt.Errorf("created_at is required"))
@@ -136,11 +154,22 @@ func validLintStatus(status LintStatus) bool {
 	return status == LintStatusOK || status == LintStatusFailed
 }
 
+func validApplyStatus(status ApplyStatus) bool {
+	return status == ApplyStatusDryRunOK || status == ApplyStatusFailed
+}
+
 func cloneApprovalStrings(values []string) []string {
 	if values == nil {
 		return []string{}
 	}
 	return append([]string{}, values...)
+}
+
+func cloneApplyPatchViolations(values []ApplyPatchViolation) []ApplyPatchViolation {
+	if values == nil {
+		return []ApplyPatchViolation{}
+	}
+	return append([]ApplyPatchViolation{}, values...)
 }
 
 func joinApprovalErrors(errs []error) error {

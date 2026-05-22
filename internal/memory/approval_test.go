@@ -37,6 +37,15 @@ func TestBuildApprovalApprovedWithLintOK(t *testing.T) {
 	if len(approval.LintWarnings) != 0 || len(approval.LintViolations) != 0 {
 		t.Fatalf("lint warnings/violations = %#v/%#v, want none", approval.LintWarnings, approval.LintViolations)
 	}
+	if approval.ApplyStatus != ApplyStatusDryRunOK {
+		t.Fatalf("apply_status = %q, want %q", approval.ApplyStatus, ApplyStatusDryRunOK)
+	}
+	if approval.PatchCount != 1 {
+		t.Fatalf("patch_count = %d, want 1", approval.PatchCount)
+	}
+	if len(approval.PatchViolations) != 0 {
+		t.Fatalf("patch_violations = %#v, want none", approval.PatchViolations)
+	}
 
 	data, err := approval.JSON()
 	if err != nil {
@@ -44,6 +53,17 @@ func TestBuildApprovalApprovedWithLintOK(t *testing.T) {
 	}
 	if !json.Valid(data) {
 		t.Fatalf("approval JSON is invalid: %s", data)
+	}
+	output := string(data)
+	for _, want := range []string{
+		`"apply_status"`,
+		`"patch_count"`,
+		`"patch_warnings"`,
+		`"patch_violations"`,
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("approval JSON = %s, want field %s", output, want)
+		}
 	}
 }
 
@@ -62,6 +82,24 @@ func TestBuildApprovalApprovedWithLintFailedFails(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "approved decision requires proposal lint status ok") {
 		t.Fatalf("BuildApproval() error = %q, want lint status error", err.Error())
+	}
+}
+
+func TestBuildApprovalApprovedWithPatchViolationFails(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApprovalPatchViolationProposal("mem-approval-patch-failed-approve")
+
+	_, err := BuildApproval(proposal, policy, NewApprovalOptions{
+		Reviewer:  "Davi",
+		Decision:  DecisionApproved,
+		Reason:    "Approve despite patch violation.",
+		CreatedAt: time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC),
+	})
+	if err == nil {
+		t.Fatal("BuildApproval() error = nil, want apply dry-run failure")
+	}
+	if !strings.Contains(err.Error(), "approved decision requires apply_status dry_run_ok") {
+		t.Fatalf("BuildApproval() error = %q, want apply status error", err.Error())
 	}
 }
 
@@ -86,6 +124,33 @@ func TestBuildApprovalRejectedWithLintFailedPasses(t *testing.T) {
 	}
 	if len(approval.LintViolations) == 0 {
 		t.Fatalf("lint_violations = %#v, want policy violations", approval.LintViolations)
+	}
+	if approval.ApplyStatus != ApplyStatusFailed {
+		t.Fatalf("apply_status = %q, want failed", approval.ApplyStatus)
+	}
+}
+
+func TestBuildApprovalRejectedWithPatchViolationPasses(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApprovalPatchViolationProposal("mem-approval-patch-failed-reject")
+
+	approval, err := BuildApproval(proposal, policy, NewApprovalOptions{
+		Reviewer:  "Davi",
+		Decision:  DecisionRejected,
+		Reason:    "Reject patch violation.",
+		CreatedAt: time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("BuildApproval() error = %v", err)
+	}
+	if approval.ApplyStatus != ApplyStatusFailed {
+		t.Fatalf("apply_status = %q, want failed", approval.ApplyStatus)
+	}
+	if approval.PatchCount != 1 {
+		t.Fatalf("patch_count = %d, want 1", approval.PatchCount)
+	}
+	if len(approval.PatchViolations) != 1 || !strings.Contains(approval.PatchViolations[0].Violation, "protected path") {
+		t.Fatalf("patch_violations = %#v, want protected path violation", approval.PatchViolations)
 	}
 }
 
@@ -132,4 +197,16 @@ func TestBuildApprovalRejectsInvalidDecision(t *testing.T) {
 	if !strings.Contains(err.Error(), "decision \"maybe\" is not supported") {
 		t.Fatalf("BuildApproval() error = %q, want invalid decision", err.Error())
 	}
+}
+
+func testApprovalPatchViolationProposal(id string) MemoryProposal {
+	proposal := testProposal(id, "general", "/vault/mysecondbrain/memory/inbox/run-001.md", OperationAppend)
+	proposal.Patches = []MemoryPatch{
+		{
+			TargetPath: "/vault/mysecondbrain/SOUL.md",
+			Operation:  OperationUpdate,
+			Content:    "bad\n",
+		},
+	}
+	return proposal
 }
