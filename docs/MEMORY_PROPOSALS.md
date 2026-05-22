@@ -83,6 +83,57 @@ deonctl memory proposal apply \
 
 The output file must not be the proposal `target_path` or any effective patch `target_path`. DeonClaw refuses `--output` when it would write the preview to a memory target.
 
+## Approval Artifact
+
+`deonctl memory proposal approve` creates a review artifact for a memory proposal:
+
+```bash
+deonctl memory proposal approve \
+  --proposal memory-proposal.json \
+  --policy configs/examples/memory-policy.yaml \
+  --reviewer "Davi" \
+  --decision approved \
+  --reason "Reviewed and accepted." \
+  --output memory-approval.json
+```
+
+The command writes `memory-approval.json`.
+
+It does not apply memory.
+
+It does not write to `mysecondbrain`.
+
+It does not write to `escalasoft_brain`.
+
+The approval artifact records the proposal identity, target, reviewer, decision, reason, lint result and apply dry-run result, including:
+
+- `lint_status`
+- `lint_warnings`
+- `lint_violations`
+- `apply_status`
+- `patch_count`
+- `patch_warnings`
+- `patch_violations`
+
+Approval decisions are gated:
+
+- `approved` requires `lint_status: ok`
+- `approved` requires `apply_status: dry_run_ok`
+- `approved` requires empty `patch_violations`
+- `rejected` can be generated even when lint failed, apply failed, or patch violations exist
+
+The approval output path is also guarded:
+
+- it must not be the proposal `target_path`
+- it must not be any effective patch `target_path`
+- it must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
+
+The approval artifact is evidence for a later apply workflow.
+
+It is not an apply step.
+
+It is not a Git commit.
+
 ## Summary Status
 
 Run summaries report one of these memory proposal states:
