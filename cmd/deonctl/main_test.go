@@ -567,6 +567,313 @@ func TestRunMemoryProposalApplyInvalidOperationFails(t *testing.T) {
 	}
 }
 
+func TestRunMemoryProposalApproveApprovedWithLintOKGeneratesApproval(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory-target.md")
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-approve-ok",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Approve lint-ok proposal.",
+		CreatedAt:  time.Date(2026, 5, 22, 12, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	}))
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"approve",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer",
+		"Davi",
+		"--decision",
+		"approved",
+		"--reason",
+		"Reviewed and approved.",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "memory approval written: "+outputPath) {
+		t.Fatalf("stdout = %q, want approval written", stdout.String())
+	}
+
+	approval := readMemoryApprovalFile(t, outputPath)
+	if approval.ProposalID != "mem-cli-approve-ok" {
+		t.Fatalf("proposal_id = %q, want mem-cli-approve-ok", approval.ProposalID)
+	}
+	if approval.Decision != memory.DecisionApproved {
+		t.Fatalf("decision = %q, want approved", approval.Decision)
+	}
+	if approval.Reviewer != "Davi" || approval.Reason != "Reviewed and approved." {
+		t.Fatalf("approval = %#v, want reviewer and reason", approval)
+	}
+	if approval.LintStatus != memory.LintStatusOK {
+		t.Fatalf("lint_status = %q, want ok", approval.LintStatus)
+	}
+	if len(approval.LintViolations) != 0 {
+		t.Fatalf("lint_violations = %#v, want none", approval.LintViolations)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after approval: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApproveApprovedWithLintFailedFails(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-approve-lint-failed",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "escalasoft",
+		TargetPath: "/vault/mysecondbrain/MEMORY.md",
+		Operation:  memory.OperationUpdate,
+		Reason:     "Should not approve failed lint.",
+		CreatedAt:  time.Date(2026, 5, 22, 12, 5, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: "/vault/mysecondbrain/MEMORY.md", Operation: memory.OperationUpdate, Content: "bad\n"},
+		},
+	}))
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"approve",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer",
+		"Davi",
+		"--decision",
+		"approved",
+		"--reason",
+		"Approve anyway.",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "approved decision requires proposal lint status ok") {
+		t.Fatalf("stderr = %q, want approval lint failure", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("approval output exists after failed approve: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApproveRejectedWithLintFailedGeneratesApproval(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-reject-lint-failed",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "escalasoft",
+		TargetPath: "/vault/mysecondbrain/MEMORY.md",
+		Operation:  memory.OperationUpdate,
+		Reason:     "Reject failed lint.",
+		CreatedAt:  time.Date(2026, 5, 22, 12, 10, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: "/vault/mysecondbrain/MEMORY.md", Operation: memory.OperationUpdate, Content: "bad\n"},
+		},
+	}))
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"approve",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer",
+		"Davi",
+		"--decision",
+		"rejected",
+		"--reason",
+		"Violates protected memory boundary.",
+		"--output",
+		outputPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	approval := readMemoryApprovalFile(t, outputPath)
+	if approval.Decision != memory.DecisionRejected {
+		t.Fatalf("decision = %q, want rejected", approval.Decision)
+	}
+	if approval.LintStatus != memory.LintStatusFailed {
+		t.Fatalf("lint_status = %q, want failed", approval.LintStatus)
+	}
+	if len(approval.LintViolations) == 0 {
+		t.Fatalf("lint_violations = %#v, want violations", approval.LintViolations)
+	}
+}
+
+func TestRunMemoryProposalApproveRequiresReviewer(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeApprovalTestProposal(t, tempDir, "mem-cli-approve-missing-reviewer")
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory", "proposal", "approve",
+		"--proposal", proposalPath,
+		"--policy", filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--decision", "approved",
+		"--reason", "Reviewed.",
+		"--output", outputPath,
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --reviewer") {
+		t.Fatalf("stderr = %q, want missing reviewer", stderr.String())
+	}
+}
+
+func TestRunMemoryProposalApproveRequiresReason(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeApprovalTestProposal(t, tempDir, "mem-cli-approve-missing-reason")
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory", "proposal", "approve",
+		"--proposal", proposalPath,
+		"--policy", filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer", "Davi",
+		"--decision", "approved",
+		"--output", outputPath,
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --reason") {
+		t.Fatalf("stderr = %q, want missing reason", stderr.String())
+	}
+}
+
+func TestRunMemoryProposalApproveRejectsInvalidDecision(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeApprovalTestProposal(t, tempDir, "mem-cli-approve-bad-decision")
+	outputPath := filepath.Join(tempDir, memory.ApprovalJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory", "proposal", "approve",
+		"--proposal", proposalPath,
+		"--policy", filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer", "Davi",
+		"--decision", "maybe",
+		"--reason", "Invalid decision.",
+		"--output", outputPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "decision \"maybe\" is not supported") {
+		t.Fatalf("stderr = %q, want invalid decision", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("approval output exists after invalid decision: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApproveRefusesOutputInsideMemoryDomain(t *testing.T) {
+	tempDir := t.TempDir()
+	proposalPath := writeApprovalTestProposal(t, tempDir, "mem-cli-approve-output-memory-domain")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory",
+		"proposal",
+		"approve",
+		"--proposal",
+		proposalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer",
+		"Davi",
+		"--decision",
+		"approved",
+		"--reason",
+		"Reviewed.",
+		"--output",
+		"/vault/mysecondbrain/memory-approval.json",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write approval artifact inside memory domain") {
+		t.Fatalf("stderr = %q, want memory domain refusal", stderr.String())
+	}
+}
+
+func TestRunMemoryProposalApproveRefusesOutputAtTargetPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposalPath := writeMemoryProposalFile(t, tempDir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-approve-output-target",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Do not write approval to target.",
+		CreatedAt:  time.Date(2026, 5, 22, 12, 20, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	}))
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"memory", "proposal", "approve",
+		"--proposal", proposalPath,
+		"--policy", filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--reviewer", "Davi",
+		"--decision", "approved",
+		"--reason", "Reviewed.",
+		"--output", targetPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write approval artifact to target_path") {
+		t.Fatalf("stderr = %q, want target_path refusal", stderr.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target file exists after approval output refusal: %v", err)
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -983,4 +1290,36 @@ func writeRawJSONFile(t *testing.T, dir string, name string, value any) string {
 		t.Fatalf("write raw json file: %v", err)
 	}
 	return path
+}
+
+func readMemoryApprovalFile(t *testing.T, path string) memory.MemoryApproval {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(approval) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("approval output is invalid JSON: %s", data)
+	}
+	var approval memory.MemoryApproval
+	if err := json.Unmarshal(data, &approval); err != nil {
+		t.Fatalf("Unmarshal(approval) error = %v", err)
+	}
+	return approval
+}
+
+func writeApprovalTestProposal(t *testing.T, dir string, id string) string {
+	t.Helper()
+	return writeMemoryProposalFile(t, dir, memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: id,
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: filepath.Join(dir, "target.md"),
+		Operation:  memory.OperationAppend,
+		Reason:     "Approval test proposal.",
+		CreatedAt:  time.Date(2026, 5, 22, 12, 15, 0, 0, time.UTC),
+		Patches:    []memory.MemoryPatch{{TargetPath: filepath.Join(dir, "target.md"), Operation: memory.OperationAppend, Content: "content\n"}},
+	}))
 }

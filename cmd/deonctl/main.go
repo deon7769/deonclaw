@@ -37,6 +37,7 @@ Usage:
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
+  deonctl memory proposal approve --proposal <path> --policy <path> --reviewer <name> --decision approved|rejected --reason <text> --output <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -161,6 +162,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMemoryProposalApply(opts, stdout, stderr)
+		case "approve":
+			opts, err := parseMemoryProposalApproveOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalApprove(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -486,6 +495,137 @@ func printMemoryProposalLintResult(stdout io.Writer, result memory.LintResult) {
 	}
 }
 
+type memoryProposalApproveOptions struct {
+	proposalPath string
+	policyPath   string
+	reviewer     string
+	decision     string
+	reason       string
+	outputPath   string
+}
+
+func parseMemoryProposalApproveOptions(args []string) (memoryProposalApproveOptions, error) {
+	var opts memoryProposalApproveOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--proposal":
+			if i+1 >= len(args) {
+				return memoryProposalApproveOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryProposalApproveOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--reviewer":
+			if i+1 >= len(args) {
+				return memoryProposalApproveOptions{}, fmt.Errorf("missing value for --reviewer")
+			}
+			opts.reviewer = args[i+1]
+			i++
+		case "--decision":
+			if i+1 >= len(args) {
+				return memoryProposalApproveOptions{}, fmt.Errorf("missing value for --decision")
+			}
+			opts.decision = args[i+1]
+			i++
+		case "--reason":
+			if i+1 >= len(args) {
+				return memoryProposalApproveOptions{}, fmt.Errorf("missing value for --reason")
+			}
+			opts.reason = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalApproveOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return memoryProposalApproveOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.proposalPath == "" {
+		return memoryProposalApproveOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.policyPath == "" {
+		return memoryProposalApproveOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.reviewer == "" {
+		return memoryProposalApproveOptions{}, fmt.Errorf("missing --reviewer")
+	}
+	if opts.decision == "" {
+		return memoryProposalApproveOptions{}, fmt.Errorf("missing --decision")
+	}
+	if opts.reason == "" {
+		return memoryProposalApproveOptions{}, fmt.Errorf("missing --reason")
+	}
+	if opts.outputPath == "" {
+		return memoryProposalApproveOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalApprove(opts memoryProposalApproveOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal, err := memory.LoadProposalFromFile(opts.proposalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal approve failed: %v\n", err)
+		return 1
+	}
+	policy, err := memory.LoadPolicyFromFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal approve failed: %v\n", err)
+		return 1
+	}
+	if outputConflictsWithApprovalTarget(opts.outputPath, proposal) {
+		fmt.Fprintf(stderr, "memory proposal approve failed: refusing to write approval artifact to target_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesMemoryDomain(opts.outputPath, policy) {
+		fmt.Fprintf(stderr, "memory proposal approve failed: refusing to write approval artifact inside memory domain %q\n", opts.outputPath)
+		return 1
+	}
+
+	approval, err := memory.BuildApproval(proposal, policy, memory.NewApprovalOptions{
+		Reviewer: opts.reviewer,
+		Decision: memory.ApprovalDecision(opts.decision),
+		Reason:   opts.reason,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal approve failed: %v\n", err)
+		return 1
+	}
+	if err := writeMemoryApproval(opts.outputPath, approval); err != nil {
+		fmt.Fprintf(stderr, "memory proposal approve failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "memory approval written: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "proposal_id: %s\n", approval.ProposalID)
+	fmt.Fprintf(stdout, "decision: %s\n", approval.Decision)
+	fmt.Fprintf(stdout, "lint_status: %s\n", approval.LintStatus)
+	return 0
+}
+
+func outputConflictsWithApprovalTarget(outputPath string, proposal memory.MemoryProposal) bool {
+	if sameCleanPath(outputPath, proposal.TargetPath) {
+		return true
+	}
+	for _, patch := range proposal.Patches {
+		targetPath := strings.TrimSpace(patch.TargetPath)
+		if targetPath == "" {
+			targetPath = proposal.TargetPath
+		}
+		if sameCleanPath(outputPath, targetPath) {
+			return true
+		}
+	}
+	return false
+}
+
 type memoryProposalApplyOptions struct {
 	proposalPath string
 	policyPath   string
@@ -575,6 +715,56 @@ func outputConflictsWithApplyTarget(outputPath string, preview memory.ApplyPrevi
 	return false
 }
 
+func outputTouchesMemoryDomain(outputPath string, policy *memory.MemoryPolicy) bool {
+	roots := []string{
+		"/vault/mysecondbrain",
+		"vault/mysecondbrain",
+		"mysecondbrain",
+	}
+	if policy != nil {
+		for _, domainPolicy := range policy.IsolatedDomains {
+			if strings.TrimSpace(domainPolicy.Root) == "" {
+				continue
+			}
+			roots = append(roots, domainPolicy.Root)
+			roots = append(roots, strings.TrimPrefix(domainPolicy.Root, "/"))
+			roots = append(roots, filepath.Base(domainPolicy.Root))
+		}
+	}
+	for _, root := range roots {
+		if cleanPathWithinRoot(outputPath, root) {
+			return true
+		}
+	}
+	return false
+}
+
+func cleanPathWithinRoot(value string, root string) bool {
+	value = cleanSlashPath(value)
+	root = cleanSlashPath(root)
+	if value == "" || root == "" {
+		return false
+	}
+	value = strings.Trim(value, "/")
+	root = strings.Trim(root, "/")
+	if value == root || strings.HasPrefix(value, root+"/") {
+		return true
+	}
+	return strings.Contains(value, "/"+root+"/")
+}
+
+func cleanSlashPath(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	value = filepath.ToSlash(filepath.Clean(value))
+	if value == "." {
+		return ""
+	}
+	return value
+}
+
 func sameCleanPath(left string, right string) bool {
 	if strings.TrimSpace(left) == "" || strings.TrimSpace(right) == "" {
 		return false
@@ -639,6 +829,23 @@ func writeApplyPreview(outputPath string, preview memory.ApplyPreview) error {
 		}
 	}
 	return os.WriteFile(outputPath, data, 0o600)
+}
+
+func writeMemoryApproval(outputPath string, approval memory.MemoryApproval) error {
+	data, err := approval.JSON()
+	if err != nil {
+		return err
+	}
+	outputDir := filepath.Dir(outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	if err := os.WriteFile(outputPath, data, 0o600); err != nil {
+		return err
+	}
+	return nil
 }
 
 func writeIndentedText(output io.Writer, value string, prefix string) {
