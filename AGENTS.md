@@ -22,6 +22,40 @@ Build a small, observable MVP that can:
 6. enforce path and memory policies
 7. prevent uncontrolled writes to memory domains
 
+## Current implemented state
+
+Implemented:
+
+- Go CLI/core
+- SQLite store
+- Codex worker dry-run and run
+- isolated Git worktree workspace
+- dirty baseline protection
+- workspace cleanup
+- JSONL/stdout/stderr/diff/changed-files artifacts
+- validation commands
+- artifact manifest, list and prune
+- domain config loader
+- context pack builder
+- context pack integration in Codex runs
+- memory proposal format and CLI
+- memory policy lint
+- memory proposal lint in Codex runs
+- apply dry-run
+- patch-level apply policy
+- approval artifact
+- approval content binding
+- apply preflight
+
+Not implemented yet:
+
+- real memory apply
+- backup/restore plan
+- OpenCode worker
+- Docker runtime
+- memory index/LanceDB
+- UI/dashboard
+
 ## Non-goals for the MVP
 
 - Do not build a full AI agent from scratch.
@@ -144,6 +178,25 @@ Memory index:
 - Markdown/Git remains the source of truth.
 - Index rebuild must be safe and reproducible.
 - Index results must cite source files and line/chunk IDs when used in prompts.
+
+## Memory apply rules
+
+Do not implement real memory writes unless the task explicitly says so.
+
+Before any real memory apply exists, the required chain is:
+
+```text
+proposal
+-> lint
+-> apply dry-run
+-> patch-level policy
+-> approval artifact
+-> preflight
+-> backup plan
+-> apply
+```
+
+Never skip approval, preflight or backup.
 
 ## Memory lifecycle
 

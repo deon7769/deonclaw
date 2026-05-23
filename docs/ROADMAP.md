@@ -1,5 +1,38 @@
 # DeonClaw Roadmap
 
+## Completed MVP milestones
+
+- Phase 0 - Documentation and contracts
+- Phase 1 - Core skeleton/store
+- Phase 2 - Codex worker execution
+- Phase 3 - Workspace/path policy
+- Phase 4 - Domain config and context packs
+- Phase 5A - Memory proposal/lint/dry-run/approval/preflight
+
+## Next milestones
+
+### Phase 5B - Safe memory apply
+
+- backup plan
+- restore plan
+- apply real for create/append only
+- apply real for update/archive later
+- no automatic git commit initially
+
+### Phase 6 - OpenCode worker
+
+- provider-agnostic worker adapter
+- Z.ai/GLM config example
+- event/log/artifact capture
+- same workspace and policy rules as Codex
+
+### Phase 7 - Docker runtime
+
+- containerized worker runs
+- read-only memory mounts
+- artifact volumes
+- restricted secrets
+
 ## Phase 0 — Documentation and contracts
 
 Goal: make the project consistent before coding.

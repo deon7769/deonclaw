@@ -140,7 +140,7 @@ It is not a Git commit.
 
 ## Apply Preflight
 
-`deonctl memory proposal apply-preflight` checks that a proposal is still bound to its approval before any future apply step can exist:
+`deonctl memory proposal apply-preflight` checks that an approved proposal is still safe to apply and still bound to its approval before any future apply step can exist:
 
 ```bash
 deonctl memory proposal apply-preflight \
@@ -150,38 +150,40 @@ deonctl memory proposal apply-preflight \
   --output apply-preflight.json
 ```
 
-The command loads the proposal, approval artifact, and memory policy.
+The command loads the current proposal, approval artifact, and memory policy.
 
 It re-runs proposal lint against the current proposal and policy.
 
 It re-runs the current apply dry-run preview against the current proposal and policy.
 
-The approval artifact must still describe an approved, clean review:
+Preflight succeeds only when the approval artifact still describes an approved, clean review:
 
-- `decision` must be `approved`
-- `lint_status` must be `ok`
-- `apply_status` must be `dry_run_ok`
-- `patch_violations` must be empty
+- approval `decision` must be `approved`
+- approval `lint_status` must be `ok`
+- approval `apply_status` must be `dry_run_ok`
+- approval `patch_violations` must be empty
 
 The approval artifact must also remain bound to the exact reviewed content:
 
 - approved `proposal_sha256` must match the current proposal `proposal_sha256`
 - approved `apply_preview_sha256` must match the current apply preview `apply_preview_sha256`
+- current lint must still be `ok`
+- current apply dry-run must still be `dry_run_ok`
+- current patch violations must still be empty
 
 If the proposal or any patch changes after approval, apply preflight fails. This includes patch content changes, patch target changes, and any change that alters the rebuilt apply preview.
 
-Apply preflight writes only the optional preflight artifact.
+The optional `--output` flag writes the preflight artifact JSON, not memory.
 
-It does not apply memory.
+Apply preflight does not apply memory.
 
-It does not write to `mysecondbrain`.
+Apply preflight does not write to `mysecondbrain`.
 
-It does not write to `escalasoft_brain`.
+Apply preflight does not write to `escalasoft_brain`.
 
-It does not write to the proposal `target_path` or any patch target path.
+Apply preflight does not write to the proposal `target_path` or any patch target path.
 
-It does not make a Git commit.
-
+Apply preflight does not make a Git commit.
 ## Summary Status
 
 Run summaries report one of these memory proposal states:

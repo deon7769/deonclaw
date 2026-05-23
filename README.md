@@ -54,4 +54,34 @@ Markdown + Git remain canonical.
 
 ## Status
 
-Early planning/MVP.
+Functional MVP in active development.
+
+Implemented:
+
+- Codex CLI worker execution
+- isolated Git worktree runs
+- path policy and diff artifacts
+- validation commands
+- artifact metadata/list/prune
+- domain config
+- context packs
+- memory proposal/lint/dry-run/approval/preflight
+
+Not implemented yet:
+
+- real memory apply
+- OpenCode worker
+- Docker runtime
+- memory index
+- UI
+
+## Quick command map
+
+```bash
+deonctl task validate examples/tasks/codex-smoke.yaml
+deonctl domains validate --config configs/examples/domains.yaml
+deonctl context build --task examples/tasks/codex-smoke.yaml --domains configs/examples/domains.yaml --output /tmp/context-pack.md
+deonctl worker codex dry-run examples/tasks/codex-smoke.yaml
+deonctl artifacts list --store deonclaw.db
+deonctl memory proposal lint --proposal memory-proposal.json --policy configs/examples/memory-policy.yaml
+```

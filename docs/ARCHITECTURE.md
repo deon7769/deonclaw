@@ -112,13 +112,19 @@ Skill inventory, renewal proposals and validation.
 
 ```text
 Task
-  -> Run
-    -> Events
-    -> Artifacts
-    -> Diff
-    -> Summary
-    -> Optional MemoryProposal
-    -> Optional SkillProposal
+ -> Run
+ -> Events
+ -> Artifacts
+ -> Diff
+ -> Summary
+ -> ContextPack
+ -> Optional MemoryProposal
+ -> MemoryProposalLint
+ -> ApplyPreview
+ -> MemoryApproval
+ -> ApplyPreflight
+ -> Future BackupPlan
+ -> Future ApplyResult
 ```
 
 ## Storage model
@@ -140,6 +146,23 @@ Markdown/Git remains canonical.
 Indexes are derived.
 
 Workers receive context packs, not whole memory vaults.
+
+## Memory safety pipeline
+
+Canonical memory is never modified by workers.
+
+The safe memory workflow is:
+
+1. proposal artifact
+2. policy lint
+3. apply dry-run
+4. patch-level validation
+5. approval artifact
+6. preflight with content-hash binding
+7. backup plan
+8. real apply, later
+
+Real apply is not implemented yet.
 
 ## Worker model
 

@@ -106,26 +106,42 @@ Output:
 
 ## Memory proposal format
 
-```yaml
-proposal_id: mem-2026-05-16-001
-source_run_id: run-001
-domain: general
-type: context_update
-target_path: memory/context/example.md
-operation: update
-status: proposed
-confidence: medium
+The current proposal artifact is `memory-proposal.json`.
 
-evidence:
-  - type: run_artifact
-    path: artifacts/run-001/summary.md
-
-reason: >
-  This update captures a repeated workflow that is now stable.
-
-changes:
-  summary: "Add route for ..."
+```json
+{
+  "proposal_id": "mem-20260523T120000Z",
+  "run_id": "run-001",
+  "task_id": "task-001",
+  "domain": "general",
+  "target_path": "memory/context/example.md",
+  "operation": "append",
+  "status": "proposed",
+  "reason": "Capture a stable workflow discovered during the run.",
+  "evidence": [
+    {
+      "type": "run_artifact",
+      "path": "artifacts/run-001/summary.md",
+      "run_id": "run-001",
+      "description": "Worker summary that supports the proposed memory update."
+    }
+  ],
+  "created_at": "2026-05-23T12:00:00Z",
+  "patches": [
+    {
+      "target_path": "memory/context/example.md",
+      "operation": "append",
+      "content": "New durable context.\n"
+    }
+  ]
+}
 ```
+
+Supported operations are `create`, `update`, `append` and `archive`.
+
+`status` is currently always `proposed`.
+
+`patches` are validated during apply dry-run and patch-level policy checks.
 
 ## Domain boundaries
 
@@ -212,17 +228,22 @@ text: string
 - Domain filtering must happen before retrieval.
 - Retrieval results must be explainable.
 
-## Commands to add later
+## Current memory commands
 
-```bash
-deonctl memory scan
-deonctl memory lint
-deonctl memory propose
-deonctl memory approve
-deonctl memory renew --domain general
-deonctl memory index rebuild --domain general
-deonctl memory search --domain escalasoft "WMS coletor tarefa"
-```
+- `deonctl memory proposal new`
+- `deonctl memory proposal lint`
+- `deonctl memory proposal apply --dry-run`
+- `deonctl memory proposal approve`
+- `deonctl memory proposal apply-preflight`
+
+## Future memory commands
+
+- `deonctl memory proposal apply`
+- `deonctl memory backup plan`
+- `deonctl memory restore`
+- `deonctl memory scan`
+- `deonctl memory renew`
+- `deonctl memory index rebuild`
 
 ## MVP boundary
 
