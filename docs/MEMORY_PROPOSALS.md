@@ -51,7 +51,9 @@ deonctl memory proposal apply \
 
 Real apply does not exist yet.
 
-The command does not write memory files. It builds an apply preview that reports what would happen if a future approved apply step existed.
+The command does not apply the proposal and does not write memory files. It does not write to `mysecondbrain`, `escalasoft_brain`, the proposal `target_path`, or any patch target path.
+
+It builds an apply preview that reports what would happen if a future approved apply step existed.
 
 The proposal lint must pass before the preview can reach `dry_run_ok`. If proposal parsing, structural validation, or policy lint fails, the preview status is `failed`.
 
@@ -71,7 +73,7 @@ Patch policy rules:
 - if any patch fails, the apply preview status is `failed`
 - patch violations are included in the apply preview
 
-The optional `--output` flag writes the preview JSON, not memory:
+The optional `--output` flag writes only the preview JSON, commonly named `apply-preview.json`:
 
 ```bash
 deonctl memory proposal apply \
@@ -107,6 +109,8 @@ It does not write to `escalasoft_brain`.
 
 The approval artifact records the proposal identity, target, reviewer, decision, reason, lint result and apply dry-run result, including:
 
+- `proposal_sha256`
+- `apply_preview_sha256`
 - `lint_status`
 - `lint_warnings`
 - `lint_violations`
@@ -134,6 +138,50 @@ It is not an apply step.
 
 It is not a Git commit.
 
+## Apply Preflight
+
+`deonctl memory proposal apply-preflight` checks that a proposal is still bound to its approval before any future apply step can exist:
+
+```bash
+deonctl memory proposal apply-preflight \
+  --proposal memory-proposal.json \
+  --approval memory-approval.json \
+  --policy configs/examples/memory-policy.yaml \
+  --output apply-preflight.json
+```
+
+The command loads the proposal, approval artifact, and memory policy.
+
+It re-runs proposal lint against the current proposal and policy.
+
+It re-runs the current apply dry-run preview against the current proposal and policy.
+
+The approval artifact must still describe an approved, clean review:
+
+- `decision` must be `approved`
+- `lint_status` must be `ok`
+- `apply_status` must be `dry_run_ok`
+- `patch_violations` must be empty
+
+The approval artifact must also remain bound to the exact reviewed content:
+
+- approved `proposal_sha256` must match the current proposal `proposal_sha256`
+- approved `apply_preview_sha256` must match the current apply preview `apply_preview_sha256`
+
+If the proposal or any patch changes after approval, apply preflight fails. This includes patch content changes, patch target changes, and any change that alters the rebuilt apply preview.
+
+Apply preflight writes only the optional preflight artifact.
+
+It does not apply memory.
+
+It does not write to `mysecondbrain`.
+
+It does not write to `escalasoft_brain`.
+
+It does not write to the proposal `target_path` or any patch target path.
+
+It does not make a Git commit.
+
 ## Summary Status
 
 Run summaries report one of these memory proposal states:
@@ -160,4 +208,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, and apply dry-run previews. It still does not perform real memory apply.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, and apply preflight. It still does not perform real memory apply or commit memory changes.
