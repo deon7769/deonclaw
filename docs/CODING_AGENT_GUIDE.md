@@ -15,6 +15,10 @@ Before changing code, read:
 
 Do not implement real memory apply unless explicitly asked.
 
+For current sequencing, follow AGENTS.md Next implementation order first.
+
+Do not implement backup/apply/OpenCode out of order.
+
 The current safe chain is:
 
 proposal -> lint -> apply dry-run -> approval -> preflight -> backup -> apply

@@ -33,6 +33,12 @@
 - artifact volumes
 - restricted secrets
 
+## Historical roadmap
+
+The sections below are the original roadmap and are kept for context.
+
+Use the "Next milestones" section above as the source of truth for current implementation order.
+
 ## Phase 0 — Documentation and contracts
 
 Goal: make the project consistent before coding.

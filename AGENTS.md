@@ -262,29 +262,18 @@ Every task must define:
 
 If a worker changes files outside allowed paths, the run must fail policy validation.
 
-## Implementation order
+## Next implementation order
 
-Phase 1:
+Current next sequence:
 
-1. create Go module
-2. create CLI skeleton
-3. define Task, Run, Event and Artifact structs
-4. implement local SQLite store
-5. implement Codex worker dry-run
-6. implement Codex worker JSONL capture
-7. implement workspace manager
-8. implement basic path policy
-
-Phase 2:
-
-1. implement context pack builder
-2. implement memory domain config
-3. implement memory proposal format
-4. implement memory lifecycle commands
-5. implement skill lifecycle commands
-6. implement optional memory index adapter
-7. implement OpenCode worker
-8. implement Docker runtime
+1. backup/restore plan for memory apply
+2. apply preflight + backup integration
+3. real apply for create/append only
+4. real apply for update/archive later
+5. OpenCode worker
+6. Docker runtime
+7. memory index/LanceDB
+8. UI/dashboard
 
 ## Coding style
 
