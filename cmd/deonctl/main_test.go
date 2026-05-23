@@ -639,6 +639,9 @@ func TestRunMemoryProposalApproveApprovedWithLintOKGeneratesApproval(t *testing.
 	if approval.PatchViolations == nil || len(approval.PatchViolations) != 0 {
 		t.Fatalf("patch_violations = %#v, want empty JSON array", approval.PatchViolations)
 	}
+	if approval.ProposalSHA256 == "" || approval.ApplyPreviewSHA256 == "" {
+		t.Fatalf("approval hashes are empty: %#v", approval)
+	}
 	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
 		t.Fatalf("target file exists after approval: %v", err)
 	}
@@ -1052,6 +1055,15 @@ func TestRunMemoryProposalApplyPreflightOKWritesOutput(t *testing.T) {
 	if preflight.LintStatus != memory.LintStatusOK || preflight.ApplyStatus != memory.ApplyStatusDryRunOK {
 		t.Fatalf("preflight = %#v, want lint/apply ok", preflight)
 	}
+	if preflight.ProposalSHA256 == "" || preflight.ApprovalProposalSHA256 == "" || preflight.ApplyPreviewSHA256 == "" || preflight.ApprovalApplyPreviewSHA256 == "" {
+		t.Fatalf("preflight hashes are empty: %#v", preflight)
+	}
+	if preflight.ProposalSHA256 != preflight.ApprovalProposalSHA256 {
+		t.Fatalf("proposal hashes = %q/%q, want equal", preflight.ProposalSHA256, preflight.ApprovalProposalSHA256)
+	}
+	if preflight.ApplyPreviewSHA256 != preflight.ApprovalApplyPreviewSHA256 {
+		t.Fatalf("apply preview hashes = %q/%q, want equal", preflight.ApplyPreviewSHA256, preflight.ApprovalApplyPreviewSHA256)
+	}
 	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
 		t.Fatalf("target file exists after preflight: %v", err)
 	}
@@ -1120,7 +1132,7 @@ func TestRunMemoryProposalApplyPreflightCurrentLintFailureFails(t *testing.T) {
 func TestRunMemoryProposalApplyPreflightCurrentApplyFailureFails(t *testing.T) {
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "target.md")
-	proposal := memory.NewProposal(memory.NewProposalOptions{
+	approvedProposal := memory.NewProposal(memory.NewProposalOptions{
 		ProposalID: "mem-cli-preflight-apply-failed",
 		RunID:      "run-001",
 		TaskID:     "task-001",
@@ -1130,29 +1142,15 @@ func TestRunMemoryProposalApplyPreflightCurrentApplyFailureFails(t *testing.T) {
 		Reason:     "Preflight apply failed.",
 		CreatedAt:  time.Date(2026, 5, 22, 14, 10, 0, 0, time.UTC),
 		Patches: []memory.MemoryPatch{
-			{TargetPath: "/vault/mysecondbrain/SOUL.md", Operation: memory.OperationUpdate, Content: "bad\n"},
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
 		},
 	})
-	approval := memory.MemoryApproval{
-		ApprovalID:      "approval-apply-failed",
-		ProposalID:      proposal.ProposalID,
-		RunID:           proposal.RunID,
-		TaskID:          proposal.TaskID,
-		Domain:          proposal.Domain,
-		TargetPath:      proposal.TargetPath,
-		Operation:       proposal.Operation,
-		Reviewer:        "Davi",
-		Decision:        memory.DecisionApproved,
-		Reason:          "Approved before patch changed.",
-		LintStatus:      memory.LintStatusOK,
-		LintWarnings:    []string{},
-		LintViolations:  []string{},
-		ApplyStatus:     memory.ApplyStatusDryRunOK,
-		PatchCount:      1,
-		PatchWarnings:   []string{},
-		PatchViolations: []memory.ApplyPatchViolation{},
-		CreatedAt:       time.Date(2026, 5, 22, 14, 11, 0, 0, time.UTC),
+	proposal := approvedProposal
+	proposal.Patches = []memory.MemoryPatch{
+		{TargetPath: "/vault/mysecondbrain/SOUL.md", Operation: memory.OperationUpdate, Content: "bad\n"},
 	}
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, approvedProposal, policy, memory.DecisionApproved)
 	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
 	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
 

@@ -17,23 +17,27 @@ const (
 )
 
 type ApplyPreflight struct {
-	ProposalID      string                `json:"proposal_id"`
-	ApprovalID      string                `json:"approval_id"`
-	RunID           string                `json:"run_id"`
-	TaskID          string                `json:"task_id"`
-	Domain          string                `json:"domain"`
-	TargetPath      string                `json:"target_path"`
-	Operation       MemoryOperation       `json:"operation"`
-	Status          ApplyPreflightStatus  `json:"status"`
-	Failures        []string              `json:"failures"`
-	LintStatus      LintStatus            `json:"lint_status"`
-	LintWarnings    []string              `json:"lint_warnings"`
-	LintViolations  []string              `json:"lint_violations"`
-	ApplyStatus     ApplyStatus           `json:"apply_status"`
-	PatchCount      int                   `json:"patch_count"`
-	PatchWarnings   []string              `json:"patch_warnings"`
-	PatchViolations []ApplyPatchViolation `json:"patch_violations"`
-	CreatedAt       time.Time             `json:"created_at"`
+	ProposalID                 string                `json:"proposal_id"`
+	ApprovalID                 string                `json:"approval_id"`
+	RunID                      string                `json:"run_id"`
+	TaskID                     string                `json:"task_id"`
+	Domain                     string                `json:"domain"`
+	TargetPath                 string                `json:"target_path"`
+	Operation                  MemoryOperation       `json:"operation"`
+	ProposalSHA256             string                `json:"proposal_sha256"`
+	ApprovalProposalSHA256     string                `json:"approval_proposal_sha256"`
+	ApplyPreviewSHA256         string                `json:"apply_preview_sha256"`
+	ApprovalApplyPreviewSHA256 string                `json:"approval_apply_preview_sha256"`
+	Status                     ApplyPreflightStatus  `json:"status"`
+	Failures                   []string              `json:"failures"`
+	LintStatus                 LintStatus            `json:"lint_status"`
+	LintWarnings               []string              `json:"lint_warnings"`
+	LintViolations             []string              `json:"lint_violations"`
+	ApplyStatus                ApplyStatus           `json:"apply_status"`
+	PatchCount                 int                   `json:"patch_count"`
+	PatchWarnings              []string              `json:"patch_warnings"`
+	PatchViolations            []ApplyPatchViolation `json:"patch_violations"`
+	CreatedAt                  time.Time             `json:"created_at"`
 }
 
 type NewApplyPreflightOptions struct {
@@ -64,26 +68,39 @@ func BuildApplyPreflight(proposal MemoryProposal, approval MemoryApproval, polic
 
 	lint := LintProposal(proposal, policy)
 	applyPreview, _ := BuildApplyDryRunPreview(proposal, policy)
+	proposalSHA256, proposalHashErr := canonicalProposalSHA256(proposal)
+	applyPreviewSHA256, applyPreviewHashErr := canonicalApplyPreviewSHA256(applyPreview)
+
 	preflight := ApplyPreflight{
-		ProposalID:      proposal.ProposalID,
-		ApprovalID:      approval.ApprovalID,
-		RunID:           proposal.RunID,
-		TaskID:          proposal.TaskID,
-		Domain:          proposal.Domain,
-		TargetPath:      proposal.TargetPath,
-		Operation:       proposal.Operation,
-		Status:          ApplyPreflightStatusOK,
-		Failures:        []string{},
-		LintStatus:      lint.Status,
-		LintWarnings:    cloneApprovalStrings(lint.Warnings),
-		LintViolations:  cloneApprovalStrings(lint.Violations),
-		ApplyStatus:     applyPreview.Status,
-		PatchCount:      applyPreview.PatchCount,
-		PatchWarnings:   cloneApprovalStrings(applyPreview.PatchWarnings),
-		PatchViolations: cloneApplyPatchViolations(applyPreview.PatchViolations),
-		CreatedAt:       createdAt.UTC(),
+		ProposalID:                 proposal.ProposalID,
+		ApprovalID:                 approval.ApprovalID,
+		RunID:                      proposal.RunID,
+		TaskID:                     proposal.TaskID,
+		Domain:                     proposal.Domain,
+		TargetPath:                 proposal.TargetPath,
+		Operation:                  proposal.Operation,
+		ProposalSHA256:             proposalSHA256,
+		ApprovalProposalSHA256:     approval.ProposalSHA256,
+		ApplyPreviewSHA256:         applyPreviewSHA256,
+		ApprovalApplyPreviewSHA256: approval.ApplyPreviewSHA256,
+		Status:                     ApplyPreflightStatusOK,
+		Failures:                   []string{},
+		LintStatus:                 lint.Status,
+		LintWarnings:               cloneApprovalStrings(lint.Warnings),
+		LintViolations:             cloneApprovalStrings(lint.Violations),
+		ApplyStatus:                applyPreview.Status,
+		PatchCount:                 applyPreview.PatchCount,
+		PatchWarnings:              cloneApprovalStrings(applyPreview.PatchWarnings),
+		PatchViolations:            cloneApplyPatchViolations(applyPreview.PatchViolations),
+		CreatedAt:                  createdAt.UTC(),
 	}
 
+	if proposalHashErr != nil {
+		preflight.addFailure(fmt.Sprintf("current proposal_sha256 unavailable: %v", proposalHashErr))
+	}
+	if applyPreviewHashErr != nil {
+		preflight.addFailure(fmt.Sprintf("current apply_preview_sha256 unavailable: %v", applyPreviewHashErr))
+	}
 	if err := approval.Validate(); err != nil {
 		preflight.addFailure(fmt.Sprintf("approval artifact invalid: %v", err))
 	}
@@ -104,6 +121,12 @@ func BuildApplyPreflight(proposal MemoryProposal, approval MemoryApproval, polic
 	}
 	if approval.Operation != proposal.Operation {
 		preflight.addFailure(fmt.Sprintf("approval operation %q does not match proposal operation %q", approval.Operation, proposal.Operation))
+	}
+	if approval.ProposalSHA256 != proposalSHA256 {
+		preflight.addFailure(fmt.Sprintf("approval proposal_sha256 %q does not match current proposal_sha256 %q", approval.ProposalSHA256, proposalSHA256))
+	}
+	if approval.ApplyPreviewSHA256 != applyPreviewSHA256 {
+		preflight.addFailure(fmt.Sprintf("approval apply_preview_sha256 %q does not match current apply_preview_sha256 %q", approval.ApplyPreviewSHA256, applyPreviewSHA256))
 	}
 	if approval.Decision != DecisionApproved {
 		preflight.addFailure(fmt.Sprintf("approval decision must be %q, got %q", DecisionApproved, approval.Decision))

@@ -18,24 +18,26 @@ const (
 )
 
 type MemoryApproval struct {
-	ApprovalID      string                `json:"approval_id"`
-	ProposalID      string                `json:"proposal_id"`
-	RunID           string                `json:"run_id"`
-	TaskID          string                `json:"task_id"`
-	Domain          string                `json:"domain"`
-	TargetPath      string                `json:"target_path"`
-	Operation       MemoryOperation       `json:"operation"`
-	Reviewer        string                `json:"reviewer"`
-	Decision        ApprovalDecision      `json:"decision"`
-	Reason          string                `json:"reason"`
-	LintStatus      LintStatus            `json:"lint_status"`
-	LintWarnings    []string              `json:"lint_warnings"`
-	LintViolations  []string              `json:"lint_violations"`
-	ApplyStatus     ApplyStatus           `json:"apply_status"`
-	PatchCount      int                   `json:"patch_count"`
-	PatchWarnings   []string              `json:"patch_warnings"`
-	PatchViolations []ApplyPatchViolation `json:"patch_violations"`
-	CreatedAt       time.Time             `json:"created_at"`
+	ApprovalID         string                `json:"approval_id"`
+	ProposalID         string                `json:"proposal_id"`
+	ProposalSHA256     string                `json:"proposal_sha256"`
+	ApplyPreviewSHA256 string                `json:"apply_preview_sha256"`
+	RunID              string                `json:"run_id"`
+	TaskID             string                `json:"task_id"`
+	Domain             string                `json:"domain"`
+	TargetPath         string                `json:"target_path"`
+	Operation          MemoryOperation       `json:"operation"`
+	Reviewer           string                `json:"reviewer"`
+	Decision           ApprovalDecision      `json:"decision"`
+	Reason             string                `json:"reason"`
+	LintStatus         LintStatus            `json:"lint_status"`
+	LintWarnings       []string              `json:"lint_warnings"`
+	LintViolations     []string              `json:"lint_violations"`
+	ApplyStatus        ApplyStatus           `json:"apply_status"`
+	PatchCount         int                   `json:"patch_count"`
+	PatchWarnings      []string              `json:"patch_warnings"`
+	PatchViolations    []ApplyPatchViolation `json:"patch_violations"`
+	CreatedAt          time.Time             `json:"created_at"`
 }
 
 type NewApprovalOptions struct {
@@ -58,26 +60,38 @@ func BuildApproval(proposal MemoryProposal, policy *MemoryPolicy, opts NewApprov
 	}
 
 	lint := LintProposal(proposal, policy)
+	proposalSHA256, err := canonicalProposalSHA256(proposal)
+	if err != nil {
+		return MemoryApproval{}, fmt.Errorf("hash memory proposal: %w", err)
+	}
+
 	applyPreview, _ := BuildApplyDryRunPreview(proposal, policy)
+	applyPreviewSHA256, err := canonicalApplyPreviewSHA256(applyPreview)
+	if err != nil {
+		return MemoryApproval{}, fmt.Errorf("hash apply preview: %w", err)
+	}
+
 	approval := MemoryApproval{
-		ApprovalID:      approvalID,
-		ProposalID:      proposal.ProposalID,
-		RunID:           proposal.RunID,
-		TaskID:          proposal.TaskID,
-		Domain:          proposal.Domain,
-		TargetPath:      proposal.TargetPath,
-		Operation:       proposal.Operation,
-		Reviewer:        strings.TrimSpace(opts.Reviewer),
-		Decision:        ApprovalDecision(strings.TrimSpace(string(opts.Decision))),
-		Reason:          strings.TrimSpace(opts.Reason),
-		LintStatus:      lint.Status,
-		LintWarnings:    cloneApprovalStrings(lint.Warnings),
-		LintViolations:  cloneApprovalStrings(lint.Violations),
-		ApplyStatus:     applyPreview.Status,
-		PatchCount:      applyPreview.PatchCount,
-		PatchWarnings:   cloneApprovalStrings(applyPreview.PatchWarnings),
-		PatchViolations: cloneApplyPatchViolations(applyPreview.PatchViolations),
-		CreatedAt:       createdAt.UTC(),
+		ApprovalID:         approvalID,
+		ProposalID:         proposal.ProposalID,
+		ProposalSHA256:     proposalSHA256,
+		ApplyPreviewSHA256: applyPreviewSHA256,
+		RunID:              proposal.RunID,
+		TaskID:             proposal.TaskID,
+		Domain:             proposal.Domain,
+		TargetPath:         proposal.TargetPath,
+		Operation:          proposal.Operation,
+		Reviewer:           strings.TrimSpace(opts.Reviewer),
+		Decision:           ApprovalDecision(strings.TrimSpace(string(opts.Decision))),
+		Reason:             strings.TrimSpace(opts.Reason),
+		LintStatus:         lint.Status,
+		LintWarnings:       cloneApprovalStrings(lint.Warnings),
+		LintViolations:     cloneApprovalStrings(lint.Violations),
+		ApplyStatus:        applyPreview.Status,
+		PatchCount:         applyPreview.PatchCount,
+		PatchWarnings:      cloneApprovalStrings(applyPreview.PatchWarnings),
+		PatchViolations:    cloneApplyPatchViolations(applyPreview.PatchViolations),
+		CreatedAt:          createdAt.UTC(),
 	}
 
 	if err := approval.Validate(); err != nil {
@@ -102,6 +116,8 @@ func (a MemoryApproval) Validate() error {
 
 	requireNonEmpty("approval_id", a.ApprovalID)
 	requireNonEmpty("proposal_id", a.ProposalID)
+	requireNonEmpty("proposal_sha256", a.ProposalSHA256)
+	requireNonEmpty("apply_preview_sha256", a.ApplyPreviewSHA256)
 	requireNonEmpty("run_id", a.RunID)
 	requireNonEmpty("task_id", a.TaskID)
 	requireNonEmpty("domain", a.Domain)

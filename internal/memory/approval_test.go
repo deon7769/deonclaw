@@ -47,6 +47,25 @@ func TestBuildApprovalApprovedWithLintOK(t *testing.T) {
 		t.Fatalf("patch_violations = %#v, want none", approval.PatchViolations)
 	}
 
+	expectedProposalSHA256, err := canonicalProposalSHA256(proposal)
+	if err != nil {
+		t.Fatalf("canonicalProposalSHA256() error = %v", err)
+	}
+	if approval.ProposalSHA256 != expectedProposalSHA256 {
+		t.Fatalf("proposal_sha256 = %q, want %q", approval.ProposalSHA256, expectedProposalSHA256)
+	}
+	applyPreview, err := BuildApplyDryRunPreview(proposal, policy)
+	if err != nil {
+		t.Fatalf("BuildApplyDryRunPreview() error = %v", err)
+	}
+	expectedApplyPreviewSHA256, err := canonicalApplyPreviewSHA256(applyPreview)
+	if err != nil {
+		t.Fatalf("canonicalApplyPreviewSHA256() error = %v", err)
+	}
+	if approval.ApplyPreviewSHA256 != expectedApplyPreviewSHA256 {
+		t.Fatalf("apply_preview_sha256 = %q, want %q", approval.ApplyPreviewSHA256, expectedApplyPreviewSHA256)
+	}
+
 	data, err := approval.JSON()
 	if err != nil {
 		t.Fatalf("approval.JSON() error = %v", err)
@@ -56,6 +75,8 @@ func TestBuildApprovalApprovedWithLintOK(t *testing.T) {
 	}
 	output := string(data)
 	for _, want := range []string{
+		`"proposal_sha256"`,
+		`"apply_preview_sha256"`,
 		`"apply_status"`,
 		`"patch_count"`,
 		`"patch_warnings"`,

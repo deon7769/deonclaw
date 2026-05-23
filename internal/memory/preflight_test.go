@@ -30,6 +30,63 @@ func TestApplyPreflightOKPasses(t *testing.T) {
 	if preflight.PatchCount != 1 {
 		t.Fatalf("patch_count = %d, want 1", preflight.PatchCount)
 	}
+	if preflight.ProposalSHA256 == "" || preflight.ApplyPreviewSHA256 == "" {
+		t.Fatalf("preflight hashes are empty: %#v", preflight)
+	}
+	if preflight.ProposalSHA256 != approval.ProposalSHA256 {
+		t.Fatalf("proposal_sha256 = %q, want approval hash %q", preflight.ProposalSHA256, approval.ProposalSHA256)
+	}
+	if preflight.ApplyPreviewSHA256 != approval.ApplyPreviewSHA256 {
+		t.Fatalf("apply_preview_sha256 = %q, want approval hash %q", preflight.ApplyPreviewSHA256, approval.ApplyPreviewSHA256)
+	}
+	if preflight.ApprovalProposalSHA256 != approval.ProposalSHA256 {
+		t.Fatalf("approval_proposal_sha256 = %q, want %q", preflight.ApprovalProposalSHA256, approval.ProposalSHA256)
+	}
+	if preflight.ApprovalApplyPreviewSHA256 != approval.ApplyPreviewSHA256 {
+		t.Fatalf("approval_apply_preview_sha256 = %q, want %q", preflight.ApprovalApplyPreviewSHA256, approval.ApplyPreviewSHA256)
+	}
+}
+
+func TestApplyPreflightProposalChangedAfterApprovalFails(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyPreflightProposal("mem-preflight-proposal-hash-changed")
+	approval := mustBuildApplyPreflightApproval(t, proposal, policy)
+	proposal.Reason = "Changed after approval."
+
+	preflight := BuildApplyPreflight(proposal, approval, policy, NewApplyPreflightOptions{})
+	assertApplyPreflightFailureContains(t, preflight, "proposal_sha256")
+}
+
+func TestApplyPreflightPatchContentChangedAfterApprovalFails(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyPreflightProposal("mem-preflight-patch-content-changed")
+	approval := mustBuildApplyPreflightApproval(t, proposal, policy)
+	proposal.Patches[0].Content = "changed content\n"
+
+	preflight := BuildApplyPreflight(proposal, approval, policy, NewApplyPreflightOptions{})
+	assertApplyPreflightFailureContains(t, preflight, "proposal_sha256")
+	assertApplyPreflightFailureContains(t, preflight, "apply_preview_sha256")
+}
+
+func TestApplyPreflightPatchTargetChangedAfterApprovalFails(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyPreflightProposal("mem-preflight-patch-target-changed")
+	approval := mustBuildApplyPreflightApproval(t, proposal, policy)
+	proposal.Patches[0].TargetPath = "/vault/mysecondbrain/memory/inbox/run-002.md"
+
+	preflight := BuildApplyPreflight(proposal, approval, policy, NewApplyPreflightOptions{})
+	assertApplyPreflightFailureContains(t, preflight, "proposal_sha256")
+	assertApplyPreflightFailureContains(t, preflight, "apply_preview_sha256")
+}
+
+func TestApplyPreflightApplyPreviewHashMismatchFails(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyPreflightProposal("mem-preflight-apply-preview-hash-mismatch")
+	approval := mustBuildApplyPreflightApproval(t, proposal, policy)
+	approval.ApplyPreviewSHA256 = strings.Repeat("0", 64)
+
+	preflight := BuildApplyPreflight(proposal, approval, policy, NewApplyPreflightOptions{})
+	assertApplyPreflightFailureContains(t, preflight, "apply_preview_sha256")
 }
 
 func TestApplyPreflightApprovalForDifferentProposalFails(t *testing.T) {
@@ -102,7 +159,17 @@ func TestApplyPreflightJSONValid(t *testing.T) {
 		t.Fatalf("preflight JSON is invalid: %s", data)
 	}
 	output := string(data)
-	for _, want := range []string{`"status"`, `"failures"`, `"lint_status"`, `"apply_status"`, `"patch_violations"`} {
+	for _, want := range []string{
+		`"proposal_sha256"`,
+		`"approval_proposal_sha256"`,
+		`"apply_preview_sha256"`,
+		`"approval_apply_preview_sha256"`,
+		`"status"`,
+		`"failures"`,
+		`"lint_status"`,
+		`"apply_status"`,
+		`"patch_violations"`,
+	} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("preflight JSON = %s, want field %s", output, want)
 		}
