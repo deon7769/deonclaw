@@ -19,9 +19,13 @@ For current sequencing, follow AGENTS.md Next implementation order first.
 
 Do not implement apply/OpenCode out of order.
 
-The current safe chain is:
+The current safe apply chain is:
 
 proposal -> lint -> apply dry-run -> approval -> preflight -> backup plan -> backup materialization -> apply
+
+The current safe restore chain is:
+
+backup plan -> backup materialization -> restore dry-run -> restore execute
 
 ## Package boundaries
 
@@ -30,7 +34,7 @@ proposal -> lint -> apply dry-run -> approval -> preflight -> backup plan -> bac
 - internal/workers: external worker adapters
 - internal/runtime: workspace lifecycle
 - internal/policy: path policy
-- internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/apply-execute
+- internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/restore-execute/apply-execute
 - internal/contextpack: scoped context generation
 - internal/domains: domain config
 - internal/store: persistence

@@ -317,6 +317,52 @@ Safety checks:
 - `--output` must not be inside `backup_root`
 - `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
 
+## Restore Execute
+
+`deonctl memory proposal restore-execute` performs the real restore from an approved backup chain:
+
+```bash
+deonctl memory proposal restore-execute \
+  --backup-plan backup-plan.json \
+  --backup-result backup-result.json \
+  --restore-preview restore-preview.json \
+  --output restore-result.json \
+  --confirm-restore
+```
+
+`--confirm-restore` is required.
+
+The command loads the backup plan, backup result, and restore preview.
+
+Before writing or removing any target path, it rebuilds the current restore dry-run from the loaded backup plan and backup result.
+
+Restore execution is blocked unless the loaded restore preview belongs to the same proposal, approval, run, task, domain, and backup root, and matches the current restore dry-run.
+
+For existing original targets, restore execution validates the current `backup_path` SHA-256 against the recorded backup hash before writing any target.
+
+For each restore item:
+
+- if `exists: true`, it copies `backup_path` back to `target_path`, creating target directories when needed
+- if `exists: false`, it removes `target_path` when the file exists
+- if `exists: false` and `target_path` is already absent, it records `skipped_missing`
+
+Restore execution does not remove directories.
+
+Restore execution does not make a Git commit.
+
+The generated `restore-result.json` records each target, backup path, operation, status, restored byte count, and hashes when a backup is restored.
+
+Safety checks:
+
+- `backup_path` must stay inside `backup_root`
+- `backup_path` must not equal `target_path`
+- if a backup file changed after restore dry-run, restore execution fails before writing target files
+- if the loaded restore preview diverges from the current restore dry-run, restore execution fails before writing target files
+- `--output` must not be any backup item `target_path`
+- `--output` must not be any backup item `backup_path`
+- `--output` must not be inside `backup_root`
+- `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
+
 ## Apply Execute
 
 `deonctl memory proposal apply-execute` performs the real memory write for the limited create/append MVP:
@@ -366,7 +412,7 @@ The generated `apply-result.json` records each applied target, operation, status
 
 Apply execution does not make a Git commit.
 
-Apply execution does not implement restore.
+Apply execution does not perform restore; restore uses the separate `restore-execute` command.
 
 Safety checks:
 
@@ -403,4 +449,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, restore dry-run, and real apply for `create`/`append`. It still does not implement real restore, real `update`/`archive` apply, or commit memory changes.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, restore dry-run, restore execute, and real apply for `create`/`append`. It still does not implement real `update`/`archive` apply or commit memory changes.

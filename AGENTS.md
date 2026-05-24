@@ -50,10 +50,10 @@ Implemented:
 - backup materialization
 - real memory apply for create/append
 - restore dry-run
+- restore execute
 
 Not implemented yet:
 
-- restore real
 - real memory apply for update/archive
 - OpenCode worker
 - Docker runtime
@@ -202,6 +202,8 @@ proposal
 ```
 
 Never skip approval, preflight or backup.
+
+Restore execution is a separate safety path and requires a backup plan, backup result, restore dry-run preview and explicit restore confirmation.
 
 ## Memory lifecycle
 

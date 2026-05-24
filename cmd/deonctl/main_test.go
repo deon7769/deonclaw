@@ -1899,6 +1899,192 @@ func TestRunMemoryProposalRestoreRefusesOutputInsideMemoryDomain(t *testing.T) {
 	}
 }
 
+func TestRunMemoryProposalRestoreExecuteExistingTargetRestoresTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIRestoreArtifacts(t, tempDir, targetPath, memory.OperationAppend, "original memory\n")
+	if err := os.WriteFile(targetPath, []byte("changed by apply\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(changed target) error = %v", err)
+	}
+	outputPath := filepath.Join(tempDir, memory.RestoreResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runRestoreExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "restore result written: "+outputPath) {
+		t.Fatalf("stdout = %q, want restore result output", stdout.String())
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "original memory\n" {
+		t.Fatalf("target content = %q, want restored original", got)
+	}
+	result := readRestoreResultFile(t, outputPath)
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(result.Items))
+	}
+	if got := result.Items[0].Status; got != memory.RestoreResultStatusRestored {
+		t.Fatalf("status = %q, want %q", got, memory.RestoreResultStatusRestored)
+	}
+}
+
+func TestRunMemoryProposalRestoreExecuteMissingOriginalRemovesTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIRestoreArtifacts(t, tempDir, targetPath, memory.OperationCreate, "")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("created by apply\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(created target) error = %v", err)
+	}
+	outputPath := filepath.Join(tempDir, memory.RestoreResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runRestoreExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target exists after restore removal: %v", err)
+	}
+	result := readRestoreResultFile(t, outputPath)
+	if got := result.Items[0].Status; got != memory.RestoreResultStatusRemoved {
+		t.Fatalf("status = %q, want %q", got, memory.RestoreResultStatusRemoved)
+	}
+}
+
+func TestRunMemoryProposalRestoreExecuteRequiresConfirmRestore(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIRestoreArtifacts(t, tempDir, targetPath, memory.OperationAppend, "original memory\n")
+	if err := os.WriteFile(targetPath, []byte("changed by apply\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(changed target) error = %v", err)
+	}
+	outputPath := filepath.Join(tempDir, memory.RestoreResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runRestoreExecute(t, artifacts, outputPath, false, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --confirm-restore") {
+		t.Fatalf("stderr = %q, want missing confirm-restore", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("restore result was written without confirm: %v", err)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "changed by apply\n" {
+		t.Fatalf("target content = %q, want unchanged without confirm", got)
+	}
+}
+
+func TestRunMemoryProposalRestoreExecuteCorruptedBackupFailsWithoutChangingTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIRestoreArtifacts(t, tempDir, targetPath, memory.OperationAppend, "original memory\n")
+	if err := os.WriteFile(targetPath, []byte("changed by apply\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(changed target) error = %v", err)
+	}
+	if err := os.WriteFile(artifacts.backupPlan.Items[0].BackupPath, []byte("corrupted backup\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(corrupted backup) error = %v", err)
+	}
+	outputPath := filepath.Join(tempDir, memory.RestoreResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runRestoreExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "backup_path") || !strings.Contains(stderr.String(), "sha256") {
+		t.Fatalf("stderr = %q, want backup hash failure", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("restore result was written after backup hash failure: %v", err)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "changed by apply\n" {
+		t.Fatalf("target content = %q, want unchanged after restore failure", got)
+	}
+}
+
+func TestRunMemoryProposalRestoreExecutePreviewDivergenceFails(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIRestoreArtifacts(t, tempDir, targetPath, memory.OperationAppend, "original memory\n")
+	if err := os.WriteFile(targetPath, []byte("changed by apply\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(changed target) error = %v", err)
+	}
+	preview := readRestorePreviewFile(t, artifacts.restorePreviewPath)
+	preview.Items[0].Action = memory.RestorePreviewActionRemoveIfExists
+	artifacts.restorePreviewPath = writeRawJSONFile(t, tempDir, "restore-preview-diverged.json", preview)
+	outputPath := filepath.Join(tempDir, memory.RestoreResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runRestoreExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "restore-preview") || !strings.Contains(stderr.String(), "diverged") {
+		t.Fatalf("stderr = %q, want restore-preview divergence", stderr.String())
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "changed by apply\n" {
+		t.Fatalf("target content = %q, want unchanged after preview divergence", got)
+	}
+}
+
+func TestRunMemoryProposalRestoreExecuteRefusesOutputAtTargetPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIRestoreArtifacts(t, tempDir, targetPath, memory.OperationAppend, "original memory\n")
+	if err := os.WriteFile(targetPath, []byte("changed by apply\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(changed target) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runRestoreExecute(t, artifacts, targetPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write restore result artifact to target_path") {
+		t.Fatalf("stderr = %q, want target refusal", stderr.String())
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "changed by apply\n" {
+		t.Fatalf("target content = %q, want unchanged after output refusal", got)
+	}
+}
+
+func TestRunMemoryProposalRestoreExecuteRefusesOutputInsideBackupRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIRestoreArtifacts(t, tempDir, targetPath, memory.OperationAppend, "original memory\n")
+	if err := os.WriteFile(targetPath, []byte("changed by apply\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(changed target) error = %v", err)
+	}
+	outputPath := filepath.Join(artifacts.backupPlan.BackupRoot, "restore-result.json")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runRestoreExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write restore result artifact inside backup_root") {
+		t.Fatalf("stderr = %q, want backup_root refusal", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("output inside backup_root was written unexpectedly: %v", err)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "changed by apply\n" {
+		t.Fatalf("target content = %q, want unchanged after output refusal", got)
+	}
+}
+
 func TestRunMemoryProposalApplyExecuteCreateWritesResult(t *testing.T) {
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "memory", "created.md")
@@ -2588,6 +2774,23 @@ func readRestorePreviewFile(t *testing.T, path string) memory.RestorePreview {
 	return preview
 }
 
+func readRestoreResultFile(t *testing.T, path string) memory.RestoreResult {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(restore result) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("restore result output is invalid JSON: %s", data)
+	}
+	var result memory.RestoreResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal(restore result) error = %v", err)
+	}
+	return result
+}
+
 func runBackupPlan(t *testing.T, proposalPath string, approvalPath string, outputPath string, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
 	t.Helper()
 	return run([]string{
@@ -2619,9 +2822,10 @@ func runBackupMaterialize(t *testing.T, backupPlanPath string, outputPath string
 }
 
 type cliRestoreArtifacts struct {
-	backupPlanPath   string
-	backupResultPath string
-	backupPlan       memory.BackupPlan
+	backupPlanPath     string
+	backupResultPath   string
+	restorePreviewPath string
+	backupPlan         memory.BackupPlan
 }
 
 func buildCLIRestoreArtifacts(t *testing.T, tempDir string, targetPath string, operation memory.MemoryOperation, initialContent string) cliRestoreArtifacts {
@@ -2639,11 +2843,31 @@ func buildCLIRestoreArtifacts(t *testing.T, tempDir string, targetPath string, o
 	if err != nil {
 		t.Fatalf("MaterializeBackup() error = %v", err)
 	}
-	return cliRestoreArtifacts{
-		backupPlanPath:   writeBackupPlanFile(t, tempDir, plan),
-		backupResultPath: writeBackupResultFile(t, tempDir, backupResult),
-		backupPlan:       plan,
+	restorePreview, err := memory.BuildRestorePreview(plan, backupResult, memory.NewRestorePreviewOptions{
+		CreatedAt: time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("BuildRestorePreview() error = %v", err)
 	}
+	return cliRestoreArtifacts{
+		backupPlanPath:     writeBackupPlanFile(t, tempDir, plan),
+		backupResultPath:   writeBackupResultFile(t, tempDir, backupResult),
+		restorePreviewPath: writeRestorePreviewFile(t, tempDir, restorePreview),
+		backupPlan:         plan,
+	}
+}
+
+func writeRestorePreviewFile(t *testing.T, tempDir string, preview memory.RestorePreview) string {
+	t.Helper()
+	path := filepath.Join(tempDir, "restore-preview-input.json")
+	data, err := preview.JSON()
+	if err != nil {
+		t.Fatalf("restore preview JSON: %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write restore preview file: %v", err)
+	}
+	return path
 }
 
 func runRestoreDryRun(t *testing.T, artifacts cliRestoreArtifacts, outputPath string, dryRun bool, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
@@ -2661,6 +2885,27 @@ func runRestoreDryRun(t *testing.T, artifacts cliRestoreArtifacts, outputPath st
 	}
 	if dryRun {
 		args = append(args, "--dry-run")
+	}
+	return run(args, stdout, stderr)
+}
+
+func runRestoreExecute(t *testing.T, artifacts cliRestoreArtifacts, outputPath string, confirm bool, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
+	t.Helper()
+	args := []string{
+		"memory",
+		"proposal",
+		"restore-execute",
+		"--backup-plan",
+		artifacts.backupPlanPath,
+		"--backup-result",
+		artifacts.backupResultPath,
+		"--restore-preview",
+		artifacts.restorePreviewPath,
+		"--output",
+		outputPath,
+	}
+	if confirm {
+		args = append(args, "--confirm-restore")
 	}
 	return run(args, stdout, stderr)
 }
