@@ -273,6 +273,8 @@ Safety checks:
 - `backup_path` must not equal `target_path`
 - if a target changed after backup-plan generation, materialization fails before copying that item
 - `--output` must not be any backup item `target_path`
+- `--output` must not be any backup item `backup_path`
+- `--output` must not be inside `backup_root`
 - `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
 
 ## Summary Status

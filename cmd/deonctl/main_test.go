@@ -1606,6 +1606,69 @@ func TestRunMemoryProposalBackupMaterializeRefusesOutputAtTargetPath(t *testing.
 	}
 }
 
+func TestRunMemoryProposalBackupMaterializeRefusesOutputAtBackupPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	content := []byte("existing content\n")
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := buildCLIBackupPlan(t, tempDir, targetPath, memory.OperationAppend)
+	planPath := writeBackupPlanFile(t, tempDir, plan)
+	backupPath := plan.Items[0].BackupPath
+	sentinel := []byte("already backed up\n")
+	if err := os.MkdirAll(filepath.Dir(backupPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(backup dir) error = %v", err)
+	}
+	if err := os.WriteFile(backupPath, sentinel, 0o600); err != nil {
+		t.Fatalf("WriteFile(backup sentinel) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupMaterialize(t, planPath, backupPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write backup result artifact to backup_path") {
+		t.Fatalf("stderr = %q, want backup_path refusal", stderr.String())
+	}
+	if got := string(mustReadCLIFile(t, backupPath)); got != string(sentinel) {
+		t.Fatalf("backup_path content = %q, want sentinel unchanged", got)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != string(content) {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestRunMemoryProposalBackupMaterializeRefusesOutputInsideBackupRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	content := []byte("existing content\n")
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := buildCLIBackupPlan(t, tempDir, targetPath, memory.OperationAppend)
+	planPath := writeBackupPlanFile(t, tempDir, plan)
+	outputPath := filepath.Join(plan.BackupRoot, "backup-result.json")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupMaterialize(t, planPath, outputPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write backup result artifact inside backup_root") {
+		t.Fatalf("stderr = %q, want backup_root refusal", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("output inside backup_root was written unexpectedly: %v", err)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != string(content) {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
 func TestRunMemoryProposalBackupMaterializeRefusesOutputInsideMemoryDomain(t *testing.T) {
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "target.md")

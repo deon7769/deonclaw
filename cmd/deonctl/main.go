@@ -929,6 +929,14 @@ func runMemoryProposalBackupMaterialize(opts memoryProposalBackupMaterializeOpti
 		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: refusing to write backup result artifact to target_path %q\n", opts.outputPath)
 		return 1
 	}
+	if outputConflictsWithBackupPlanBackupPath(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: refusing to write backup result artifact to backup_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesBackupRoot(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: refusing to write backup result artifact inside backup_root %q\n", opts.outputPath)
+		return 1
+	}
 	if outputTouchesMemoryDomain(opts.outputPath, nil) {
 		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: refusing to write backup result artifact inside memory domain %q\n", opts.outputPath)
 		return 1
@@ -958,6 +966,22 @@ func outputConflictsWithBackupPlanTarget(outputPath string, plan memory.BackupPl
 		}
 	}
 	return false
+}
+
+func outputConflictsWithBackupPlanBackupPath(outputPath string, plan memory.BackupPlan) bool {
+	for _, item := range plan.Items {
+		if sameCleanPath(outputPath, item.BackupPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func outputTouchesBackupRoot(outputPath string, plan memory.BackupPlan) bool {
+	if strings.TrimSpace(plan.BackupRoot) == "" {
+		return false
+	}
+	return cleanPathWithinRoot(outputPath, plan.BackupRoot)
 }
 
 func writeBackupResult(outputPath string, result memory.BackupResult) error {
