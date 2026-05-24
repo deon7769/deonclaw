@@ -39,6 +39,7 @@ Usage:
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
   deonctl memory proposal approve --proposal <path> --policy <path> --reviewer <name> --decision approved|rejected --reason <text> --output <path>
   deonctl memory proposal apply-preflight --proposal <path> --approval <path> --policy <path> [--output <path>]
+  deonctl memory proposal backup-plan --proposal <path> --approval <path> --policy <path> --backup-root <path> --output <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -179,6 +180,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMemoryProposalApplyPreflight(opts, stdout, stderr)
+		case "backup-plan":
+			opts, err := parseMemoryProposalBackupPlanOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalBackupPlan(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -745,6 +754,128 @@ func printMemoryProposalApplyPreflight(stdout io.Writer, preflight memory.ApplyP
 
 func writeApplyPreflight(outputPath string, preflight memory.ApplyPreflight) error {
 	data, err := preflight.JSON()
+	if err != nil {
+		return err
+	}
+	outputDir := filepath.Dir(outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(outputPath, data, 0o600)
+}
+
+type memoryProposalBackupPlanOptions struct {
+	proposalPath string
+	approvalPath string
+	policyPath   string
+	backupRoot   string
+	outputPath   string
+}
+
+func parseMemoryProposalBackupPlanOptions(args []string) (memoryProposalBackupPlanOptions, error) {
+	var opts memoryProposalBackupPlanOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--proposal":
+			if i+1 >= len(args) {
+				return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalPath = args[i+1]
+			i++
+		case "--approval":
+			if i+1 >= len(args) {
+				return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--backup-root":
+			if i+1 >= len(args) {
+				return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing value for --backup-root")
+			}
+			opts.backupRoot = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return memoryProposalBackupPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.proposalPath == "" {
+		return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.approvalPath == "" {
+		return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.policyPath == "" {
+		return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.backupRoot == "" {
+		return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing --backup-root")
+	}
+	if opts.outputPath == "" {
+		return memoryProposalBackupPlanOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalBackupPlan(opts memoryProposalBackupPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal, err := memory.LoadProposalFromFile(opts.proposalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-plan failed: %v\n", err)
+		return 1
+	}
+	approval, err := memory.LoadApprovalFromFile(opts.approvalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-plan failed: %v\n", err)
+		return 1
+	}
+	policy, err := memory.LoadPolicyFromFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-plan failed: %v\n", err)
+		return 1
+	}
+	if outputConflictsWithApprovalTarget(opts.outputPath, proposal) {
+		fmt.Fprintf(stderr, "memory proposal backup-plan failed: refusing to write backup plan artifact to target_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesMemoryDomain(opts.outputPath, policy) {
+		fmt.Fprintf(stderr, "memory proposal backup-plan failed: refusing to write backup plan artifact inside memory domain %q\n", opts.outputPath)
+		return 1
+	}
+
+	plan, err := memory.BuildBackupPlan(proposal, approval, policy, memory.NewBackupPlanOptions{
+		BackupRoot: opts.backupRoot,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-plan failed: %v\n", err)
+		return 1
+	}
+	if err := writeBackupPlan(opts.outputPath, plan); err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-plan failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "backup plan written: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "proposal_id: %s\n", plan.ProposalID)
+	fmt.Fprintf(stdout, "approval_id: %s\n", plan.ApprovalID)
+	fmt.Fprintf(stdout, "entries: %d\n", len(plan.Entries))
+	return 0
+}
+
+func writeBackupPlan(outputPath string, plan memory.BackupPlan) error {
+	data, err := plan.JSON()
 	if err != nil {
 		return err
 	}

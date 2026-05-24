@@ -1244,6 +1244,275 @@ func TestRunMemoryProposalApplyPreflightRefusesOutputInsideMemoryDomain(t *testi
 	}
 }
 
+func TestRunMemoryProposalBackupPlanExistingTargetWritesPlan(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	content := []byte("existing content\n")
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-backup-existing",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Backup existing target.",
+		CreatedAt:  time.Date(2026, 5, 23, 15, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "new content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+	outputPath := filepath.Join(tempDir, memory.BackupPlanJSONArtifactName)
+	backupRoot := filepath.Join(tempDir, "backups")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupPlan(t, proposalPath, approvalPath, backupRoot, outputPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "entries: 1") {
+		t.Fatalf("stdout = %q, want entries", stdout.String())
+	}
+
+	plan := readBackupPlanFile(t, outputPath)
+	if len(plan.Entries) != 1 {
+		t.Fatalf("entries = %d, want 1", len(plan.Entries))
+	}
+	entry := plan.Entries[0]
+	if !entry.Exists {
+		t.Fatalf("exists = false, want true")
+	}
+	if entry.SHA256 == nil || *entry.SHA256 == "" {
+		t.Fatalf("sha256 is empty: %#v", entry)
+	}
+	if entry.SizeBytes == nil || *entry.SizeBytes != int64(len(content)) {
+		t.Fatalf("size_bytes = %v, want %d", entry.SizeBytes, len(content))
+	}
+	if len(plan.RestorePlan.Entries) != 1 {
+		t.Fatalf("restore entries = %d, want 1", len(plan.RestorePlan.Entries))
+	}
+	if _, err := os.Stat(entry.BackupPath); !os.IsNotExist(err) {
+		t.Fatalf("backup path was written unexpectedly: %v", err)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != string(content) {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestRunMemoryProposalBackupPlanMissingTargetWritesNotExists(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "missing.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-backup-missing",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationCreate,
+		Reason:     "Backup missing target.",
+		CreatedAt:  time.Date(2026, 5, 23, 15, 5, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationCreate, Content: "new content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+	outputPath := filepath.Join(tempDir, memory.BackupPlanJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupPlan(t, proposalPath, approvalPath, filepath.Join(tempDir, "backups"), outputPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	plan := readBackupPlanFile(t, outputPath)
+	entry := plan.Entries[0]
+	if entry.Exists {
+		t.Fatalf("exists = true, want false")
+	}
+	if entry.SHA256 != nil || entry.SizeBytes != nil {
+		t.Fatalf("entry = %#v, want no hash/size for missing target", entry)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target was written unexpectedly: %v", err)
+	}
+}
+
+func TestRunMemoryProposalBackupPlanMultiplePatches(t *testing.T) {
+	tempDir := t.TempDir()
+	first := filepath.Join(tempDir, "first.md")
+	second := filepath.Join(tempDir, "second.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-backup-multiple",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: first,
+		Operation:  memory.OperationAppend,
+		Reason:     "Backup multiple targets.",
+		CreatedAt:  time.Date(2026, 5, 23, 15, 10, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: first, Operation: memory.OperationAppend, Content: "first\n"},
+			{TargetPath: second, Operation: memory.OperationCreate, Content: "second\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+	outputPath := filepath.Join(tempDir, memory.BackupPlanJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupPlan(t, proposalPath, approvalPath, filepath.Join(tempDir, "backups"), outputPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	plan := readBackupPlanFile(t, outputPath)
+	if len(plan.Entries) != 2 {
+		t.Fatalf("entries = %d, want 2", len(plan.Entries))
+	}
+}
+
+func TestRunMemoryProposalBackupPlanPreflightFailureBlocksOutput(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-backup-preflight-failed",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Backup preflight failed.",
+		CreatedAt:  time.Date(2026, 5, 23, 15, 15, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	approval.Decision = memory.DecisionRejected
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+	outputPath := filepath.Join(tempDir, memory.BackupPlanJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupPlan(t, proposalPath, approvalPath, filepath.Join(tempDir, "backups"), outputPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "apply preflight failed") {
+		t.Fatalf("stderr = %q, want preflight failure", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("backup plan output exists after preflight failure: %v", err)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target was written unexpectedly: %v", err)
+	}
+}
+
+func TestRunMemoryProposalBackupPlanRefusesOutputAtTargetPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-backup-output-target",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Backup output target.",
+		CreatedAt:  time.Date(2026, 5, 23, 15, 20, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupPlan(t, proposalPath, approvalPath, filepath.Join(tempDir, "backups"), targetPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write backup plan artifact to target_path") {
+		t.Fatalf("stderr = %q, want target refusal", stderr.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target was written unexpectedly: %v", err)
+	}
+}
+
+func TestRunMemoryProposalBackupPlanRefusesOutputInsideMemoryDomain(t *testing.T) {
+	tempDir := t.TempDir()
+	proposal := testCLIPreflightProposal(t, tempDir, "mem-cli-backup-output-memory-domain")
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupPlan(t, proposalPath, approvalPath, filepath.Join(tempDir, "backups"), "/vault/mysecondbrain/backup-plan.json", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write backup plan artifact inside memory domain") {
+		t.Fatalf("stderr = %q, want memory domain refusal", stderr.String())
+	}
+}
+
+func TestRunMemoryProposalBackupPlanRejectsBackupRootTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-backup-root-traversal",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  memory.OperationAppend,
+		Reason:     "Backup root traversal.",
+		CreatedAt:  time.Date(2026, 5, 23, 15, 25, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: memory.OperationAppend, Content: "content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	proposalPath := writeMemoryProposalFile(t, tempDir, proposal)
+	approvalPath := writeMemoryApprovalFile(t, tempDir, approval)
+	outputPath := filepath.Join(tempDir, memory.BackupPlanJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupPlan(t, proposalPath, approvalPath, tempDir+string(filepath.Separator)+".."+string(filepath.Separator)+"escape", outputPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "path traversal") {
+		t.Fatalf("stderr = %q, want traversal failure", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("backup plan output exists after traversal failure: %v", err)
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1674,6 +1943,51 @@ func writeMemoryApprovalFile(t *testing.T, dir string, approval memory.MemoryApp
 		t.Fatalf("write memory approval file: %v", err)
 	}
 	return path
+}
+
+func readBackupPlanFile(t *testing.T, path string) memory.BackupPlan {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(backup plan) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("backup plan output is invalid JSON: %s", data)
+	}
+	var plan memory.BackupPlan
+	if err := json.Unmarshal(data, &plan); err != nil {
+		t.Fatalf("Unmarshal(backup plan) error = %v", err)
+	}
+	return plan
+}
+
+func runBackupPlan(t *testing.T, proposalPath string, approvalPath string, backupRoot string, outputPath string, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
+	t.Helper()
+	return run([]string{
+		"memory",
+		"proposal",
+		"backup-plan",
+		"--proposal",
+		proposalPath,
+		"--approval",
+		approvalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--backup-root",
+		backupRoot,
+		"--output",
+		outputPath,
+	}, stdout, stderr)
+}
+
+func mustReadCLIFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	return data
 }
 
 func readApplyPreflightFile(t *testing.T, path string) memory.ApplyPreflight {
