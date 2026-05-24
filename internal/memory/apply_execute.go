@@ -18,14 +18,25 @@ const (
 	ApplyResultStatusAppended ApplyResultItemStatus = "appended"
 )
 
+type ApplyResultStatus string
+
+const (
+	ApplyResultStatusSucceeded     ApplyResultStatus = "succeeded"
+	ApplyResultStatusFailed        ApplyResultStatus = "failed"
+	ApplyResultStatusPartialFailed ApplyResultStatus = "partial_failed"
+)
+
 type ApplyResult struct {
-	ProposalID string            `json:"proposal_id"`
-	ApprovalID string            `json:"approval_id"`
-	RunID      string            `json:"run_id"`
-	TaskID     string            `json:"task_id"`
-	Domain     string            `json:"domain"`
-	Items      []ApplyResultItem `json:"items"`
-	CreatedAt  time.Time         `json:"created_at"`
+	ProposalID string                 `json:"proposal_id"`
+	ApprovalID string                 `json:"approval_id"`
+	RunID      string                 `json:"run_id"`
+	TaskID     string                 `json:"task_id"`
+	Domain     string                 `json:"domain"`
+	Status     ApplyResultStatus      `json:"status"`
+	Items      []ApplyResultItem      `json:"items"`
+	FailedItem *ApplyResultFailedItem `json:"failed_item,omitempty"`
+	Error      string                 `json:"error,omitempty"`
+	CreatedAt  time.Time              `json:"created_at"`
 }
 
 type ApplyResultItem struct {
@@ -34,6 +45,34 @@ type ApplyResultItem struct {
 	Status       ApplyResultItemStatus `json:"status"`
 	BytesWritten int64                 `json:"bytes_written"`
 	SHA256       string                `json:"sha256"`
+}
+
+type ApplyResultFailedItem struct {
+	TargetPath string          `json:"target_path"`
+	Operation  MemoryOperation `json:"operation"`
+	Error      string          `json:"error,omitempty"`
+}
+
+type ApplyExecutionError struct {
+	Result ApplyResult
+	Err    error
+}
+
+func (e *ApplyExecutionError) Error() string {
+	if e == nil {
+		return ""
+	}
+	if e.Err != nil {
+		return e.Err.Error()
+	}
+	return "apply execution failed"
+}
+
+func (e *ApplyExecutionError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Err
 }
 
 type NewApplyExecuteOptions struct {
@@ -58,11 +97,6 @@ func ParseBackupResultJSON(data []byte) (BackupResult, error) {
 }
 
 func ExecuteApply(proposal MemoryProposal, approval MemoryApproval, policy *MemoryPolicy, backupPlan BackupPlan, backupResult BackupResult, opts NewApplyExecuteOptions) (ApplyResult, error) {
-	prepared, err := prepareApplyExecution(proposal, approval, policy, backupPlan, backupResult)
-	if err != nil {
-		return ApplyResult{}, err
-	}
-
 	createdAt := opts.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = time.Now().UTC()
@@ -74,16 +108,17 @@ func ExecuteApply(proposal MemoryProposal, approval MemoryApproval, policy *Memo
 		RunID:      proposal.RunID,
 		TaskID:     proposal.TaskID,
 		Domain:     proposal.Domain,
+		Status:     ApplyResultStatusFailed,
 		Items:      []ApplyResultItem{},
 		CreatedAt:  createdAt.UTC(),
 	}
 
-	items, err := executeApplyStaged(prepared, opts)
+	prepared, err := prepareApplyExecution(proposal, approval, policy, backupPlan, backupResult)
 	if err != nil {
-		return ApplyResult{}, err
+		return applyExecutionFailure(result, ApplyResultStatusFailed, nil, err)
 	}
-	result.Items = items
-	return result, nil
+
+	return executeApplyStaged(prepared, opts, result)
 }
 
 func (r ApplyResult) JSON() ([]byte, error) {
@@ -347,7 +382,7 @@ func executeApplyAction(action ApplyPreviewAction, planItem BackupItem) (int64, 
 	return staged.bytesWritten, staged.status, nil
 }
 
-func executeApplyStaged(prepared []preparedApplyItem, opts NewApplyExecuteOptions) ([]ApplyResultItem, error) {
+func executeApplyStaged(prepared []preparedApplyItem, opts NewApplyExecuteOptions, result ApplyResult) (ApplyResult, error) {
 	staged := make([]stagedApplyItem, 0, len(prepared))
 	defer func() {
 		cleanupStagedApplyItems(staged)
@@ -356,39 +391,75 @@ func executeApplyStaged(prepared []preparedApplyItem, opts NewApplyExecuteOption
 	for _, item := range prepared {
 		stagedItem, err := prepareApplyActionTemp(item, opts.atomicWriteOptionsByTarget)
 		if err != nil {
-			return nil, err
+			return applyExecutionFailure(result, ApplyResultStatusFailed, failedApplyResultItemFromAction(item.action, err), err)
 		}
 		staged = append(staged, stagedItem)
 	}
 	for _, item := range staged {
 		if err := validateStagedApplyTemp(item); err != nil {
-			return nil, err
+			return applyExecutionFailure(result, ApplyResultStatusFailed, failedApplyResultItemFromAction(item.action, err), err)
 		}
 	}
 	for _, item := range staged {
 		if err := validateStagedApplyTarget(item); err != nil {
-			return nil, err
+			return applyExecutionFailure(result, ApplyResultStatusFailed, failedApplyResultItemFromAction(item.action, err), err)
 		}
 	}
 
-	resultItems := make([]ApplyResultItem, 0, len(staged))
+	result.Items = make([]ApplyResultItem, 0, len(staged))
 	for index := range staged {
 		if err := renameStagedApplyItem(&staged[index]); err != nil {
-			return nil, err
+			status := ApplyResultStatusFailed
+			if len(result.Items) > 0 {
+				status = ApplyResultStatusPartialFailed
+			}
+			return applyExecutionFailure(result, status, failedApplyResultItemFromAction(staged[index].action, err), err)
 		}
 		sha256, err := fileSHA256(staged[index].action.TargetPath)
 		if err != nil {
-			return nil, err
+			result.Items = append(result.Items, applyResultItemFromStaged(staged[index], ""))
+			return applyExecutionFailure(result, ApplyResultStatusPartialFailed, failedApplyResultItemFromAction(staged[index].action, err), err)
 		}
-		resultItems = append(resultItems, ApplyResultItem{
-			TargetPath:   staged[index].action.TargetPath,
-			Operation:    staged[index].action.Operation,
-			Status:       staged[index].status,
-			BytesWritten: staged[index].bytesWritten,
-			SHA256:       sha256,
-		})
+		result.Items = append(result.Items, applyResultItemFromStaged(staged[index], sha256))
 	}
-	return resultItems, nil
+	result.Status = ApplyResultStatusSucceeded
+	return result, nil
+}
+
+func applyExecutionFailure(result ApplyResult, status ApplyResultStatus, failedItem *ApplyResultFailedItem, err error) (ApplyResult, error) {
+	result.Status = status
+	result.FailedItem = failedItem
+	if err != nil {
+		result.Error = err.Error()
+		if result.FailedItem != nil {
+			result.FailedItem.Error = err.Error()
+		}
+	}
+	if result.Items == nil {
+		result.Items = []ApplyResultItem{}
+	}
+	return result, &ApplyExecutionError{Result: result, Err: err}
+}
+
+func applyResultItemFromStaged(item stagedApplyItem, sha256 string) ApplyResultItem {
+	return ApplyResultItem{
+		TargetPath:   item.action.TargetPath,
+		Operation:    item.action.Operation,
+		Status:       item.status,
+		BytesWritten: item.bytesWritten,
+		SHA256:       sha256,
+	}
+}
+
+func failedApplyResultItemFromAction(action ApplyPreviewAction, err error) *ApplyResultFailedItem {
+	item := &ApplyResultFailedItem{
+		TargetPath: action.TargetPath,
+		Operation:  action.Operation,
+	}
+	if err != nil {
+		item.Error = err.Error()
+	}
+	return item
 }
 
 type stagedApplyItem struct {
@@ -402,6 +473,7 @@ type stagedApplyItem struct {
 	bytesWritten          int64
 	status                ApplyResultItemStatus
 	beforeRename          func() error
+	rename                func(tempPath string, targetPath string) error
 	renamed               bool
 }
 
@@ -448,6 +520,7 @@ func prepareApplyActionTemp(item preparedApplyItem, hooksByTarget map[string]ato
 			writeOptions.WriteTemp = hook.WriteTemp
 			writeOptions.AfterTempWrite = hook.AfterTempWrite
 			writeOptions.BeforeRename = hook.BeforeRename
+			writeOptions.Rename = hook.Rename
 		}
 	}
 
@@ -475,6 +548,7 @@ type atomicApplyWriteOptions struct {
 	WriteTemp             func(tempPath string, content string) (int64, error)
 	AfterTempWrite        func(tempPath string) error
 	BeforeRename          func() error
+	Rename                func(tempPath string, targetPath string) error
 }
 
 func writeApplyContentAtomically(targetPath string, content string, opts atomicApplyWriteOptions) (int64, error) {
@@ -540,6 +614,7 @@ func prepareAtomicApplyWrite(targetPath string, content string, opts atomicApply
 		expectedCurrentSHA256: opts.ExpectedCurrentSHA256,
 		bytesWritten:          written,
 		beforeRename:          opts.BeforeRename,
+		rename:                opts.Rename,
 	}, nil
 }
 
@@ -580,7 +655,11 @@ func validateStagedApplyTarget(item stagedApplyItem) error {
 }
 
 func renameStagedApplyItem(item *stagedApplyItem) error {
-	if err := os.Rename(item.tempPath, item.targetPath); err != nil {
+	rename := item.rename
+	if rename == nil {
+		rename = os.Rename
+	}
+	if err := rename(item.tempPath, item.targetPath); err != nil {
 		return fmt.Errorf("rename temporary apply file %q to target_path %q: %w", item.tempPath, item.targetPath, err)
 	}
 	item.renamed = true

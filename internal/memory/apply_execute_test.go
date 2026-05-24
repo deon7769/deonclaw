@@ -22,6 +22,9 @@ func TestExecuteApplyCreateCreatesFileAndResult(t *testing.T) {
 	if got := string(mustReadFile(t, fixture.targetPath)); got != "created memory\n" {
 		t.Fatalf("target content = %q, want created content", got)
 	}
+	if result.Status != ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusSucceeded)
+	}
 	if len(result.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(result.Items))
 	}
@@ -57,6 +60,9 @@ func TestExecuteApplyAppendAppendsContentAndResult(t *testing.T) {
 	}
 	if got := string(mustReadFile(t, fixture.targetPath)); got != "existing memory\nappended memory\n" {
 		t.Fatalf("target content = %q, want appended content", got)
+	}
+	if result.Status != ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusSucceeded)
 	}
 	if len(result.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(result.Items))
@@ -198,6 +204,9 @@ func TestExecuteApplyMultipleCreatePatchesPass(t *testing.T) {
 	if got := string(mustReadFile(t, secondTarget)); got != "created two\n" {
 		t.Fatalf("second target = %q, want created content", got)
 	}
+	if result.Status != ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusSucceeded)
+	}
 	if len(result.Items) != 2 {
 		t.Fatalf("items = %d, want 2", len(result.Items))
 	}
@@ -233,6 +242,9 @@ func TestExecuteApplyMultipleAppendPatchesPass(t *testing.T) {
 	if got := string(mustReadFile(t, secondTarget)); got != "second original\nsecond appended\n" {
 		t.Fatalf("second target = %q, want appended content", got)
 	}
+	if result.Status != ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusSucceeded)
+	}
 	if len(result.Items) != 2 {
 		t.Fatalf("items = %d, want 2", len(result.Items))
 	}
@@ -240,6 +252,64 @@ func TestExecuteApplyMultipleAppendPatchesPass(t *testing.T) {
 		if item.Status != ApplyResultStatusAppended {
 			t.Fatalf("item status = %q, want %q", item.Status, ApplyResultStatusAppended)
 		}
+	}
+	assertApplyResultJSONValid(t, result)
+	assertNoApplyTempFiles(t, firstTarget)
+	assertNoApplyTempFiles(t, secondTarget)
+}
+
+func TestExecuteApplySecondRenameFailureReturnsPartialFailedResult(t *testing.T) {
+	tempDir := t.TempDir()
+	firstTarget := filepath.Join(tempDir, "memory", "created-one.md")
+	secondTarget := filepath.Join(tempDir, "memory", "created-two.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, nil, []MemoryPatch{
+		{TargetPath: firstTarget, Operation: OperationCreate, Content: "created one\n"},
+		{TargetPath: secondTarget, Operation: OperationCreate, Content: "created two\n"},
+	})
+	injectedErr := errors.New("injected second rename failure")
+
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{
+		atomicWriteOptionsByTarget: map[string]atomicApplyWriteOptions{
+			applyPathKey(secondTarget): {
+				Rename: func(tempPath string, targetPath string) error {
+					return injectedErr
+				},
+			},
+		},
+	})
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("ExecuteApply() error = %v, want injected rename failure", err)
+	}
+	var applyErr *ApplyExecutionError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("ExecuteApply() error = %T, want *ApplyExecutionError", err)
+	}
+	if result.Status != ApplyResultStatusPartialFailed {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusPartialFailed)
+	}
+	if applyErr.Result.Status != ApplyResultStatusPartialFailed {
+		t.Fatalf("error result status = %q, want %q", applyErr.Result.Status, ApplyResultStatusPartialFailed)
+	}
+	if got := string(mustReadFile(t, firstTarget)); got != "created one\n" {
+		t.Fatalf("first target = %q, want created content after partial failure", got)
+	}
+	if _, err := os.Stat(secondTarget); !os.IsNotExist(err) {
+		t.Fatalf("second target was changed after rename failure: %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want only first renamed item", len(result.Items))
+	}
+	if result.Items[0].TargetPath != firstTarget {
+		t.Fatalf("applied item target = %q, want first target %q", result.Items[0].TargetPath, firstTarget)
+	}
+	if result.FailedItem == nil {
+		t.Fatalf("failed_item is nil, want second target")
+	}
+	if result.FailedItem.TargetPath != secondTarget || result.FailedItem.Operation != OperationCreate {
+		t.Fatalf("failed_item = %#v, want second create target", result.FailedItem)
+	}
+	if !strings.Contains(result.Error, "injected second rename failure") {
+		t.Fatalf("result error = %q, want injected error", result.Error)
 	}
 	assertApplyResultJSONValid(t, result)
 	assertNoApplyTempFiles(t, firstTarget)
@@ -271,6 +341,16 @@ func TestExecuteApplySecondPatchPreparationFailureDoesNotChangeFirstTarget(t *te
 	if !errors.Is(err, injectedErr) {
 		t.Fatalf("ExecuteApply() error = %v, want injected preparation failure", err)
 	}
+	var applyErr *ApplyExecutionError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("ExecuteApply() error = %T, want *ApplyExecutionError", err)
+	}
+	if applyErr.Result.Status != ApplyResultStatusFailed {
+		t.Fatalf("result status = %q, want %q", applyErr.Result.Status, ApplyResultStatusFailed)
+	}
+	if len(applyErr.Result.Items) != 0 {
+		t.Fatalf("items = %d, want no applied items before rename", len(applyErr.Result.Items))
+	}
 	if _, err := os.Stat(firstTarget); !os.IsNotExist(err) {
 		t.Fatalf("first target was changed after second preparation failure: %v", err)
 	}
@@ -293,7 +373,7 @@ func TestExecuteApplySecondPatchValidationFailureDoesNotChangeFirstTarget(t *tes
 		{TargetPath: secondTarget, Operation: OperationAppend, Content: "second appended\n"},
 	})
 
-	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{
 		atomicWriteOptionsByTarget: map[string]atomicApplyWriteOptions{
 			applyPathKey(secondTarget): {
 				AfterTempWrite: func(tempPath string) error {
@@ -304,6 +384,19 @@ func TestExecuteApplySecondPatchValidationFailureDoesNotChangeFirstTarget(t *tes
 	})
 	if err == nil || !strings.Contains(err.Error(), "temporary apply file") || !strings.Contains(err.Error(), "content") {
 		t.Fatalf("ExecuteApply() error = %v, want second validation failure", err)
+	}
+	var applyErr *ApplyExecutionError
+	if !errors.As(err, &applyErr) {
+		t.Fatalf("ExecuteApply() error = %T, want *ApplyExecutionError", err)
+	}
+	if result.Status != ApplyResultStatusFailed {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusFailed)
+	}
+	if len(result.Items) != 0 {
+		t.Fatalf("items = %d, want no applied items before rename", len(result.Items))
+	}
+	if applyErr.Result.FailedItem == nil || applyErr.Result.FailedItem.TargetPath != secondTarget {
+		t.Fatalf("failed_item = %#v, want second target", applyErr.Result.FailedItem)
 	}
 	if got := string(mustReadFile(t, firstTarget)); got != "first original\n" {
 		t.Fatalf("first target = %q, want unchanged after second validation failure", got)

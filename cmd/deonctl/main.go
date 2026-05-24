@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -53,6 +54,8 @@ Usage:
 var codexWorkerFactory = func() workers.Worker {
 	return codex.New()
 }
+
+var memoryExecuteApply = memory.ExecuteApply
 
 var runIDFactory = func() string {
 	return "run-" + time.Now().UTC().Format("20060102T150405.000000000Z")
@@ -1316,8 +1319,15 @@ func runMemoryProposalApplyExecute(opts memoryProposalApplyExecuteOptions, stdou
 		return 1
 	}
 
-	result, err := memory.ExecuteApply(proposal, approval, policy, plan, backupResult, memory.NewApplyExecuteOptions{})
+	result, err := memoryExecuteApply(proposal, approval, policy, plan, backupResult, memory.NewApplyExecuteOptions{})
 	if err != nil {
+		var applyErr *memory.ApplyExecutionError
+		if errors.As(err, &applyErr) && applyErr.Result.Status == memory.ApplyResultStatusPartialFailed {
+			if writeErr := writeApplyResult(opts.outputPath, applyErr.Result); writeErr != nil {
+				fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", writeErr)
+				return 1
+			}
+		}
 		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
 		return 1
 	}

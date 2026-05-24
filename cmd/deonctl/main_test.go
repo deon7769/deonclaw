@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -2104,6 +2105,9 @@ func TestRunMemoryProposalApplyExecuteCreateWritesResult(t *testing.T) {
 		t.Fatalf("target content = %q, want created content", got)
 	}
 	result := readApplyResultFile(t, outputPath)
+	if result.Status != memory.ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, memory.ApplyResultStatusSucceeded)
+	}
 	if len(result.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(result.Items))
 	}
@@ -2128,6 +2132,9 @@ func TestRunMemoryProposalApplyExecuteAppendWritesResult(t *testing.T) {
 		t.Fatalf("target content = %q, want appended content", got)
 	}
 	result := readApplyResultFile(t, outputPath)
+	if result.Status != memory.ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, memory.ApplyResultStatusSucceeded)
+	}
 	if len(result.Items) != 1 {
 		t.Fatalf("items = %d, want 1", len(result.Items))
 	}
@@ -2136,6 +2143,69 @@ func TestRunMemoryProposalApplyExecuteAppendWritesResult(t *testing.T) {
 	}
 	if result.Items[0].BytesWritten != int64(len("appended memory\n")) {
 		t.Fatalf("bytes_written = %d, want %d", result.Items[0].BytesWritten, len("appended memory\n"))
+	}
+}
+
+func TestRunMemoryProposalApplyExecuteWritesPartialResultOnPartialFailure(t *testing.T) {
+	tempDir := t.TempDir()
+	firstTarget := filepath.Join(tempDir, "memory", "created-one.md")
+	secondTarget := filepath.Join(tempDir, "memory", "created-two.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, firstTarget, memory.OperationCreate, "", "created memory\n")
+	outputPath := filepath.Join(tempDir, memory.ApplyResultJSONArtifactName)
+	injectedErr := errors.New("injected second rename failure")
+	partialResult := memory.ApplyResult{
+		ProposalID: "proposal-partial",
+		ApprovalID: "approval-partial",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		Status:     memory.ApplyResultStatusPartialFailed,
+		Items: []memory.ApplyResultItem{
+			{
+				TargetPath:   firstTarget,
+				Operation:    memory.OperationCreate,
+				Status:       memory.ApplyResultStatusCreated,
+				BytesWritten: int64(len("created one\n")),
+				SHA256:       strings.Repeat("a", 64),
+			},
+		},
+		FailedItem: &memory.ApplyResultFailedItem{
+			TargetPath: secondTarget,
+			Operation:  memory.OperationCreate,
+			Error:      injectedErr.Error(),
+		},
+		Error:     injectedErr.Error(),
+		CreatedAt: time.Date(2026, 5, 24, 12, 30, 0, 0, time.UTC),
+	}
+	originalExecuteApply := memoryExecuteApply
+	memoryExecuteApply = func(memory.MemoryProposal, memory.MemoryApproval, *memory.MemoryPolicy, memory.BackupPlan, memory.BackupResult, memory.NewApplyExecuteOptions) (memory.ApplyResult, error) {
+		return partialResult, &memory.ApplyExecutionError{Result: partialResult, Err: injectedErr}
+	}
+	t.Cleanup(func() {
+		memoryExecuteApply = originalExecuteApply
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "injected second rename failure") {
+		t.Fatalf("stderr = %q, want injected error", stderr.String())
+	}
+	result := readApplyResultFile(t, outputPath)
+	if result.Status != memory.ApplyResultStatusPartialFailed {
+		t.Fatalf("result status = %q, want %q", result.Status, memory.ApplyResultStatusPartialFailed)
+	}
+	if len(result.Items) != 1 || result.Items[0].TargetPath != firstTarget {
+		t.Fatalf("items = %#v, want first target applied only", result.Items)
+	}
+	if result.FailedItem == nil || result.FailedItem.TargetPath != secondTarget {
+		t.Fatalf("failed_item = %#v, want second target", result.FailedItem)
+	}
+	if result.Error != injectedErr.Error() {
+		t.Fatalf("result error = %q, want %q", result.Error, injectedErr.Error())
 	}
 }
 
