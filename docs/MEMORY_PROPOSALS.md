@@ -399,8 +399,9 @@ If any proposal, approval, policy, target, backup plan, or backup result check f
 
 Supported operations:
 
-- `create` creates a new file and fails if the target already exists
-- `append` appends to an existing file, or creates the file when the approved append target is still missing
+- `create` writes content to a temporary file in the target directory, validates the temporary content, then renames it to a new target and fails if the target already exists
+- `append` builds a temporary file from the current target content plus the new content, validates the temporary content, rechecks the current target SHA-256 against the backup plan before rename, then renames it to the target
+- `append` creates the file through the same controlled create path when the approved append target is still missing
 
 Unsupported operations:
 
@@ -423,6 +424,7 @@ Safety checks:
 - `--output` must not be inside `backup_root`
 - `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
 - apply execution only writes effective patch target paths
+- apply execution removes temporary apply files on error before rename
 
 ## Summary Status
 

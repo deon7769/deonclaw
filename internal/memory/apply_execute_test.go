@@ -2,6 +2,7 @@ package memory
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,6 +45,7 @@ func TestExecuteApplyCreateCreatesFileAndResult(t *testing.T) {
 	if !json.Valid(data) {
 		t.Fatalf("apply result JSON invalid: %s", data)
 	}
+	assertNoApplyTempFiles(t, fixture.targetPath)
 }
 
 func TestExecuteApplyAppendAppendsContentAndResult(t *testing.T) {
@@ -69,6 +71,112 @@ func TestExecuteApplyAppendAppendsContentAndResult(t *testing.T) {
 	if item.SHA256 == "" {
 		t.Fatalf("sha256 is empty: %#v", item)
 	}
+	assertNoApplyTempFiles(t, fixture.targetPath)
+}
+
+func TestWriteApplyContentAtomicallyHashMismatchLeavesTargetIntactAndRemovesTemp(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "target.md")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("existing memory\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	_, err := writeApplyContentAtomically(targetPath, "existing memory\nappended memory\n", atomicApplyWriteOptions{
+		Mode:                  atomicApplyModeReplace,
+		ExpectedCurrentSHA256: mustFileSHA256(t, targetPath),
+		AfterTempWrite: func(tempPath string) error {
+			return os.WriteFile(tempPath, []byte("corrupted temporary content\n"), 0o600)
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "temporary apply file") || !strings.Contains(err.Error(), "content") {
+		t.Fatalf("writeApplyContentAtomically() error = %v, want temporary content failure", err)
+	}
+	if got := string(mustReadFile(t, targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want original target intact", got)
+	}
+	assertNoApplyTempFiles(t, targetPath)
+}
+
+func TestWriteApplyContentAtomicallyTempWriteFailureLeavesTargetIntactAndRemovesTemp(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "target.md")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("existing memory\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	injectedErr := errors.New("injected temporary write failure")
+
+	_, err := writeApplyContentAtomically(targetPath, "existing memory\nappended memory\n", atomicApplyWriteOptions{
+		Mode:                  atomicApplyModeReplace,
+		ExpectedCurrentSHA256: mustFileSHA256(t, targetPath),
+		WriteTemp: func(tempPath string, content string) (int64, error) {
+			if err := os.WriteFile(tempPath, []byte("partial temporary content\n"), 0o600); err != nil {
+				return 0, err
+			}
+			return int64(len("partial temporary content\n")), injectedErr
+		},
+	})
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("writeApplyContentAtomically() error = %v, want injected write failure", err)
+	}
+	if got := string(mustReadFile(t, targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want original target intact", got)
+	}
+	assertNoApplyTempFiles(t, targetPath)
+}
+
+func TestWriteApplyContentAtomicallyCreateFailsIfTargetAppearsBeforeRename(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "target.md")
+
+	_, err := writeApplyContentAtomically(targetPath, "created memory\n", atomicApplyWriteOptions{
+		Mode: atomicApplyModeCreate,
+		BeforeRename: func() error {
+			if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+				return err
+			}
+			return os.WriteFile(targetPath, []byte("concurrent content\n"), 0o600)
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "already exists") {
+		t.Fatalf("writeApplyContentAtomically() error = %v, want target exists failure", err)
+	}
+	if got := string(mustReadFile(t, targetPath)); got != "concurrent content\n" {
+		t.Fatalf("target content = %q, want concurrent content preserved", got)
+	}
+	assertNoApplyTempFiles(t, targetPath)
+}
+
+func TestWriteApplyAppendAtomicHashFailureBeforeRenameLeavesTargetIntact(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "target.md")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("existing memory\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	expectedSHA256 := mustFileSHA256(t, targetPath)
+
+	_, err := writeApplyContentAtomically(targetPath, "existing memory\nappended memory\n", atomicApplyWriteOptions{
+		Mode:                  atomicApplyModeReplace,
+		ExpectedCurrentSHA256: expectedSHA256,
+		BeforeRename: func() error {
+			return os.WriteFile(targetPath, []byte("changed before rename\n"), 0o600)
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "changed before rename") {
+		t.Fatalf("writeApplyContentAtomically() error = %v, want target hash failure", err)
+	}
+	if got := string(mustReadFile(t, targetPath)); got != "changed before rename\n" {
+		t.Fatalf("target content = %q, want externally changed target preserved", got)
+	}
+	assertNoApplyTempFiles(t, targetPath)
 }
 
 func TestExecuteApplyRejectsUnimplementedOperations(t *testing.T) {
@@ -250,5 +358,28 @@ func newApplyExecuteFixture(t *testing.T, operation MemoryOperation, initialCont
 		policy:       policy,
 		backupPlan:   plan,
 		backupResult: result,
+	}
+}
+
+func mustFileSHA256(t *testing.T, path string) string {
+	t.Helper()
+
+	sha256, err := fileSHA256(path)
+	if err != nil {
+		t.Fatalf("fileSHA256(%q) error = %v", path, err)
+	}
+	return sha256
+}
+
+func assertNoApplyTempFiles(t *testing.T, targetPath string) {
+	t.Helper()
+
+	pattern := filepath.Join(filepath.Dir(targetPath), "."+filepath.Base(targetPath)+".apply-*")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("Glob(%q) error = %v", pattern, err)
+	}
+	if len(matches) > 0 {
+		t.Fatalf("apply temp files left behind: %v", matches)
 	}
 }
