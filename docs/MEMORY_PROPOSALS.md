@@ -342,7 +342,7 @@ For existing original targets, restore execution validates the current `backup_p
 
 For each restore item:
 
-- if `exists: true`, it copies `backup_path` back to `target_path`, creating target directories when needed
+- if `exists: true`, it copies `backup_path` to a temporary file in the target directory, validates the temporary file SHA-256, and renames it to `target_path`
 - if `exists: false`, it removes `target_path` when the file exists
 - if `exists: false` and `target_path` is already absent, it records `skipped_missing`
 
@@ -357,6 +357,7 @@ Safety checks:
 - `backup_path` must stay inside `backup_root`
 - `backup_path` must not equal `target_path`
 - if a backup file changed after restore dry-run, restore execution fails before writing target files
+- if the temporary restore file hash differs from `backup_sha256`, restore execution fails without replacing `target_path`
 - if the loaded restore preview diverges from the current restore dry-run, restore execution fails before writing target files
 - `--output` must not be any backup item `target_path`
 - `--output` must not be any backup item `backup_path`

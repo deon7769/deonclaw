@@ -94,7 +94,7 @@ func ExecuteRestore(plan BackupPlan, backupResult BackupResult, restorePreview R
 		}
 
 		if item.previewItem.Exists {
-			bytesRestored, err := copyRestoreFile(item.previewItem.BackupPath, item.previewItem.TargetPath)
+			bytesRestored, err := copyRestoreFile(item.previewItem.BackupPath, item.previewItem.TargetPath, *item.previewItem.BackupSHA256)
 			if err != nil {
 				return RestoreResult{}, err
 			}
@@ -260,12 +260,10 @@ func validateRestoreExecutionItem(backupRoot string, index int, item RestorePrev
 	return nil
 }
 
-func copyRestoreFile(sourcePath string, destinationPath string) (int64, error) {
-	source, err := os.Open(sourcePath)
-	if err != nil {
-		return 0, fmt.Errorf("open backup_path %q: %w", sourcePath, err)
+func copyRestoreFile(sourcePath string, destinationPath string, expectedSHA256 string) (int64, error) {
+	if strings.TrimSpace(expectedSHA256) == "" {
+		return 0, fmt.Errorf("backup_sha256 is required for restore target_path %q", destinationPath)
 	}
-	defer source.Close()
 
 	destinationDir := filepath.Dir(destinationPath)
 	if destinationDir != "." {
@@ -273,15 +271,53 @@ func copyRestoreFile(sourcePath string, destinationPath string) (int64, error) {
 			return 0, fmt.Errorf("create target directory %q: %w", destinationDir, err)
 		}
 	}
-	destination, err := os.OpenFile(destinationPath, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
-	if err != nil {
-		return 0, fmt.Errorf("open target_path %q: %w", destinationPath, err)
-	}
-	defer destination.Close()
 
-	written, err := io.Copy(destination, source)
+	tempFile, err := os.CreateTemp(destinationDir, "."+filepath.Base(destinationPath)+".restore-*")
 	if err != nil {
-		return written, fmt.Errorf("copy backup_path %q to target_path %q: %w", sourcePath, destinationPath, err)
+		return 0, fmt.Errorf("create temporary restore file for target_path %q: %w", destinationPath, err)
 	}
+	tempPath := tempFile.Name()
+	tempClosed := false
+	renamed := false
+	closeTemp := func() error {
+		if tempClosed {
+			return nil
+		}
+		tempClosed = true
+		return tempFile.Close()
+	}
+	defer func() {
+		_ = closeTemp()
+		if !renamed {
+			_ = os.Remove(tempPath)
+		}
+	}()
+
+	source, err := os.Open(sourcePath)
+	if err != nil {
+		return 0, fmt.Errorf("open backup_path %q: %w", sourcePath, err)
+	}
+	defer source.Close()
+
+	written, err := io.Copy(tempFile, source)
+	if err != nil {
+		return written, fmt.Errorf("copy backup_path %q to temporary restore file %q: %w", sourcePath, tempPath, err)
+	}
+	if err := closeTemp(); err != nil {
+		return written, fmt.Errorf("close temporary restore file %q: %w", tempPath, err)
+	}
+
+	tempSHA256, err := fileSHA256(tempPath)
+	if err != nil {
+		return written, fmt.Errorf("hash temporary restore file %q: %w", tempPath, err)
+	}
+	if tempSHA256 != expectedSHA256 {
+		return written, fmt.Errorf("temporary restore file %q sha256 does not match backup_sha256", tempPath)
+	}
+
+	if err := os.Rename(tempPath, destinationPath); err != nil {
+		return written, fmt.Errorf("rename temporary restore file %q to target_path %q: %w", tempPath, destinationPath, err)
+	}
+	renamed = true
 	return written, nil
 }

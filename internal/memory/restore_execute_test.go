@@ -40,6 +40,7 @@ func TestExecuteRestoreExistingTargetRestoresFile(t *testing.T) {
 	if item.SHA256 == nil || item.BackupSHA256 == nil || *item.SHA256 != *item.BackupSHA256 {
 		t.Fatalf("hashes = sha256 %v backup_sha256 %v, want matching hashes", item.SHA256, item.BackupSHA256)
 	}
+	assertNoRestoreTempFiles(t, fixture.targetPath)
 }
 
 func TestExecuteRestoreMissingOriginalTargetRemovesTarget(t *testing.T) {
@@ -97,6 +98,57 @@ func TestExecuteRestoreCorruptedBackupFailsBeforeWriting(t *testing.T) {
 	if got := string(mustReadFile(t, fixture.targetPath)); got != "changed by apply\n" {
 		t.Fatalf("target content = %q, want unchanged after restore failure", got)
 	}
+}
+
+func TestCopyRestoreFileHashMismatchLeavesTargetIntactAndRemovesTemp(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "target.md")
+	backupPath := filepath.Join(tempDir, "backups", "target.md")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(backupPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(backup dir) error = %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("target before failed restore\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	if err := os.WriteFile(backupPath, []byte("backup content\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(backup) error = %v", err)
+	}
+
+	_, err := copyRestoreFile(backupPath, targetPath, strings.Repeat("0", 64))
+	if err == nil || !strings.Contains(err.Error(), "temporary restore") || !strings.Contains(err.Error(), "sha256") {
+		t.Fatalf("copyRestoreFile() error = %v, want temporary sha256 failure", err)
+	}
+	if got := string(mustReadFile(t, targetPath)); got != "target before failed restore\n" {
+		t.Fatalf("target content = %q, want original target intact", got)
+	}
+	assertNoRestoreTempFiles(t, targetPath)
+}
+
+func TestCopyRestoreFileCopyFailureLeavesTargetIntactAndRemovesTemp(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "target.md")
+	backupPath := filepath.Join(tempDir, "backup-as-directory")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+	if err := os.MkdirAll(backupPath, 0o755); err != nil {
+		t.Fatalf("MkdirAll(backup directory) error = %v", err)
+	}
+	if err := os.WriteFile(targetPath, []byte("target before failed copy\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	_, err := copyRestoreFile(backupPath, targetPath, strings.Repeat("0", 64))
+	if err == nil {
+		t.Fatalf("copyRestoreFile() error = nil, want copy failure")
+	}
+	if got := string(mustReadFile(t, targetPath)); got != "target before failed copy\n" {
+		t.Fatalf("target content = %q, want original target intact", got)
+	}
+	assertNoRestoreTempFiles(t, targetPath)
 }
 
 func TestExecuteRestorePreviewDivergenceFails(t *testing.T) {
@@ -162,5 +214,18 @@ func newRestoreExecuteFixture(t *testing.T, operation MemoryOperation, initialCo
 		backupPlan:     base.backupPlan,
 		backupResult:   base.backupResult,
 		restorePreview: preview,
+	}
+}
+
+func assertNoRestoreTempFiles(t *testing.T, targetPath string) {
+	t.Helper()
+
+	pattern := filepath.Join(filepath.Dir(targetPath), "."+filepath.Base(targetPath)+".restore-*")
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		t.Fatalf("Glob(%q) error = %v", pattern, err)
+	}
+	if len(matches) > 0 {
+		t.Fatalf("restore temp files left behind: %v", matches)
 	}
 }
