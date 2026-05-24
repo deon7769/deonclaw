@@ -265,18 +265,25 @@ func validateApplyBackupResultItem(index int, planItem BackupItem, resultItem Ba
 		if resultItem.Status != BackupResultStatusCopied {
 			return fmt.Errorf("backup result item[%d] backup was not copied for target_path %q", index, resultItem.TargetPath)
 		}
-		if resultItem.SHA256 == nil || planItem.SHA256 == nil || *resultItem.SHA256 != *planItem.SHA256 {
+		if planItem.SHA256 == nil || strings.TrimSpace(*planItem.SHA256) == "" {
+			return fmt.Errorf("backup result item[%d] backup plan sha256 is required for copied target_path %q", index, resultItem.TargetPath)
+		}
+		planSHA256 := *planItem.SHA256
+		if resultItem.SHA256 == nil || *resultItem.SHA256 != planSHA256 {
 			return fmt.Errorf("backup result item[%d] sha256 does not match backup plan for target_path %q", index, resultItem.TargetPath)
 		}
 		if resultItem.BackupSHA256 == nil || strings.TrimSpace(*resultItem.BackupSHA256) == "" {
 			return fmt.Errorf("backup result item[%d] backup_sha256 is required for copied target_path %q", index, resultItem.TargetPath)
 		}
+		if *resultItem.BackupSHA256 != planSHA256 {
+			return fmt.Errorf("backup result item[%d] backup_sha256 does not match backup plan for target_path %q", index, resultItem.TargetPath)
+		}
 		backupSHA256, err := fileSHA256(resultItem.BackupPath)
 		if err != nil {
 			return fmt.Errorf("backup result item[%d] backup_path %q cannot be hashed: %w", index, resultItem.BackupPath, err)
 		}
-		if backupSHA256 != *resultItem.BackupSHA256 {
-			return fmt.Errorf("backup result item[%d] backup_path %q sha256 does not match backup result", index, resultItem.BackupPath)
+		if backupSHA256 != planSHA256 {
+			return fmt.Errorf("backup result item[%d] backup_path %q sha256 does not match backup plan", index, resultItem.BackupPath)
 		}
 		return nil
 	}

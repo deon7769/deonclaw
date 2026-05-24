@@ -129,6 +129,55 @@ func TestExecuteApplyExistingBackupNotCopiedFails(t *testing.T) {
 	}
 }
 
+func TestExecuteApplyCorruptedBackupFileMatchingTamperedResultHashFails(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationAppend, "existing memory\n", "appended memory\n")
+	backupPath := fixture.backupPlan.Items[0].BackupPath
+	if err := os.WriteFile(backupPath, []byte("corrupted backup\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(corrupted backup) error = %v", err)
+	}
+	corruptedSHA256, err := fileSHA256(backupPath)
+	if err != nil {
+		t.Fatalf("fileSHA256(corrupted backup) error = %v", err)
+	}
+	fixture.backupResult.Items[0].BackupSHA256 = &corruptedSHA256
+
+	_, err = ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "backup_sha256 does not match backup plan") {
+		t.Fatalf("ExecuteApply() error = %v, want backup hash mismatch", err)
+	}
+	if got := string(mustReadFile(t, fixture.targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestExecuteApplyTamperedBackupResultBackupSHA256Fails(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationAppend, "existing memory\n", "appended memory\n")
+	tamperedSHA256 := strings.Repeat("0", 64)
+	fixture.backupResult.Items[0].BackupSHA256 = &tamperedSHA256
+
+	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "backup_sha256 does not match backup plan") {
+		t.Fatalf("ExecuteApply() error = %v, want backup result backup_sha256 mismatch", err)
+	}
+	if got := string(mustReadFile(t, fixture.targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestExecuteApplyBackupResultSHA256DifferentFromPlanFails(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationAppend, "existing memory\n", "appended memory\n")
+	tamperedSHA256 := strings.Repeat("1", 64)
+	fixture.backupResult.Items[0].SHA256 = &tamperedSHA256
+
+	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "sha256 does not match backup plan") {
+		t.Fatalf("ExecuteApply() error = %v, want backup result sha256 mismatch", err)
+	}
+	if got := string(mustReadFile(t, fixture.targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
 func TestExecuteApplyPreflightFailureBlocksApply(t *testing.T) {
 	fixture := newApplyExecuteFixture(t, OperationAppend, "existing memory\n", "appended memory\n")
 	fixture.approval.Decision = DecisionRejected
