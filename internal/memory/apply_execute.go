@@ -37,7 +37,8 @@ type ApplyResultItem struct {
 }
 
 type NewApplyExecuteOptions struct {
-	CreatedAt time.Time
+	CreatedAt                  time.Time
+	atomicWriteOptionsByTarget map[string]atomicApplyWriteOptions
 }
 
 func LoadBackupResultFromFile(resultPath string) (BackupResult, error) {
@@ -77,23 +78,11 @@ func ExecuteApply(proposal MemoryProposal, approval MemoryApproval, policy *Memo
 		CreatedAt:  createdAt.UTC(),
 	}
 
-	for _, item := range prepared {
-		bytesWritten, status, err := executeApplyAction(item.action, item.planItem)
-		if err != nil {
-			return ApplyResult{}, err
-		}
-		sha256, err := fileSHA256(item.action.TargetPath)
-		if err != nil {
-			return ApplyResult{}, err
-		}
-		result.Items = append(result.Items, ApplyResultItem{
-			TargetPath:   item.action.TargetPath,
-			Operation:    item.action.Operation,
-			Status:       status,
-			BytesWritten: bytesWritten,
-			SHA256:       sha256,
-		})
+	items, err := executeApplyStaged(prepared, opts)
+	if err != nil {
+		return ApplyResult{}, err
 	}
+	result.Items = items
 	return result, nil
 }
 
@@ -338,43 +327,139 @@ func validateApplyAction(index int, action ApplyPreviewAction, planByTarget map[
 }
 
 func executeApplyAction(action ApplyPreviewAction, planItem BackupItem) (int64, ApplyResultItemStatus, error) {
+	staged, err := prepareApplyActionTemp(preparedApplyItem{action: action, planItem: planItem}, nil)
+	if err != nil {
+		return 0, "", err
+	}
+	defer func() {
+		cleanupStagedApplyItems([]stagedApplyItem{staged})
+	}()
+
+	if err := validateStagedApplyTemp(staged); err != nil {
+		return staged.bytesWritten, "", err
+	}
+	if err := validateStagedApplyTarget(staged); err != nil {
+		return staged.bytesWritten, "", err
+	}
+	if err := renameStagedApplyItem(&staged); err != nil {
+		return staged.bytesWritten, "", err
+	}
+	return staged.bytesWritten, staged.status, nil
+}
+
+func executeApplyStaged(prepared []preparedApplyItem, opts NewApplyExecuteOptions) ([]ApplyResultItem, error) {
+	staged := make([]stagedApplyItem, 0, len(prepared))
+	defer func() {
+		cleanupStagedApplyItems(staged)
+	}()
+
+	for _, item := range prepared {
+		stagedItem, err := prepareApplyActionTemp(item, opts.atomicWriteOptionsByTarget)
+		if err != nil {
+			return nil, err
+		}
+		staged = append(staged, stagedItem)
+	}
+	for _, item := range staged {
+		if err := validateStagedApplyTemp(item); err != nil {
+			return nil, err
+		}
+	}
+	for _, item := range staged {
+		if err := validateStagedApplyTarget(item); err != nil {
+			return nil, err
+		}
+	}
+
+	resultItems := make([]ApplyResultItem, 0, len(staged))
+	for index := range staged {
+		if err := renameStagedApplyItem(&staged[index]); err != nil {
+			return nil, err
+		}
+		sha256, err := fileSHA256(staged[index].action.TargetPath)
+		if err != nil {
+			return nil, err
+		}
+		resultItems = append(resultItems, ApplyResultItem{
+			TargetPath:   staged[index].action.TargetPath,
+			Operation:    staged[index].action.Operation,
+			Status:       staged[index].status,
+			BytesWritten: staged[index].bytesWritten,
+			SHA256:       sha256,
+		})
+	}
+	return resultItems, nil
+}
+
+type stagedApplyItem struct {
+	action                ApplyPreviewAction
+	planItem              BackupItem
+	targetPath            string
+	content               string
+	tempPath              string
+	mode                  atomicApplyMode
+	expectedCurrentSHA256 string
+	bytesWritten          int64
+	status                ApplyResultItemStatus
+	beforeRename          func() error
+	renamed               bool
+}
+
+func prepareApplyActionTemp(item preparedApplyItem, hooksByTarget map[string]atomicApplyWriteOptions) (stagedApplyItem, error) {
+	action := item.action
+	planItem := item.planItem
+	mode := atomicApplyMode("")
+	content := action.Content
+	status := ApplyResultItemStatus("")
+	bytesWritten := int64(len(action.Content))
+	expectedCurrentSHA256 := ""
+
 	switch action.Operation {
 	case OperationCreate:
-		written, err := writeApplyContentAtomically(action.TargetPath, action.Content, atomicApplyWriteOptions{
-			Mode: atomicApplyModeCreate,
-		})
-		if err != nil {
-			return written, "", err
-		}
-		return written, ApplyResultStatusCreated, nil
+		mode = atomicApplyModeCreate
+		status = ApplyResultStatusCreated
 	case OperationAppend:
 		if !planItem.Exists {
-			written, err := writeApplyContentAtomically(action.TargetPath, action.Content, atomicApplyWriteOptions{
-				Mode: atomicApplyModeCreate,
-			})
-			if err != nil {
-				return written, "", err
-			}
-			return written, ApplyResultStatusAppended, nil
+			mode = atomicApplyModeCreate
+			status = ApplyResultStatusAppended
+			break
 		}
+		mode = atomicApplyModeReplace
+		status = ApplyResultStatusAppended
 		if planItem.SHA256 == nil || strings.TrimSpace(*planItem.SHA256) == "" {
-			return 0, "", fmt.Errorf("backup item target_path %q missing sha256 for append", action.TargetPath)
+			return stagedApplyItem{}, fmt.Errorf("backup item target_path %q missing sha256 for append", action.TargetPath)
 		}
+		expectedCurrentSHA256 = *planItem.SHA256
 		currentContent, err := os.ReadFile(action.TargetPath)
 		if err != nil {
-			return 0, "", fmt.Errorf("read target_path %q for append: %w", action.TargetPath, err)
+			return stagedApplyItem{}, fmt.Errorf("read target_path %q for append: %w", action.TargetPath, err)
 		}
-		_, err = writeApplyContentAtomically(action.TargetPath, string(currentContent)+action.Content, atomicApplyWriteOptions{
-			Mode:                  atomicApplyModeReplace,
-			ExpectedCurrentSHA256: *planItem.SHA256,
-		})
-		if err != nil {
-			return 0, "", err
-		}
-		return int64(len(action.Content)), ApplyResultStatusAppended, nil
+		content = string(currentContent) + action.Content
 	default:
-		return 0, "", fmt.Errorf("operation not implemented: %s", action.Operation)
+		return stagedApplyItem{}, fmt.Errorf("operation not implemented: %s", action.Operation)
 	}
+
+	writeOptions := atomicApplyWriteOptions{
+		Mode:                  mode,
+		ExpectedCurrentSHA256: expectedCurrentSHA256,
+	}
+	if hooksByTarget != nil {
+		if hook, ok := hooksByTarget[applyPathKey(action.TargetPath)]; ok {
+			writeOptions.WriteTemp = hook.WriteTemp
+			writeOptions.AfterTempWrite = hook.AfterTempWrite
+			writeOptions.BeforeRename = hook.BeforeRename
+		}
+	}
+
+	staged, err := prepareAtomicApplyWrite(action.TargetPath, content, writeOptions)
+	if err != nil {
+		return stagedApplyItem{}, err
+	}
+	staged.action = action
+	staged.planItem = planItem
+	staged.status = status
+	staged.bytesWritten = bytesWritten
+	return staged, nil
 }
 
 type atomicApplyMode string
@@ -393,29 +478,43 @@ type atomicApplyWriteOptions struct {
 }
 
 func writeApplyContentAtomically(targetPath string, content string, opts atomicApplyWriteOptions) (int64, error) {
+	staged, err := prepareAtomicApplyWrite(targetPath, content, opts)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		cleanupStagedApplyItems([]stagedApplyItem{staged})
+	}()
+
+	if err := validateStagedApplyTemp(staged); err != nil {
+		return staged.bytesWritten, err
+	}
+	if err := validateStagedApplyTarget(staged); err != nil {
+		return staged.bytesWritten, err
+	}
+	if err := renameStagedApplyItem(&staged); err != nil {
+		return staged.bytesWritten, err
+	}
+	return staged.bytesWritten, nil
+}
+
+func prepareAtomicApplyWrite(targetPath string, content string, opts atomicApplyWriteOptions) (stagedApplyItem, error) {
 	targetDir := filepath.Dir(targetPath)
 	if targetDir != "." {
 		if err := os.MkdirAll(targetDir, 0o755); err != nil {
-			return 0, fmt.Errorf("create target directory for %q: %w", targetPath, err)
+			return stagedApplyItem{}, fmt.Errorf("create target directory for %q: %w", targetPath, err)
 		}
 	}
 
 	tempFile, err := os.CreateTemp(targetDir, "."+filepath.Base(targetPath)+".apply-*")
 	if err != nil {
-		return 0, fmt.Errorf("create temporary apply file for target_path %q: %w", targetPath, err)
+		return stagedApplyItem{}, fmt.Errorf("create temporary apply file for target_path %q: %w", targetPath, err)
 	}
 	tempPath := tempFile.Name()
 	if err := tempFile.Close(); err != nil {
 		_ = os.Remove(tempPath)
-		return 0, fmt.Errorf("close temporary apply file %q: %w", tempPath, err)
+		return stagedApplyItem{}, fmt.Errorf("close temporary apply file %q: %w", tempPath, err)
 	}
-
-	renamed := false
-	defer func() {
-		if !renamed {
-			_ = os.Remove(tempPath)
-		}
-	}()
 
 	writeTemp := opts.WriteTemp
 	if writeTemp == nil {
@@ -423,52 +522,77 @@ func writeApplyContentAtomically(targetPath string, content string, opts atomicA
 	}
 	written, err := writeTemp(tempPath, content)
 	if err != nil {
-		return written, fmt.Errorf("write temporary apply file %q: %w", tempPath, err)
+		_ = os.Remove(tempPath)
+		return stagedApplyItem{}, fmt.Errorf("write temporary apply file %q: %w", tempPath, err)
 	}
 	if opts.AfterTempWrite != nil {
 		if err := opts.AfterTempWrite(tempPath); err != nil {
-			return written, fmt.Errorf("after temporary apply file write %q: %w", tempPath, err)
-		}
-	}
-	if err := validateApplyTempContent(tempPath, content); err != nil {
-		return written, err
-	}
-
-	if opts.BeforeRename != nil {
-		if err := opts.BeforeRename(); err != nil {
-			return written, fmt.Errorf("before apply rename for target_path %q: %w", targetPath, err)
+			_ = os.Remove(tempPath)
+			return stagedApplyItem{}, fmt.Errorf("after temporary apply file write %q: %w", tempPath, err)
 		}
 	}
 
-	switch opts.Mode {
+	return stagedApplyItem{
+		targetPath:            targetPath,
+		content:               content,
+		tempPath:              tempPath,
+		mode:                  opts.Mode,
+		expectedCurrentSHA256: opts.ExpectedCurrentSHA256,
+		bytesWritten:          written,
+		beforeRename:          opts.BeforeRename,
+	}, nil
+}
+
+func validateStagedApplyTemp(item stagedApplyItem) error {
+	return validateApplyTempContent(item.tempPath, item.content)
+}
+
+func validateStagedApplyTarget(item stagedApplyItem) error {
+	if item.beforeRename != nil {
+		if err := item.beforeRename(); err != nil {
+			return fmt.Errorf("before apply rename for target_path %q: %w", item.targetPath, err)
+		}
+	}
+	switch item.mode {
 	case atomicApplyModeCreate:
-		exists, err := targetExists(targetPath)
+		exists, err := targetExists(item.targetPath)
 		if err != nil {
-			return written, fmt.Errorf("stat target_path %q before rename: %w", targetPath, err)
+			return fmt.Errorf("stat target_path %q before rename: %w", item.targetPath, err)
 		}
 		if exists {
-			return written, fmt.Errorf("target_path %q already exists before rename", targetPath)
+			return fmt.Errorf("target_path %q already exists before rename", item.targetPath)
 		}
 	case atomicApplyModeReplace:
-		if strings.TrimSpace(opts.ExpectedCurrentSHA256) == "" {
-			return written, fmt.Errorf("expected current sha256 is required for target_path %q", targetPath)
+		if strings.TrimSpace(item.expectedCurrentSHA256) == "" {
+			return fmt.Errorf("expected current sha256 is required for target_path %q", item.targetPath)
 		}
-		currentSHA256, err := fileSHA256(targetPath)
+		currentSHA256, err := fileSHA256(item.targetPath)
 		if err != nil {
-			return written, fmt.Errorf("hash target_path %q before rename: %w", targetPath, err)
+			return fmt.Errorf("hash target_path %q before rename: %w", item.targetPath, err)
 		}
-		if currentSHA256 != opts.ExpectedCurrentSHA256 {
-			return written, fmt.Errorf("target_path %q changed before rename", targetPath)
+		if currentSHA256 != item.expectedCurrentSHA256 {
+			return fmt.Errorf("target_path %q changed before rename", item.targetPath)
 		}
 	default:
-		return written, fmt.Errorf("atomic apply mode %q is not supported", opts.Mode)
+		return fmt.Errorf("atomic apply mode %q is not supported", item.mode)
 	}
+	return nil
+}
 
-	if err := os.Rename(tempPath, targetPath); err != nil {
-		return written, fmt.Errorf("rename temporary apply file %q to target_path %q: %w", tempPath, targetPath, err)
+func renameStagedApplyItem(item *stagedApplyItem) error {
+	if err := os.Rename(item.tempPath, item.targetPath); err != nil {
+		return fmt.Errorf("rename temporary apply file %q to target_path %q: %w", item.tempPath, item.targetPath, err)
 	}
-	renamed = true
-	return int64(written), nil
+	item.renamed = true
+	return nil
+}
+
+func cleanupStagedApplyItems(items []stagedApplyItem) {
+	for _, item := range items {
+		if item.tempPath != "" && !item.renamed {
+			_ = os.Remove(item.tempPath)
+		}
+	}
 }
 
 func writeApplyTempContent(tempPath string, content string) (int64, error) {

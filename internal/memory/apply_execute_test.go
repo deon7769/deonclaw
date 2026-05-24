@@ -179,6 +179,142 @@ func TestWriteApplyAppendAtomicHashFailureBeforeRenameLeavesTargetIntact(t *test
 	assertNoApplyTempFiles(t, targetPath)
 }
 
+func TestExecuteApplyMultipleCreatePatchesPass(t *testing.T) {
+	tempDir := t.TempDir()
+	firstTarget := filepath.Join(tempDir, "memory", "created-one.md")
+	secondTarget := filepath.Join(tempDir, "memory", "created-two.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, nil, []MemoryPatch{
+		{TargetPath: firstTarget, Operation: OperationCreate, Content: "created one\n"},
+		{TargetPath: secondTarget, Operation: OperationCreate, Content: "created two\n"},
+	})
+
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteApply() error = %v", err)
+	}
+	if got := string(mustReadFile(t, firstTarget)); got != "created one\n" {
+		t.Fatalf("first target = %q, want created content", got)
+	}
+	if got := string(mustReadFile(t, secondTarget)); got != "created two\n" {
+		t.Fatalf("second target = %q, want created content", got)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(result.Items))
+	}
+	for _, item := range result.Items {
+		if item.Status != ApplyResultStatusCreated {
+			t.Fatalf("item status = %q, want %q", item.Status, ApplyResultStatusCreated)
+		}
+	}
+	assertApplyResultJSONValid(t, result)
+	assertNoApplyTempFiles(t, firstTarget)
+	assertNoApplyTempFiles(t, secondTarget)
+}
+
+func TestExecuteApplyMultipleAppendPatchesPass(t *testing.T) {
+	tempDir := t.TempDir()
+	firstTarget := filepath.Join(tempDir, "memory", "append-one.md")
+	secondTarget := filepath.Join(tempDir, "memory", "append-two.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, map[string]string{
+		firstTarget:  "first original\n",
+		secondTarget: "second original\n",
+	}, []MemoryPatch{
+		{TargetPath: firstTarget, Operation: OperationAppend, Content: "first appended\n"},
+		{TargetPath: secondTarget, Operation: OperationAppend, Content: "second appended\n"},
+	})
+
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteApply() error = %v", err)
+	}
+	if got := string(mustReadFile(t, firstTarget)); got != "first original\nfirst appended\n" {
+		t.Fatalf("first target = %q, want appended content", got)
+	}
+	if got := string(mustReadFile(t, secondTarget)); got != "second original\nsecond appended\n" {
+		t.Fatalf("second target = %q, want appended content", got)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(result.Items))
+	}
+	for _, item := range result.Items {
+		if item.Status != ApplyResultStatusAppended {
+			t.Fatalf("item status = %q, want %q", item.Status, ApplyResultStatusAppended)
+		}
+	}
+	assertApplyResultJSONValid(t, result)
+	assertNoApplyTempFiles(t, firstTarget)
+	assertNoApplyTempFiles(t, secondTarget)
+}
+
+func TestExecuteApplySecondPatchPreparationFailureDoesNotChangeFirstTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	firstTarget := filepath.Join(tempDir, "memory", "created-one.md")
+	secondTarget := filepath.Join(tempDir, "memory", "created-two.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, nil, []MemoryPatch{
+		{TargetPath: firstTarget, Operation: OperationCreate, Content: "created one\n"},
+		{TargetPath: secondTarget, Operation: OperationCreate, Content: "created two\n"},
+	})
+	injectedErr := errors.New("injected second preparation failure")
+
+	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{
+		atomicWriteOptionsByTarget: map[string]atomicApplyWriteOptions{
+			applyPathKey(secondTarget): {
+				WriteTemp: func(tempPath string, content string) (int64, error) {
+					if err := os.WriteFile(tempPath, []byte("partial second temp\n"), 0o600); err != nil {
+						return 0, err
+					}
+					return int64(len("partial second temp\n")), injectedErr
+				},
+			},
+		},
+	})
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("ExecuteApply() error = %v, want injected preparation failure", err)
+	}
+	if _, err := os.Stat(firstTarget); !os.IsNotExist(err) {
+		t.Fatalf("first target was changed after second preparation failure: %v", err)
+	}
+	if _, err := os.Stat(secondTarget); !os.IsNotExist(err) {
+		t.Fatalf("second target was changed after preparation failure: %v", err)
+	}
+	assertNoApplyTempFiles(t, firstTarget)
+	assertNoApplyTempFiles(t, secondTarget)
+}
+
+func TestExecuteApplySecondPatchValidationFailureDoesNotChangeFirstTarget(t *testing.T) {
+	tempDir := t.TempDir()
+	firstTarget := filepath.Join(tempDir, "memory", "append-one.md")
+	secondTarget := filepath.Join(tempDir, "memory", "append-two.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, map[string]string{
+		firstTarget:  "first original\n",
+		secondTarget: "second original\n",
+	}, []MemoryPatch{
+		{TargetPath: firstTarget, Operation: OperationAppend, Content: "first appended\n"},
+		{TargetPath: secondTarget, Operation: OperationAppend, Content: "second appended\n"},
+	})
+
+	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{
+		atomicWriteOptionsByTarget: map[string]atomicApplyWriteOptions{
+			applyPathKey(secondTarget): {
+				AfterTempWrite: func(tempPath string) error {
+					return os.WriteFile(tempPath, []byte("corrupted second temp\n"), 0o600)
+				},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "temporary apply file") || !strings.Contains(err.Error(), "content") {
+		t.Fatalf("ExecuteApply() error = %v, want second validation failure", err)
+	}
+	if got := string(mustReadFile(t, firstTarget)); got != "first original\n" {
+		t.Fatalf("first target = %q, want unchanged after second validation failure", got)
+	}
+	if got := string(mustReadFile(t, secondTarget)); got != "second original\n" {
+		t.Fatalf("second target = %q, want unchanged after validation failure", got)
+	}
+	assertNoApplyTempFiles(t, firstTarget)
+	assertNoApplyTempFiles(t, secondTarget)
+}
+
 func TestExecuteApplyRejectsUnimplementedOperations(t *testing.T) {
 	for _, operation := range []MemoryOperation{OperationUpdate, OperationArchive} {
 		t.Run(string(operation), func(t *testing.T) {
@@ -358,6 +494,67 @@ func newApplyExecuteFixture(t *testing.T, operation MemoryOperation, initialCont
 		policy:       policy,
 		backupPlan:   plan,
 		backupResult: result,
+	}
+}
+
+func newApplyExecuteMultiPatchFixture(t *testing.T, tempDir string, initialContents map[string]string, patches []MemoryPatch) applyExecuteFixture {
+	t.Helper()
+
+	for targetPath, content := range initialContents {
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			t.Fatalf("MkdirAll(%q) error = %v", filepath.Dir(targetPath), err)
+		}
+		if err := os.WriteFile(targetPath, []byte(content), 0o600); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", targetPath, err)
+		}
+	}
+
+	proposal := NewProposal(NewProposalOptions{
+		ProposalID: "mem-apply-execute-multi",
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: patches[0].TargetPath,
+		Operation:  patches[0].Operation,
+		Reason:     "Execute multi-patch apply proposal.",
+		CreatedAt:  time.Date(2026, 5, 24, 13, 0, 0, 0, time.UTC),
+		Patches:    patches,
+	})
+	policy := loadExamplePolicy(t)
+	approval := mustBuildBackupPlanApproval(t, proposal, policy)
+	plan, err := BuildBackupPlan(proposal, approval, policy, NewBackupPlanOptions{
+		BackupRoot: filepath.Join(tempDir, "backups"),
+		CreatedAt:  time.Date(2026, 5, 24, 13, 5, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("BuildBackupPlan() error = %v", err)
+	}
+	result, err := MaterializeBackup(plan, NewBackupMaterializeOptions{
+		CreatedAt: time.Date(2026, 5, 24, 13, 10, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("MaterializeBackup() error = %v", err)
+	}
+
+	return applyExecuteFixture{
+		targetPath:   patches[0].TargetPath,
+		proposal:     proposal,
+		approval:     approval,
+		policy:       policy,
+		backupPlan:   plan,
+		backupResult: result,
+	}
+}
+
+func assertApplyResultJSONValid(t *testing.T, result ApplyResult) {
+	t.Helper()
+
+	data, err := result.JSON()
+	if err != nil {
+		t.Fatalf("result.JSON() error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("apply result JSON invalid: %s", data)
 	}
 }
 

@@ -397,6 +397,8 @@ It also validates the backup chain before writing:
 
 If any proposal, approval, policy, target, backup plan, or backup result check fails, apply execution fails before writing target files.
 
+For multi-patch apply execution, DeonClaw prepares all temporary apply files first, validates all temporary contents, and validates all target paths before any final rename. If preparation or validation fails, no target path is changed and temporary files are removed.
+
 Supported operations:
 
 - `create` writes content to a temporary file in the target directory, validates the temporary content, then renames it to a new target and fails if the target already exists
