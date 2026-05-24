@@ -30,7 +30,7 @@ proposal -> lint -> apply dry-run -> approval -> preflight -> backup plan -> bac
 - internal/workers: external worker adapters
 - internal/runtime: workspace lifecycle
 - internal/policy: path policy
-- internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/apply-execute
+- internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/apply-execute
 - internal/contextpack: scoped context generation
 - internal/domains: domain config
 - internal/store: persistence

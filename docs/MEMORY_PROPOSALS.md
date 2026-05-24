@@ -277,6 +277,46 @@ Safety checks:
 - `--output` must not be inside `backup_root`
 - `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
 
+## Restore Dry Run
+
+`deonctl memory proposal restore` currently supports restore previews only:
+
+```bash
+deonctl memory proposal restore \
+  --backup-plan backup-plan.json \
+  --backup-result backup-result.json \
+  --dry-run \
+  --output restore-preview.json
+```
+
+`--dry-run` is required.
+
+The command loads `backup-plan.json` and `backup-result.json`.
+
+It validates that the backup result belongs to the backup plan, including proposal, approval, run, task, domain, and backup root identity.
+
+It validates that the backup plan contains a restore plan.
+
+For each restore item:
+
+- if `exists: true`, the preview reports that `backup_path` would be restored to `target_path`
+- if `exists: false`, the preview reports that `target_path` would be removed if it exists
+
+For existing original targets, restore dry-run verifies the current `backup_path` SHA-256 against `backup_result.backup_sha256`.
+
+Restore dry-run does not write any `target_path`.
+
+Restore dry-run does not remove files.
+
+Restore dry-run does not make a Git commit.
+
+Safety checks:
+
+- `--output` must not be any backup item `target_path`
+- `--output` must not be any backup item `backup_path`
+- `--output` must not be inside `backup_root`
+- `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
+
 ## Apply Execute
 
 `deonctl memory proposal apply-execute` performs the real memory write for the limited create/append MVP:
@@ -363,4 +403,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, and real apply for `create`/`append`. It still does not implement real `update`/`archive` apply or commit memory changes.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, restore dry-run, and real apply for `create`/`append`. It still does not implement real restore, real `update`/`archive` apply, or commit memory changes.

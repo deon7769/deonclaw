@@ -49,9 +49,11 @@ Implemented:
 - backup/restore plan
 - backup materialization
 - real memory apply for create/append
+- restore dry-run
 
 Not implemented yet:
 
+- restore real
 - real memory apply for update/archive
 - OpenCode worker
 - Docker runtime

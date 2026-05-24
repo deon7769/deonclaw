@@ -41,6 +41,7 @@ Usage:
   deonctl memory proposal apply-preflight --proposal <path> --approval <path> --policy <path> [--output <path>]
   deonctl memory proposal backup-plan --proposal <path> --approval <path> --policy <path> --output <path>
   deonctl memory proposal backup-materialize --backup-plan <path> --output <path>
+  deonctl memory proposal restore --backup-plan <path> --backup-result <path> --dry-run --output <path>
   deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
@@ -198,6 +199,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMemoryProposalBackupMaterialize(opts, stdout, stderr)
+		case "restore":
+			opts, err := parseMemoryProposalRestoreOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalRestore(opts, stdout, stderr)
 		case "apply-execute":
 			opts, err := parseMemoryProposalApplyExecuteOptions(args[3:])
 			if err != nil {
@@ -968,6 +977,101 @@ func runMemoryProposalBackupMaterialize(opts memoryProposalBackupMaterializeOpti
 	return 0
 }
 
+type memoryProposalRestoreOptions struct {
+	backupPlanPath   string
+	backupResultPath string
+	dryRun           bool
+	outputPath       string
+}
+
+func parseMemoryProposalRestoreOptions(args []string) (memoryProposalRestoreOptions, error) {
+	var opts memoryProposalRestoreOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--backup-plan":
+			if i+1 >= len(args) {
+				return memoryProposalRestoreOptions{}, fmt.Errorf("missing value for --backup-plan")
+			}
+			opts.backupPlanPath = args[i+1]
+			i++
+		case "--backup-result":
+			if i+1 >= len(args) {
+				return memoryProposalRestoreOptions{}, fmt.Errorf("missing value for --backup-result")
+			}
+			opts.backupResultPath = args[i+1]
+			i++
+		case "--dry-run":
+			opts.dryRun = true
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalRestoreOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return memoryProposalRestoreOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.backupPlanPath == "" {
+		return memoryProposalRestoreOptions{}, fmt.Errorf("missing --backup-plan")
+	}
+	if opts.backupResultPath == "" {
+		return memoryProposalRestoreOptions{}, fmt.Errorf("missing --backup-result")
+	}
+	if !opts.dryRun {
+		return memoryProposalRestoreOptions{}, fmt.Errorf("missing --dry-run")
+	}
+	if opts.outputPath == "" {
+		return memoryProposalRestoreOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalRestore(opts memoryProposalRestoreOptions, stdout io.Writer, stderr io.Writer) int {
+	plan, err := memory.LoadBackupPlanFromFile(opts.backupPlanPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal restore failed: %v\n", err)
+		return 1
+	}
+	result, err := memory.LoadBackupResultFromFile(opts.backupResultPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal restore failed: %v\n", err)
+		return 1
+	}
+	if outputConflictsWithBackupPlanTarget(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal restore failed: refusing to write restore preview artifact to target_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputConflictsWithBackupPlanBackupPath(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal restore failed: refusing to write restore preview artifact to backup_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesBackupRoot(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal restore failed: refusing to write restore preview artifact inside backup_root %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesMemoryDomain(opts.outputPath, nil) {
+		fmt.Fprintf(stderr, "memory proposal restore failed: refusing to write restore preview artifact inside memory domain %q\n", opts.outputPath)
+		return 1
+	}
+
+	preview, err := memory.BuildRestorePreview(plan, result, memory.NewRestorePreviewOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal restore failed: %v\n", err)
+		return 1
+	}
+	if err := writeRestorePreview(opts.outputPath, preview); err != nil {
+		fmt.Fprintf(stderr, "memory proposal restore failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "restore preview written: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "proposal_id: %s\n", preview.ProposalID)
+	fmt.Fprintf(stdout, "approval_id: %s\n", preview.ApprovalID)
+	fmt.Fprintf(stdout, "items: %d\n", len(preview.Items))
+	return 0
+}
+
 type memoryProposalApplyExecuteOptions struct {
 	proposalPath     string
 	approvalPath     string
@@ -1136,6 +1240,20 @@ func outputTouchesBackupRoot(outputPath string, plan memory.BackupPlan) bool {
 
 func writeBackupResult(outputPath string, result memory.BackupResult) error {
 	data, err := result.JSON()
+	if err != nil {
+		return err
+	}
+	outputDir := filepath.Dir(outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(outputPath, data, 0o600)
+}
+
+func writeRestorePreview(outputPath string, preview memory.RestorePreview) error {
+	data, err := preview.JSON()
 	if err != nil {
 		return err
 	}
