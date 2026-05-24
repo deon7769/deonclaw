@@ -16,6 +16,7 @@ type ApplyResultItemStatus string
 const (
 	ApplyResultStatusCreated  ApplyResultItemStatus = "created"
 	ApplyResultStatusAppended ApplyResultItemStatus = "appended"
+	ApplyResultStatusUpdated  ApplyResultItemStatus = "updated"
 )
 
 type ApplyResultStatus string
@@ -331,9 +332,10 @@ func validateApplyAction(index int, action ApplyPreviewAction, planByTarget map[
 	if _, ok := planByTarget[applyPathKey(action.TargetPath)]; !ok {
 		return fmt.Errorf("apply action[%d] target_path %q is not covered by backup plan", index, action.TargetPath)
 	}
+	targetKey := applyPathKey(action.TargetPath)
+	planItem := planByTarget[targetKey]
 	switch action.Operation {
 	case OperationCreate:
-		targetKey := applyPathKey(action.TargetPath)
 		if createTargets[targetKey] {
 			return fmt.Errorf("apply action[%d] duplicate create target_path %q", index, action.TargetPath)
 		}
@@ -353,7 +355,21 @@ func validateApplyAction(index int, action ApplyPreviewAction, planByTarget map[
 		if err == nil && info.IsDir() {
 			return fmt.Errorf("apply action[%d] target_path %q is a directory", index, action.TargetPath)
 		}
-	case OperationUpdate, OperationArchive:
+	case OperationUpdate:
+		if !planItem.Exists {
+			return fmt.Errorf("apply action[%d] update target_path %q requires backup plan exists=true", index, action.TargetPath)
+		}
+		info, err := os.Stat(action.TargetPath)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("apply action[%d] update target_path %q does not exist", index, action.TargetPath)
+		}
+		if err != nil {
+			return fmt.Errorf("apply action[%d] stat target_path %q: %w", index, action.TargetPath, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("apply action[%d] target_path %q is a directory", index, action.TargetPath)
+		}
+	case OperationArchive:
 		return fmt.Errorf("apply action[%d] operation not implemented: %s", index, action.Operation)
 	default:
 		return fmt.Errorf("apply action[%d] operation %q is not supported", index, action.Operation)
@@ -507,6 +523,16 @@ func prepareApplyActionTemp(item preparedApplyItem, hooksByTarget map[string]ato
 			return stagedApplyItem{}, fmt.Errorf("read target_path %q for append: %w", action.TargetPath, err)
 		}
 		content = string(currentContent) + action.Content
+	case OperationUpdate:
+		if !planItem.Exists {
+			return stagedApplyItem{}, fmt.Errorf("backup item target_path %q must exist for update", action.TargetPath)
+		}
+		mode = atomicApplyModeReplace
+		status = ApplyResultStatusUpdated
+		if planItem.SHA256 == nil || strings.TrimSpace(*planItem.SHA256) == "" {
+			return stagedApplyItem{}, fmt.Errorf("backup item target_path %q missing sha256 for update", action.TargetPath)
+		}
+		expectedCurrentSHA256 = *planItem.SHA256
 	default:
 		return stagedApplyItem{}, fmt.Errorf("operation not implemented: %s", action.Operation)
 	}
