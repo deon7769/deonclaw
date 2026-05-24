@@ -41,6 +41,7 @@ Usage:
   deonctl memory proposal apply-preflight --proposal <path> --approval <path> --policy <path> [--output <path>]
   deonctl memory proposal backup-plan --proposal <path> --approval <path> --policy <path> --output <path>
   deonctl memory proposal backup-materialize --backup-plan <path> --output <path>
+  deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -197,6 +198,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMemoryProposalBackupMaterialize(opts, stdout, stderr)
+		case "apply-execute":
+			opts, err := parseMemoryProposalApplyExecuteOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalApplyExecute(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -959,6 +968,147 @@ func runMemoryProposalBackupMaterialize(opts memoryProposalBackupMaterializeOpti
 	return 0
 }
 
+type memoryProposalApplyExecuteOptions struct {
+	proposalPath     string
+	approvalPath     string
+	policyPath       string
+	backupPlanPath   string
+	backupResultPath string
+	outputPath       string
+	confirmApply     bool
+}
+
+func parseMemoryProposalApplyExecuteOptions(args []string) (memoryProposalApplyExecuteOptions, error) {
+	var opts memoryProposalApplyExecuteOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--proposal":
+			if i+1 >= len(args) {
+				return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalPath = args[i+1]
+			i++
+		case "--approval":
+			if i+1 >= len(args) {
+				return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--backup-plan":
+			if i+1 >= len(args) {
+				return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing value for --backup-plan")
+			}
+			opts.backupPlanPath = args[i+1]
+			i++
+		case "--backup-result":
+			if i+1 >= len(args) {
+				return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing value for --backup-result")
+			}
+			opts.backupResultPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--confirm-apply":
+			opts.confirmApply = true
+		default:
+			return memoryProposalApplyExecuteOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.proposalPath == "" {
+		return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.approvalPath == "" {
+		return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.policyPath == "" {
+		return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.backupPlanPath == "" {
+		return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing --backup-plan")
+	}
+	if opts.backupResultPath == "" {
+		return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing --backup-result")
+	}
+	if opts.outputPath == "" {
+		return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing --output")
+	}
+	if !opts.confirmApply {
+		return memoryProposalApplyExecuteOptions{}, fmt.Errorf("missing --confirm-apply")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalApplyExecute(opts memoryProposalApplyExecuteOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal, err := memory.LoadProposalFromFile(opts.proposalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
+		return 1
+	}
+	approval, err := memory.LoadApprovalFromFile(opts.approvalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
+		return 1
+	}
+	policy, err := memory.LoadPolicyFromFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
+		return 1
+	}
+	plan, err := memory.LoadBackupPlanFromFile(opts.backupPlanPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
+		return 1
+	}
+	backupResult, err := memory.LoadBackupResultFromFile(opts.backupResultPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
+		return 1
+	}
+
+	if outputConflictsWithApprovalTarget(opts.outputPath, proposal) || outputConflictsWithBackupPlanTarget(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: refusing to write apply result artifact to target_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputConflictsWithBackupPlanBackupPath(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: refusing to write apply result artifact to backup_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesBackupRoot(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: refusing to write apply result artifact inside backup_root %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesMemoryDomain(opts.outputPath, policy) {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: refusing to write apply result artifact inside memory domain %q\n", opts.outputPath)
+		return 1
+	}
+
+	result, err := memory.ExecuteApply(proposal, approval, policy, plan, backupResult, memory.NewApplyExecuteOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
+		return 1
+	}
+	if err := writeApplyResult(opts.outputPath, result); err != nil {
+		fmt.Fprintf(stderr, "memory proposal apply-execute failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "apply result written: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "proposal_id: %s\n", result.ProposalID)
+	fmt.Fprintf(stdout, "approval_id: %s\n", result.ApprovalID)
+	fmt.Fprintf(stdout, "items: %d\n", len(result.Items))
+	return 0
+}
+
 func outputConflictsWithBackupPlanTarget(outputPath string, plan memory.BackupPlan) bool {
 	for _, item := range plan.Items {
 		if sameCleanPath(outputPath, item.TargetPath) {
@@ -985,6 +1135,20 @@ func outputTouchesBackupRoot(outputPath string, plan memory.BackupPlan) bool {
 }
 
 func writeBackupResult(outputPath string, result memory.BackupResult) error {
+	data, err := result.JSON()
+	if err != nil {
+		return err
+	}
+	outputDir := filepath.Dir(outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(outputPath, data, 0o600)
+}
+
+func writeApplyResult(outputPath string, result memory.ApplyResult) error {
 	data, err := result.JSON()
 	if err != nil {
 		return err

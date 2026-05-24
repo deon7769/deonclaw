@@ -38,7 +38,7 @@ Lint failure does not change the run status yet.
 
 ## Apply Dry Run
 
-`deonctl memory proposal apply` only supports dry-run previews today:
+`deonctl memory proposal apply` supports dry-run previews:
 
 ```bash
 deonctl memory proposal apply \
@@ -49,11 +49,11 @@ deonctl memory proposal apply \
 
 `--dry-run` is required.
 
-Real apply does not exist yet.
+Real apply is a separate `apply-execute` step after approval, preflight, backup planning, and backup materialization.
 
 The command does not apply the proposal and does not write memory files. It does not write to `mysecondbrain`, `escalasoft_brain`, the proposal `target_path`, or any patch target path.
 
-It builds an apply preview that reports what would happen if a future approved apply step existed.
+It builds an apply preview that reports what a later approved apply-execute step would do.
 
 The proposal lint must pass before the preview can reach `dry_run_ok`. If proposal parsing, structural validation, or policy lint fails, the preview status is `failed`.
 
@@ -277,6 +277,66 @@ Safety checks:
 - `--output` must not be inside `backup_root`
 - `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
 
+## Apply Execute
+
+`deonctl memory proposal apply-execute` performs the real memory write for the limited create/append MVP:
+
+```bash
+deonctl memory proposal apply-execute \
+  --proposal memory-proposal.json \
+  --approval memory-approval.json \
+  --policy configs/examples/memory-policy.yaml \
+  --backup-plan backup-plan.json \
+  --backup-result backup-result.json \
+  --output apply-result.json \
+  --confirm-apply
+```
+
+`--confirm-apply` is required.
+
+The command loads the current proposal, approval artifact, memory policy, backup plan, and backup result.
+
+Before writing any target path, it runs apply preflight again. Apply execution is blocked unless preflight status is `preflight_ok`.
+
+It also validates the backup chain before writing:
+
+- backup plan `proposal_id` and `approval_id` must match the loaded proposal and approval
+- backup result `proposal_id` and `approval_id` must match the loaded proposal and approval
+- backup result must cover every backup plan item
+- existing targets in the backup plan must have been copied in the backup result
+- copied backup files must still hash to the recorded `backup_sha256`
+- current target SHA-256 must still match the backup plan SHA-256 for targets that existed when the plan was created
+- targets that were missing during backup planning must still be missing before apply
+
+If any proposal, approval, policy, target, backup plan, or backup result check fails, apply execution fails before writing target files.
+
+Supported operations:
+
+- `create` creates a new file and fails if the target already exists
+- `append` appends to an existing file, or creates the file when the approved append target is still missing
+
+Unsupported operations:
+
+- `update` fails with `operation not implemented`
+- `archive` fails with `operation not implemented`
+
+Apply execution creates target directories when needed.
+
+The generated `apply-result.json` records each applied target, operation, status, bytes written, and final SHA-256.
+
+Apply execution does not make a Git commit.
+
+Apply execution does not implement restore.
+
+Safety checks:
+
+- `--output` must not be any proposal or patch `target_path`
+- `--output` must not be any backup item `target_path`
+- `--output` must not be any backup item `backup_path`
+- `--output` must not be inside `backup_root`
+- `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
+- apply execution only writes effective patch target paths
+
 ## Summary Status
 
 Run summaries report one of these memory proposal states:
@@ -295,7 +355,7 @@ The summary also includes:
 
 ## Policy Boundary
 
-Memory proposal lint enforces policy boundaries before any future approval/apply workflow exists.
+Memory proposal lint enforces policy boundaries before approval and apply execution.
 
 For example:
 
@@ -303,4 +363,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, and backup materialization. It still does not perform real memory apply or commit memory changes.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, and real apply for `create`/`append`. It still does not implement real `update`/`archive` apply or commit memory changes.

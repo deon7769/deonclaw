@@ -1689,6 +1689,167 @@ func TestRunMemoryProposalBackupMaterializeRefusesOutputInsideMemoryDomain(t *te
 	}
 }
 
+func TestRunMemoryProposalApplyExecuteCreateWritesResult(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "created.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, targetPath, memory.OperationCreate, "", "created memory\n")
+	outputPath := filepath.Join(tempDir, memory.ApplyResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "apply result written: "+outputPath) {
+		t.Fatalf("stdout = %q, want apply result output", stdout.String())
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "created memory\n" {
+		t.Fatalf("target content = %q, want created content", got)
+	}
+	result := readApplyResultFile(t, outputPath)
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].Status != memory.ApplyResultStatusCreated {
+		t.Fatalf("status = %q, want %q", result.Items[0].Status, memory.ApplyResultStatusCreated)
+	}
+}
+
+func TestRunMemoryProposalApplyExecuteAppendWritesResult(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "target.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, targetPath, memory.OperationAppend, "existing memory\n", "appended memory\n")
+	outputPath := filepath.Join(tempDir, memory.ApplyResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "existing memory\nappended memory\n" {
+		t.Fatalf("target content = %q, want appended content", got)
+	}
+	result := readApplyResultFile(t, outputPath)
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(result.Items))
+	}
+	if result.Items[0].Status != memory.ApplyResultStatusAppended {
+		t.Fatalf("status = %q, want %q", result.Items[0].Status, memory.ApplyResultStatusAppended)
+	}
+	if result.Items[0].BytesWritten != int64(len("appended memory\n")) {
+		t.Fatalf("bytes_written = %d, want %d", result.Items[0].BytesWritten, len("appended memory\n"))
+	}
+}
+
+func TestRunMemoryProposalApplyExecuteRequiresConfirmApply(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "created.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, targetPath, memory.OperationCreate, "", "created memory\n")
+	outputPath := filepath.Join(tempDir, memory.ApplyResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, outputPath, false, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --confirm-apply") {
+		t.Fatalf("stderr = %q, want missing confirm", stderr.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target was written without confirm: %v", err)
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("apply result was written without confirm: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyExecuteRefusesOutputAtTargetPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "created.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, targetPath, memory.OperationCreate, "", "created memory\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, targetPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write apply result artifact to target_path") {
+		t.Fatalf("stderr = %q, want target refusal", stderr.String())
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target was written despite output refusal: %v", err)
+	}
+}
+
+func TestRunMemoryProposalApplyExecuteRefusesOutputInsideBackupRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, targetPath, memory.OperationAppend, "existing memory\n", "appended memory\n")
+	outputPath := filepath.Join(artifacts.backupPlan.BackupRoot, "apply-result.json")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, outputPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write apply result artifact inside backup_root") {
+		t.Fatalf("stderr = %q, want backup_root refusal", stderr.String())
+	}
+	if _, err := os.Stat(outputPath); !os.IsNotExist(err) {
+		t.Fatalf("output inside backup_root was written unexpectedly: %v", err)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestRunMemoryProposalApplyExecuteRefusesOutputAtBackupPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, targetPath, memory.OperationAppend, "existing memory\n", "appended memory\n")
+	backupPath := artifacts.backupPlan.Items[0].BackupPath
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, backupPath, true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write apply result artifact to backup_path") {
+		t.Fatalf("stderr = %q, want backup_path refusal", stderr.String())
+	}
+	if got := string(mustReadCLIFile(t, backupPath)); got != "existing memory\n" {
+		t.Fatalf("backup_path content = %q, want backup copy unchanged", got)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestRunMemoryProposalApplyExecuteRefusesOutputInsideMemoryDomain(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	artifacts := buildCLIApplyExecuteArtifacts(t, tempDir, targetPath, memory.OperationAppend, "existing memory\n", "appended memory\n")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runApplyExecute(t, artifacts, "/vault/mysecondbrain/apply-result.json", true, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write apply result artifact inside memory domain") {
+		t.Fatalf("stderr = %q, want memory domain refusal", stderr.String())
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -2169,6 +2330,37 @@ func readBackupResultFile(t *testing.T, path string) memory.BackupResult {
 	return result
 }
 
+func writeBackupResultFile(t *testing.T, dir string, result memory.BackupResult) string {
+	t.Helper()
+
+	data, err := result.JSON()
+	if err != nil {
+		t.Fatalf("result.JSON() error = %v", err)
+	}
+	path := filepath.Join(dir, memory.BackupResultJSONArtifactName)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write backup result file: %v", err)
+	}
+	return path
+}
+
+func readApplyResultFile(t *testing.T, path string) memory.ApplyResult {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(apply result) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("apply result output is invalid JSON: %s", data)
+	}
+	var result memory.ApplyResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal(apply result) error = %v", err)
+	}
+	return result
+}
+
 func runBackupPlan(t *testing.T, proposalPath string, approvalPath string, outputPath string, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
 	t.Helper()
 	return run([]string{
@@ -2197,6 +2389,81 @@ func runBackupMaterialize(t *testing.T, backupPlanPath string, outputPath string
 		"--output",
 		outputPath,
 	}, stdout, stderr)
+}
+
+type cliApplyExecuteArtifacts struct {
+	proposalPath     string
+	approvalPath     string
+	backupPlanPath   string
+	backupResultPath string
+	backupPlan       memory.BackupPlan
+}
+
+func buildCLIApplyExecuteArtifacts(t *testing.T, tempDir string, targetPath string, operation memory.MemoryOperation, initialContent string, patchContent string) cliApplyExecuteArtifacts {
+	t.Helper()
+	if initialContent != "" {
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			t.Fatalf("MkdirAll(target dir) error = %v", err)
+		}
+		if err := os.WriteFile(targetPath, []byte(initialContent), 0o600); err != nil {
+			t.Fatalf("WriteFile(target) error = %v", err)
+		}
+	}
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-apply-execute-" + string(operation),
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  operation,
+		Reason:     "Apply execute.",
+		CreatedAt:  time.Date(2026, 5, 24, 12, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: operation, Content: patchContent},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	plan, err := memory.BuildBackupPlan(proposal, approval, policy, memory.NewBackupPlanOptions{BackupRoot: filepath.Join(tempDir, "backups")})
+	if err != nil {
+		t.Fatalf("BuildBackupPlan() error = %v", err)
+	}
+	backupResult, err := memory.MaterializeBackup(plan, memory.NewBackupMaterializeOptions{})
+	if err != nil {
+		t.Fatalf("MaterializeBackup() error = %v", err)
+	}
+	return cliApplyExecuteArtifacts{
+		proposalPath:     writeMemoryProposalFile(t, tempDir, proposal),
+		approvalPath:     writeMemoryApprovalFile(t, tempDir, approval),
+		backupPlanPath:   writeBackupPlanFile(t, tempDir, plan),
+		backupResultPath: writeBackupResultFile(t, tempDir, backupResult),
+		backupPlan:       plan,
+	}
+}
+
+func runApplyExecute(t *testing.T, artifacts cliApplyExecuteArtifacts, outputPath string, confirm bool, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
+	t.Helper()
+	args := []string{
+		"memory",
+		"proposal",
+		"apply-execute",
+		"--proposal",
+		artifacts.proposalPath,
+		"--approval",
+		artifacts.approvalPath,
+		"--policy",
+		filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+		"--backup-plan",
+		artifacts.backupPlanPath,
+		"--backup-result",
+		artifacts.backupResultPath,
+		"--output",
+		outputPath,
+	}
+	if confirm {
+		args = append(args, "--confirm-apply")
+	}
+	return run(args, stdout, stderr)
 }
 
 func buildCLIBackupPlan(t *testing.T, tempDir string, targetPath string, operation memory.MemoryOperation) memory.BackupPlan {
