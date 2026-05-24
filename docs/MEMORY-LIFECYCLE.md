@@ -235,11 +235,11 @@ text: string
 - `deonctl memory proposal apply --dry-run`
 - `deonctl memory proposal approve`
 - `deonctl memory proposal apply-preflight`
+- `deonctl memory proposal backup-plan`
 
 ## Future memory commands
 
 - `deonctl memory proposal apply`
-- `deonctl memory backup plan`
 - `deonctl memory restore`
 - `deonctl memory scan`
 - `deonctl memory renew`

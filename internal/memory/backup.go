@@ -15,18 +15,18 @@ import (
 const BackupPlanJSONArtifactName = "backup-plan.json"
 
 type BackupPlan struct {
-	ProposalID  string        `json:"proposal_id"`
-	ApprovalID  string        `json:"approval_id"`
-	RunID       string        `json:"run_id"`
-	TaskID      string        `json:"task_id"`
-	Domain      string        `json:"domain"`
-	BackupRoot  string        `json:"backup_root"`
-	Entries     []BackupEntry `json:"entries"`
-	RestorePlan RestorePlan   `json:"restore_plan"`
-	CreatedAt   time.Time     `json:"created_at"`
+	ProposalID  string       `json:"proposal_id"`
+	ApprovalID  string       `json:"approval_id"`
+	RunID       string       `json:"run_id"`
+	TaskID      string       `json:"task_id"`
+	Domain      string       `json:"domain"`
+	BackupRoot  string       `json:"backup_root"`
+	Items       []BackupItem `json:"items"`
+	RestorePlan RestorePlan  `json:"restore_plan"`
+	CreatedAt   time.Time    `json:"created_at"`
 }
 
-type BackupEntry struct {
+type BackupItem struct {
 	TargetPath string          `json:"target_path"`
 	Exists     bool            `json:"exists"`
 	BackupPath string          `json:"backup_path"`
@@ -36,12 +36,12 @@ type BackupEntry struct {
 }
 
 type RestorePlan struct {
-	ProposalID string         `json:"proposal_id"`
-	ApprovalID string         `json:"approval_id"`
-	Entries    []RestoreEntry `json:"entries"`
+	ProposalID string        `json:"proposal_id"`
+	ApprovalID string        `json:"approval_id"`
+	Items      []RestoreItem `json:"items"`
 }
 
-type RestoreEntry struct {
+type RestoreItem struct {
 	TargetPath string          `json:"target_path"`
 	BackupPath string          `json:"backup_path"`
 	Exists     bool            `json:"exists"`
@@ -56,7 +56,11 @@ type NewBackupPlanOptions struct {
 }
 
 func BuildBackupPlan(proposal MemoryProposal, approval MemoryApproval, policy *MemoryPolicy, opts NewBackupPlanOptions) (BackupPlan, error) {
-	backupRoot, err := cleanBackupRoot(opts.BackupRoot)
+	backupRoot := opts.BackupRoot
+	if strings.TrimSpace(backupRoot) == "" {
+		backupRoot = defaultBackupRoot(proposal.ProposalID)
+	}
+	backupRoot, err := cleanBackupRoot(backupRoot)
 	if err != nil {
 		return BackupPlan{}, err
 	}
@@ -85,28 +89,35 @@ func BuildBackupPlan(proposal MemoryProposal, approval MemoryApproval, policy *M
 		TaskID:     proposal.TaskID,
 		Domain:     proposal.Domain,
 		BackupRoot: backupRoot,
-		Entries:    []BackupEntry{},
+		Items:      []BackupItem{},
 		CreatedAt:  createdAt.UTC(),
 	}
 	restore := RestorePlan{
 		ProposalID: proposal.ProposalID,
 		ApprovalID: approval.ApprovalID,
-		Entries:    []RestoreEntry{},
+		Items:      []RestoreItem{},
 	}
 
+	seenTargets := map[string]bool{}
 	for _, action := range preview.Actions {
-		entry, err := buildBackupEntry(backupRoot, action.TargetPath, action.Operation)
+		targetKey := backupTargetKey(action.TargetPath)
+		if seenTargets[targetKey] {
+			continue
+		}
+		seenTargets[targetKey] = true
+
+		item, err := buildBackupItem(backupRoot, action.TargetPath, action.Operation)
 		if err != nil {
 			return BackupPlan{}, err
 		}
-		plan.Entries = append(plan.Entries, entry)
-		restore.Entries = append(restore.Entries, RestoreEntry{
-			TargetPath: entry.TargetPath,
-			BackupPath: entry.BackupPath,
-			Exists:     entry.Exists,
-			SHA256:     cloneStringPointer(entry.SHA256),
-			SizeBytes:  cloneInt64Pointer(entry.SizeBytes),
-			Operation:  entry.Operation,
+		plan.Items = append(plan.Items, item)
+		restore.Items = append(restore.Items, RestoreItem{
+			TargetPath: item.TargetPath,
+			BackupPath: item.BackupPath,
+			Exists:     item.Exists,
+			SHA256:     cloneStringPointer(item.SHA256),
+			SizeBytes:  cloneInt64Pointer(item.SizeBytes),
+			Operation:  item.Operation,
 		})
 	}
 	plan.RestorePlan = restore
@@ -119,6 +130,19 @@ func (p BackupPlan) JSON() ([]byte, error) {
 		return nil, err
 	}
 	return append(data, '\n'), nil
+}
+
+func defaultBackupRoot(proposalID string) string {
+	proposalID = strings.TrimSpace(proposalID)
+	if proposalID == "" || hasPathTraversal(proposalID) {
+		proposalID = "unknown-proposal"
+	}
+	proposalID = strings.NewReplacer(
+		"\\", "-",
+		"/", "-",
+		":", "-",
+	).Replace(proposalID)
+	return filepath.Join(".deonclaw", "memory-backups", proposalID)
 }
 
 func cleanBackupRoot(backupRoot string) (string, error) {
@@ -136,21 +160,21 @@ func cleanBackupRoot(backupRoot string) (string, error) {
 	return cleaned, nil
 }
 
-func buildBackupEntry(backupRoot string, targetPath string, operation MemoryOperation) (BackupEntry, error) {
+func buildBackupItem(backupRoot string, targetPath string, operation MemoryOperation) (BackupItem, error) {
 	targetPath = strings.TrimSpace(targetPath)
 	if targetPath == "" {
-		return BackupEntry{}, fmt.Errorf("target_path is required")
+		return BackupItem{}, fmt.Errorf("target_path is required")
 	}
 	if hasPathTraversal(targetPath) {
-		return BackupEntry{}, fmt.Errorf("target_path %q contains path traversal", targetPath)
+		return BackupItem{}, fmt.Errorf("target_path %q contains path traversal", targetPath)
 	}
 
 	backupPath, err := backupPathForTarget(backupRoot, targetPath)
 	if err != nil {
-		return BackupEntry{}, err
+		return BackupItem{}, err
 	}
 
-	entry := BackupEntry{
+	item := BackupItem{
 		TargetPath: targetPath,
 		Exists:     false,
 		BackupPath: backupPath,
@@ -160,23 +184,27 @@ func buildBackupEntry(backupRoot string, targetPath string, operation MemoryOper
 	info, err := os.Stat(targetPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return entry, nil
+			return item, nil
 		}
-		return BackupEntry{}, fmt.Errorf("stat target_path %q: %w", targetPath, err)
+		return BackupItem{}, fmt.Errorf("stat target_path %q: %w", targetPath, err)
 	}
 	if info.IsDir() {
-		return BackupEntry{}, fmt.Errorf("target_path %q is a directory", targetPath)
+		return BackupItem{}, fmt.Errorf("target_path %q is a directory", targetPath)
 	}
 
 	hash, err := fileSHA256(targetPath)
 	if err != nil {
-		return BackupEntry{}, err
+		return BackupItem{}, err
 	}
 	size := info.Size()
-	entry.Exists = true
-	entry.SHA256 = &hash
-	entry.SizeBytes = &size
-	return entry, nil
+	item.Exists = true
+	item.SHA256 = &hash
+	item.SizeBytes = &size
+	return item, nil
+}
+
+func backupTargetKey(targetPath string) string {
+	return filepath.Clean(strings.TrimSpace(targetPath))
 }
 
 func backupPathForTarget(backupRoot string, targetPath string) (string, error) {

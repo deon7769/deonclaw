@@ -123,7 +123,7 @@ Task
  -> ApplyPreview
  -> MemoryApproval
  -> ApplyPreflight
- -> Future BackupPlan
+ -> BackupPlan
  -> Future ApplyResult
 ```
 

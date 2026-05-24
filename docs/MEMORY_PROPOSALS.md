@@ -184,6 +184,56 @@ Apply preflight does not write to `escalasoft_brain`.
 Apply preflight does not write to the proposal `target_path` or any patch target path.
 
 Apply preflight does not make a Git commit.
+
+## Backup Plan
+
+`deonctl memory proposal backup-plan` creates a backup and restore plan for the effective patch targets:
+
+```bash
+deonctl memory proposal backup-plan \
+  --proposal memory-proposal.json \
+  --approval memory-approval.json \
+  --policy configs/examples/memory-policy.yaml \
+  --output backup-plan.json
+```
+
+The command loads the proposal, approval artifact, and memory policy.
+
+It runs apply preflight first.
+
+Backup plan generation succeeds only when preflight status is `preflight_ok`.
+
+The command identifies every effective patch target. Empty patch `target_path` values use the proposal `target_path`, matching apply dry-run behavior.
+
+Repeated effective targets are deduplicated.
+
+Each backup item records:
+
+- `target_path`
+- `exists`
+- `operation`
+- `size_bytes`, when the target exists
+- `sha256`, when the target exists
+- suggested `backup_path`
+
+The backup plan embeds a restore plan with matching restore items.
+
+Backup plan generation does not copy files.
+
+Backup plan generation does not apply memory.
+
+Backup plan generation does not write to `mysecondbrain`.
+
+Backup plan generation does not write to `escalasoft_brain`.
+
+Backup plan generation does not write to the proposal `target_path` or any patch target path.
+
+The `--output` path must not be the proposal `target_path` or any effective patch target path.
+
+The `--output` path must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`.
+
+Backup plan generation does not make a Git commit.
+
 ## Summary Status
 
 Run summaries report one of these memory proposal states:
@@ -210,4 +260,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, and apply preflight. It still does not perform real memory apply or commit memory changes.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, and backup/restore plans. It still does not perform real memory apply or commit memory changes.

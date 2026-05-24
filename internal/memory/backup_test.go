@@ -12,48 +12,55 @@ import (
 )
 
 func TestBuildBackupPlanExistingTargetRecordsHashAndSize(t *testing.T) {
-	tempDir := t.TempDir()
-	targetPath := filepath.Join(tempDir, "target.md")
-	content := []byte("existing content\n")
-	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
-		t.Fatalf("WriteFile(target) error = %v", err)
-	}
-	proposal := testBackupPlanProposal("mem-backup-existing", []MemoryPatch{
-		{TargetPath: targetPath, Operation: OperationAppend, Content: "new content\n"},
-	})
-	policy := loadExamplePolicy(t)
-	approval := mustBuildBackupPlanApproval(t, proposal, policy)
+	for _, operation := range []MemoryOperation{OperationAppend, OperationUpdate} {
+		t.Run(string(operation), func(t *testing.T) {
+			tempDir := t.TempDir()
+			targetPath := filepath.Join(tempDir, "target.md")
+			content := []byte("existing content\n")
+			if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+				t.Fatalf("WriteFile(target) error = %v", err)
+			}
+			proposal := testBackupPlanProposal("mem-backup-existing-"+string(operation), []MemoryPatch{
+				{TargetPath: targetPath, Operation: operation, Content: "new content\n"},
+			})
+			policy := loadExamplePolicy(t)
+			approval := mustBuildBackupPlanApproval(t, proposal, policy)
 
-	plan, err := BuildBackupPlan(proposal, approval, policy, NewBackupPlanOptions{
-		BackupRoot: filepath.Join(tempDir, "backups"),
-		CreatedAt:  time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
-	})
-	if err != nil {
-		t.Fatalf("BuildBackupPlan() error = %v", err)
-	}
-	if len(plan.Entries) != 1 {
-		t.Fatalf("entries = %d, want 1", len(plan.Entries))
-	}
-	entry := plan.Entries[0]
-	if !entry.Exists {
-		t.Fatalf("exists = false, want true")
-	}
-	wantHashBytes := sha256.Sum256(content)
-	wantHash := hex.EncodeToString(wantHashBytes[:])
-	if entry.SHA256 == nil || *entry.SHA256 != wantHash {
-		t.Fatalf("sha256 = %v, want %s", entry.SHA256, wantHash)
-	}
-	if entry.SizeBytes == nil || *entry.SizeBytes != int64(len(content)) {
-		t.Fatalf("size_bytes = %v, want %d", entry.SizeBytes, len(content))
-	}
-	if !strings.HasPrefix(entry.BackupPath, filepath.Join(tempDir, "backups")) {
-		t.Fatalf("backup_path = %q, want under backup root", entry.BackupPath)
-	}
-	if _, err := os.Stat(entry.BackupPath); !os.IsNotExist(err) {
-		t.Fatalf("backup path was written unexpectedly: %v", err)
-	}
-	if string(mustReadFile(t, targetPath)) != string(content) {
-		t.Fatalf("target content changed")
+			plan, err := BuildBackupPlan(proposal, approval, policy, NewBackupPlanOptions{
+				BackupRoot: filepath.Join(tempDir, "backups"),
+				CreatedAt:  time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC),
+			})
+			if err != nil {
+				t.Fatalf("BuildBackupPlan() error = %v", err)
+			}
+			if len(plan.Items) != 1 {
+				t.Fatalf("items = %d, want 1", len(plan.Items))
+			}
+			item := plan.Items[0]
+			if !item.Exists {
+				t.Fatalf("exists = false, want true")
+			}
+			if item.Operation != operation {
+				t.Fatalf("operation = %q, want %q", item.Operation, operation)
+			}
+			wantHashBytes := sha256.Sum256(content)
+			wantHash := hex.EncodeToString(wantHashBytes[:])
+			if item.SHA256 == nil || *item.SHA256 != wantHash {
+				t.Fatalf("sha256 = %v, want %s", item.SHA256, wantHash)
+			}
+			if item.SizeBytes == nil || *item.SizeBytes != int64(len(content)) {
+				t.Fatalf("size_bytes = %v, want %d", item.SizeBytes, len(content))
+			}
+			if !strings.HasPrefix(item.BackupPath, filepath.Join(tempDir, "backups")) {
+				t.Fatalf("backup_path = %q, want under backup root", item.BackupPath)
+			}
+			if _, err := os.Stat(item.BackupPath); !os.IsNotExist(err) {
+				t.Fatalf("backup path was written unexpectedly: %v", err)
+			}
+			if string(mustReadFile(t, targetPath)) != string(content) {
+				t.Fatalf("target content changed")
+			}
+		})
 	}
 }
 
@@ -70,22 +77,22 @@ func TestBuildBackupPlanMissingTargetRecordsNotExists(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildBackupPlan() error = %v", err)
 	}
-	entry := plan.Entries[0]
-	if entry.Exists {
+	item := plan.Items[0]
+	if item.Exists {
 		t.Fatalf("exists = true, want false")
 	}
-	if entry.SHA256 != nil {
-		t.Fatalf("sha256 = %v, want nil", *entry.SHA256)
+	if item.SHA256 != nil {
+		t.Fatalf("sha256 = %v, want nil", *item.SHA256)
 	}
-	if entry.SizeBytes != nil {
-		t.Fatalf("size_bytes = %v, want nil", *entry.SizeBytes)
+	if item.SizeBytes != nil {
+		t.Fatalf("size_bytes = %v, want nil", *item.SizeBytes)
 	}
 	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
 		t.Fatalf("target was written unexpectedly: %v", err)
 	}
 }
 
-func TestBuildBackupPlanMultiplePatchesGenerateMultipleEntries(t *testing.T) {
+func TestBuildBackupPlanMultiplePatchesGenerateMultipleItems(t *testing.T) {
 	tempDir := t.TempDir()
 	first := filepath.Join(tempDir, "first.md")
 	second := filepath.Join(tempDir, "second.md")
@@ -100,11 +107,40 @@ func TestBuildBackupPlanMultiplePatchesGenerateMultipleEntries(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildBackupPlan() error = %v", err)
 	}
-	if len(plan.Entries) != 2 {
-		t.Fatalf("entries = %d, want 2", len(plan.Entries))
+	if len(plan.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(plan.Items))
 	}
-	if len(plan.RestorePlan.Entries) != 2 {
-		t.Fatalf("restore entries = %d, want 2", len(plan.RestorePlan.Entries))
+	if len(plan.RestorePlan.Items) != 2 {
+		t.Fatalf("restore items = %d, want 2", len(plan.RestorePlan.Items))
+	}
+}
+
+func TestBuildBackupPlanDeduplicatesRepeatedTargets(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "same.md")
+	content := []byte("existing content\n")
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	proposal := testBackupPlanProposal("mem-backup-dedupe", []MemoryPatch{
+		{TargetPath: targetPath, Operation: OperationAppend, Content: "first\n"},
+		{TargetPath: targetPath, Operation: OperationAppend, Content: "second\n"},
+	})
+	policy := loadExamplePolicy(t)
+	approval := mustBuildBackupPlanApproval(t, proposal, policy)
+
+	plan, err := BuildBackupPlan(proposal, approval, policy, NewBackupPlanOptions{BackupRoot: filepath.Join(tempDir, "backups")})
+	if err != nil {
+		t.Fatalf("BuildBackupPlan() error = %v", err)
+	}
+	if len(plan.Items) != 1 {
+		t.Fatalf("items = %d, want 1 deduplicated target", len(plan.Items))
+	}
+	if len(plan.RestorePlan.Items) != 1 {
+		t.Fatalf("restore items = %d, want 1 deduplicated target", len(plan.RestorePlan.Items))
+	}
+	if got := string(mustReadFile(t, targetPath)); got != string(content) {
+		t.Fatalf("target content = %q, want unchanged", got)
 	}
 }
 
@@ -163,7 +199,7 @@ func TestBuildBackupPlanJSONValid(t *testing.T) {
 		t.Fatalf("backup plan JSON invalid: %s", data)
 	}
 	output := string(data)
-	for _, want := range []string{"\"entries\"", "\"restore_plan\"", "\"backup_path\"", "\"target_path\""} {
+	for _, want := range []string{"\"items\"", "\"restore_plan\"", "\"backup_path\"", "\"target_path\""} {
 		if !strings.Contains(output, want) {
 			t.Fatalf("backup plan JSON = %s, want %s", output, want)
 		}
