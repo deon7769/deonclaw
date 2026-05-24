@@ -206,6 +206,154 @@ func TestBuildBackupPlanJSONValid(t *testing.T) {
 	}
 }
 
+func TestMaterializeBackupExistingTargetCopiesAndHashes(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	content := []byte("existing content\n")
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := mustBuildBackupPlanForMaterialize(t, tempDir, targetPath, OperationAppend)
+
+	result, err := MaterializeBackup(plan, NewBackupMaterializeOptions{
+		CreatedAt: time.Date(2026, 5, 24, 10, 0, 0, 0, time.UTC),
+	})
+	if err != nil {
+		t.Fatalf("MaterializeBackup() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("result items = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Status != BackupResultStatusCopied {
+		t.Fatalf("status = %q, want %q", item.Status, BackupResultStatusCopied)
+	}
+	if item.BackupSHA256 == nil || *item.BackupSHA256 == "" {
+		t.Fatalf("backup_sha256 is empty: %#v", item)
+	}
+	if got := string(mustReadFile(t, plan.Items[0].BackupPath)); got != string(content) {
+		t.Fatalf("backup content = %q, want %q", got, content)
+	}
+	if got := string(mustReadFile(t, targetPath)); got != string(content) {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+	if plan.Items[0].SHA256 == nil || *item.BackupSHA256 != *plan.Items[0].SHA256 {
+		t.Fatalf("backup_sha256 = %v, want plan sha256 %v", item.BackupSHA256, plan.Items[0].SHA256)
+	}
+}
+
+func TestMaterializeBackupMissingTargetSkipped(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "missing.md")
+	plan := mustBuildBackupPlanForMaterialize(t, tempDir, targetPath, OperationCreate)
+
+	result, err := MaterializeBackup(plan, NewBackupMaterializeOptions{})
+	if err != nil {
+		t.Fatalf("MaterializeBackup() error = %v", err)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("result items = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Status != BackupResultStatusSkippedMissing {
+		t.Fatalf("status = %q, want %q", item.Status, BackupResultStatusSkippedMissing)
+	}
+	if item.BackupSHA256 != nil {
+		t.Fatalf("backup_sha256 = %v, want nil", item.BackupSHA256)
+	}
+	if _, err := os.Stat(plan.Items[0].BackupPath); !os.IsNotExist(err) {
+		t.Fatalf("backup path was written unexpectedly: %v", err)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target was written unexpectedly: %v", err)
+	}
+}
+
+func TestMaterializeBackupTargetChangedSincePlanFails(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	original := []byte("original\n")
+	if err := os.WriteFile(targetPath, original, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := mustBuildBackupPlanForMaterialize(t, tempDir, targetPath, OperationAppend)
+	changed := []byte("changed\n")
+	if err := os.WriteFile(targetPath, changed, 0o600); err != nil {
+		t.Fatalf("WriteFile(changed target) error = %v", err)
+	}
+
+	_, err := MaterializeBackup(plan, NewBackupMaterializeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "changed since backup plan") {
+		t.Fatalf("MaterializeBackup() error = %v, want changed target failure", err)
+	}
+	if _, statErr := os.Stat(plan.Items[0].BackupPath); !os.IsNotExist(statErr) {
+		t.Fatalf("backup path was written despite target hash mismatch: %v", statErr)
+	}
+	if got := string(mustReadFile(t, targetPath)); got != string(changed) {
+		t.Fatalf("target content = %q, want changed content preserved", got)
+	}
+}
+
+func TestMaterializeBackupRejectsBackupPathOutsideRoot(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	if err := os.WriteFile(targetPath, []byte("content\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := mustBuildBackupPlanForMaterialize(t, tempDir, targetPath, OperationAppend)
+	plan.Items[0].BackupPath = filepath.Join(tempDir, "outside.md")
+
+	_, err := MaterializeBackup(plan, NewBackupMaterializeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "escapes backup_root") {
+		t.Fatalf("MaterializeBackup() error = %v, want backup root failure", err)
+	}
+	if _, statErr := os.Stat(plan.Items[0].BackupPath); !os.IsNotExist(statErr) {
+		t.Fatalf("outside backup path was written unexpectedly: %v", statErr)
+	}
+}
+
+func TestMaterializeBackupRejectsPathTraversal(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	if err := os.WriteFile(targetPath, []byte("content\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := mustBuildBackupPlanForMaterialize(t, tempDir, targetPath, OperationAppend)
+	plan.Items[0].BackupPath = plan.BackupRoot + string(filepath.Separator) + ".." + string(filepath.Separator) + "escape.md"
+
+	_, err := MaterializeBackup(plan, NewBackupMaterializeOptions{})
+	if err == nil || !strings.Contains(err.Error(), "path traversal") {
+		t.Fatalf("MaterializeBackup() error = %v, want path traversal failure", err)
+	}
+}
+
+func TestMaterializeBackupResultJSONValid(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	if err := os.WriteFile(targetPath, []byte("content\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := mustBuildBackupPlanForMaterialize(t, tempDir, targetPath, OperationAppend)
+	result, err := MaterializeBackup(plan, NewBackupMaterializeOptions{})
+	if err != nil {
+		t.Fatalf("MaterializeBackup() error = %v", err)
+	}
+
+	data, err := result.JSON()
+	if err != nil {
+		t.Fatalf("result.JSON() error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("backup result JSON invalid: %s", data)
+	}
+	output := string(data)
+	for _, want := range []string{"\"items\"", "\"backup_sha256\"", "\"status\"", "\"target_path\""} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("backup result JSON = %s, want %s", output, want)
+		}
+	}
+}
+
 func testBackupPlanProposal(id string, patches []MemoryPatch) MemoryProposal {
 	targetPath := "/vault/mysecondbrain/memory/inbox/run-001.md"
 	if len(patches) > 0 && strings.TrimSpace(patches[0].TargetPath) != "" {
@@ -237,6 +385,20 @@ func mustBuildBackupPlanApproval(t *testing.T, proposal MemoryProposal, policy *
 		t.Fatalf("BuildApproval() error = %v", err)
 	}
 	return approval
+}
+
+func mustBuildBackupPlanForMaterialize(t *testing.T, tempDir string, targetPath string, operation MemoryOperation) BackupPlan {
+	t.Helper()
+	proposal := testBackupPlanProposal("mem-backup-materialize-"+string(operation), []MemoryPatch{
+		{TargetPath: targetPath, Operation: operation, Content: "new content\n"},
+	})
+	policy := loadExamplePolicy(t)
+	approval := mustBuildBackupPlanApproval(t, proposal, policy)
+	plan, err := BuildBackupPlan(proposal, approval, policy, NewBackupPlanOptions{BackupRoot: filepath.Join(tempDir, "backups")})
+	if err != nil {
+		t.Fatalf("BuildBackupPlan() error = %v", err)
+	}
+	return plan
 }
 
 func mustReadFile(t *testing.T, path string) []byte {

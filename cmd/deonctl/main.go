@@ -40,6 +40,7 @@ Usage:
   deonctl memory proposal approve --proposal <path> --policy <path> --reviewer <name> --decision approved|rejected --reason <text> --output <path>
   deonctl memory proposal apply-preflight --proposal <path> --approval <path> --policy <path> [--output <path>]
   deonctl memory proposal backup-plan --proposal <path> --approval <path> --policy <path> --output <path>
+  deonctl memory proposal backup-materialize --backup-plan <path> --output <path>
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
@@ -188,6 +189,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMemoryProposalBackupPlan(opts, stdout, stderr)
+		case "backup-materialize":
+			opts, err := parseMemoryProposalBackupMaterializeOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMemoryProposalBackupMaterialize(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -876,6 +885,95 @@ func writeBackupPlan(outputPath string, plan memory.BackupPlan) error {
 	return os.WriteFile(outputPath, data, 0o600)
 }
 
+type memoryProposalBackupMaterializeOptions struct {
+	backupPlanPath string
+	outputPath     string
+}
+
+func parseMemoryProposalBackupMaterializeOptions(args []string) (memoryProposalBackupMaterializeOptions, error) {
+	var opts memoryProposalBackupMaterializeOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--backup-plan":
+			if i+1 >= len(args) {
+				return memoryProposalBackupMaterializeOptions{}, fmt.Errorf("missing value for --backup-plan")
+			}
+			opts.backupPlanPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return memoryProposalBackupMaterializeOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return memoryProposalBackupMaterializeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.backupPlanPath == "" {
+		return memoryProposalBackupMaterializeOptions{}, fmt.Errorf("missing --backup-plan")
+	}
+	if opts.outputPath == "" {
+		return memoryProposalBackupMaterializeOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runMemoryProposalBackupMaterialize(opts memoryProposalBackupMaterializeOptions, stdout io.Writer, stderr io.Writer) int {
+	plan, err := memory.LoadBackupPlanFromFile(opts.backupPlanPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: %v\n", err)
+		return 1
+	}
+	if outputConflictsWithBackupPlanTarget(opts.outputPath, plan) {
+		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: refusing to write backup result artifact to target_path %q\n", opts.outputPath)
+		return 1
+	}
+	if outputTouchesMemoryDomain(opts.outputPath, nil) {
+		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: refusing to write backup result artifact inside memory domain %q\n", opts.outputPath)
+		return 1
+	}
+
+	result, err := memory.MaterializeBackup(plan, memory.NewBackupMaterializeOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: %v\n", err)
+		return 1
+	}
+	if err := writeBackupResult(opts.outputPath, result); err != nil {
+		fmt.Fprintf(stderr, "memory proposal backup-materialize failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "backup result written: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "proposal_id: %s\n", result.ProposalID)
+	fmt.Fprintf(stdout, "approval_id: %s\n", result.ApprovalID)
+	fmt.Fprintf(stdout, "items: %d\n", len(result.Items))
+	return 0
+}
+
+func outputConflictsWithBackupPlanTarget(outputPath string, plan memory.BackupPlan) bool {
+	for _, item := range plan.Items {
+		if sameCleanPath(outputPath, item.TargetPath) {
+			return true
+		}
+	}
+	return false
+}
+
+func writeBackupResult(outputPath string, result memory.BackupResult) error {
+	data, err := result.JSON()
+	if err != nil {
+		return err
+	}
+	outputDir := filepath.Dir(outputPath)
+	if outputDir != "." {
+		if err := os.MkdirAll(outputDir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(outputPath, data, 0o600)
+}
+
 type memoryProposalApplyOptions struct {
 	proposalPath string
 	policyPath   string
@@ -970,6 +1068,9 @@ func outputTouchesMemoryDomain(outputPath string, policy *memory.MemoryPolicy) b
 		"/vault/mysecondbrain",
 		"vault/mysecondbrain",
 		"mysecondbrain",
+		"/domains/escalasoft_brain",
+		"domains/escalasoft_brain",
+		"escalasoft_brain",
 	}
 	if policy != nil {
 		for _, domainPolicy := range policy.IsolatedDomains {

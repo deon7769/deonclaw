@@ -8,7 +8,7 @@
 - Phase 3 - Workspace/path policy
 - Phase 4 - Domain config and context packs
 - Phase 5A - Memory proposal/lint/dry-run/approval/preflight
-- Phase 5B - Backup/restore plan
+- Phase 5B - Backup/restore plan and materialization
 
 ## Next milestones
 

@@ -21,7 +21,7 @@ Do not implement apply/OpenCode out of order.
 
 The current safe chain is:
 
-proposal -> lint -> apply dry-run -> approval -> preflight -> backup -> apply
+proposal -> lint -> apply dry-run -> approval -> preflight -> backup plan -> backup materialization -> apply
 
 ## Package boundaries
 
@@ -30,7 +30,7 @@ proposal -> lint -> apply dry-run -> approval -> preflight -> backup -> apply
 - internal/workers: external worker adapters
 - internal/runtime: workspace lifecycle
 - internal/policy: path policy
-- internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan
+- internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize
 - internal/contextpack: scoped context generation
 - internal/domains: domain config
 - internal/store: persistence

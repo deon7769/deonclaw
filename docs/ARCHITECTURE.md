@@ -124,6 +124,7 @@ Task
  -> MemoryApproval
  -> ApplyPreflight
  -> BackupPlan
+ -> BackupResult
  -> Future ApplyResult
 ```
 
@@ -160,7 +161,8 @@ The safe memory workflow is:
 5. approval artifact
 6. preflight with content-hash binding
 7. backup plan
-8. real apply, later
+8. backup materialization
+9. real apply, later
 
 Real apply is not implemented yet.
 

@@ -236,6 +236,7 @@ text: string
 - `deonctl memory proposal approve`
 - `deonctl memory proposal apply-preflight`
 - `deonctl memory proposal backup-plan`
+- `deonctl memory proposal backup-materialize`
 
 ## Future memory commands
 

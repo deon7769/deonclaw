@@ -47,6 +47,7 @@ Implemented:
 - approval content binding
 - apply preflight
 - backup/restore plan
+- backup materialization
 
 Not implemented yet:
 
@@ -193,6 +194,7 @@ proposal
 -> approval artifact
 -> preflight
 -> backup plan
+-> backup materialization
 -> apply
 ```
 

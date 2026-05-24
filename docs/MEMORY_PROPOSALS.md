@@ -234,6 +234,47 @@ The `--output` path must not be inside a memory domain such as `mysecondbrain` o
 
 Backup plan generation does not make a Git commit.
 
+## Backup Materialization
+
+`deonctl memory proposal backup-materialize` copies existing targets described by a backup plan into their planned backup paths:
+
+```bash
+deonctl memory proposal backup-materialize \
+  --backup-plan backup-plan.json \
+  --output backup-result.json
+```
+
+The command loads `backup-plan.json`.
+
+For each backup item:
+
+- `exists: false` is not copied and becomes `skipped_missing`
+- `exists: true` requires the current `target_path` SHA-256 to match the plan `sha256`
+- when the hash matches, the current `target_path` is copied to `backup_path`
+- missing backup directories are created as needed
+- after copying, DeonClaw records the copied backup file SHA-256 as `backup_sha256`
+
+The generated `backup-result.json` records each item status and hash evidence.
+
+Backup materialization does not write to any `target_path`.
+
+Backup materialization does not apply memory.
+
+Backup materialization does not write to `mysecondbrain`.
+
+Backup materialization does not write to `escalasoft_brain`.
+
+Backup materialization does not make a Git commit.
+
+Safety checks:
+
+- `backup_path` must stay inside `backup_root`
+- `target_path` and `backup_path` must not contain path traversal
+- `backup_path` must not equal `target_path`
+- if a target changed after backup-plan generation, materialization fails before copying that item
+- `--output` must not be any backup item `target_path`
+- `--output` must not be inside a memory domain such as `mysecondbrain` or `escalasoft_brain`
+
 ## Summary Status
 
 Run summaries report one of these memory proposal states:
@@ -260,4 +301,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, and backup/restore plans. It still does not perform real memory apply or commit memory changes.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, and backup materialization. It still does not perform real memory apply or commit memory changes.

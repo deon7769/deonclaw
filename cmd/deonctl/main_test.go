@@ -1521,6 +1521,111 @@ func TestRunMemoryProposalBackupPlanRefusesOutputInsideMemoryDomain(t *testing.T
 	}
 }
 
+func TestRunMemoryProposalBackupMaterializeExistingTargetWritesResult(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	content := []byte("existing content\n")
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := buildCLIBackupPlan(t, tempDir, targetPath, memory.OperationAppend)
+	planPath := writeBackupPlanFile(t, tempDir, plan)
+	outputPath := filepath.Join(tempDir, memory.BackupResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupMaterialize(t, planPath, outputPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "items: 1") {
+		t.Fatalf("stdout = %q, want items", stdout.String())
+	}
+	result := readBackupResultFile(t, outputPath)
+	if len(result.Items) != 1 {
+		t.Fatalf("result items = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.Status != memory.BackupResultStatusCopied {
+		t.Fatalf("status = %q, want %q", item.Status, memory.BackupResultStatusCopied)
+	}
+	if item.BackupSHA256 == nil || *item.BackupSHA256 == "" {
+		t.Fatalf("backup_sha256 is empty: %#v", item)
+	}
+	if got := string(mustReadCLIFile(t, plan.Items[0].BackupPath)); got != string(content) {
+		t.Fatalf("backup content = %q, want %q", got, content)
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != string(content) {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestRunMemoryProposalBackupMaterializeMissingTargetSkipped(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "missing.md")
+	plan := buildCLIBackupPlan(t, tempDir, targetPath, memory.OperationCreate)
+	planPath := writeBackupPlanFile(t, tempDir, plan)
+	outputPath := filepath.Join(tempDir, memory.BackupResultJSONArtifactName)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupMaterialize(t, planPath, outputPath, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	result := readBackupResultFile(t, outputPath)
+	if got := result.Items[0].Status; got != memory.BackupResultStatusSkippedMissing {
+		t.Fatalf("status = %q, want %q", got, memory.BackupResultStatusSkippedMissing)
+	}
+	if _, err := os.Stat(targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target was written unexpectedly: %v", err)
+	}
+}
+
+func TestRunMemoryProposalBackupMaterializeRefusesOutputAtTargetPath(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	content := []byte("existing content\n")
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := buildCLIBackupPlan(t, tempDir, targetPath, memory.OperationAppend)
+	planPath := writeBackupPlanFile(t, tempDir, plan)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupMaterialize(t, planPath, targetPath, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write backup result artifact to target_path") {
+		t.Fatalf("stderr = %q, want target refusal", stderr.String())
+	}
+	if got := string(mustReadCLIFile(t, targetPath)); got != string(content) {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+}
+
+func TestRunMemoryProposalBackupMaterializeRefusesOutputInsideMemoryDomain(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "target.md")
+	if err := os.WriteFile(targetPath, []byte("existing content\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	plan := buildCLIBackupPlan(t, tempDir, targetPath, memory.OperationAppend)
+	planPath := writeBackupPlanFile(t, tempDir, plan)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runBackupMaterialize(t, planPath, "/vault/mysecondbrain/backup-result.json", &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "refusing to write backup result artifact inside memory domain") {
+		t.Fatalf("stderr = %q, want memory domain refusal", stderr.String())
+	}
+}
+
 func TestRunWorkerCodexDryRun(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -1970,6 +2075,37 @@ func readBackupPlanFile(t *testing.T, path string) memory.BackupPlan {
 	return plan
 }
 
+func writeBackupPlanFile(t *testing.T, dir string, plan memory.BackupPlan) string {
+	t.Helper()
+
+	data, err := plan.JSON()
+	if err != nil {
+		t.Fatalf("plan.JSON() error = %v", err)
+	}
+	path := filepath.Join(dir, memory.BackupPlanJSONArtifactName)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write backup plan file: %v", err)
+	}
+	return path
+}
+
+func readBackupResultFile(t *testing.T, path string) memory.BackupResult {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(backup result) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("backup result output is invalid JSON: %s", data)
+	}
+	var result memory.BackupResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		t.Fatalf("Unmarshal(backup result) error = %v", err)
+	}
+	return result
+}
+
 func runBackupPlan(t *testing.T, proposalPath string, approvalPath string, outputPath string, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
 	t.Helper()
 	return run([]string{
@@ -1985,6 +2121,43 @@ func runBackupPlan(t *testing.T, proposalPath string, approvalPath string, outpu
 		"--output",
 		outputPath,
 	}, stdout, stderr)
+}
+
+func runBackupMaterialize(t *testing.T, backupPlanPath string, outputPath string, stdout *bytes.Buffer, stderr *bytes.Buffer) int {
+	t.Helper()
+	return run([]string{
+		"memory",
+		"proposal",
+		"backup-materialize",
+		"--backup-plan",
+		backupPlanPath,
+		"--output",
+		outputPath,
+	}, stdout, stderr)
+}
+
+func buildCLIBackupPlan(t *testing.T, tempDir string, targetPath string, operation memory.MemoryOperation) memory.BackupPlan {
+	t.Helper()
+	proposal := memory.NewProposal(memory.NewProposalOptions{
+		ProposalID: "mem-cli-backup-materialize-" + string(operation),
+		RunID:      "run-001",
+		TaskID:     "task-001",
+		Domain:     "general",
+		TargetPath: targetPath,
+		Operation:  operation,
+		Reason:     "Backup materialize.",
+		CreatedAt:  time.Date(2026, 5, 24, 11, 0, 0, 0, time.UTC),
+		Patches: []memory.MemoryPatch{
+			{TargetPath: targetPath, Operation: operation, Content: "new content\n"},
+		},
+	})
+	policy := loadCLIExamplePolicy(t)
+	approval := buildCLIMemoryApproval(t, proposal, policy, memory.DecisionApproved)
+	plan, err := memory.BuildBackupPlan(proposal, approval, policy, memory.NewBackupPlanOptions{BackupRoot: filepath.Join(tempDir, "backups")})
+	if err != nil {
+		t.Fatalf("BuildBackupPlan() error = %v", err)
+	}
+	return plan
 }
 
 func mustReadCLIFile(t *testing.T, path string) []byte {
