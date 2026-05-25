@@ -48,13 +48,13 @@ Implemented:
 - apply preflight
 - backup/restore plan
 - backup materialization
-- real memory apply for create/append
+- real memory apply for create/append/update
 - restore dry-run
 - restore execute
 
 Not implemented yet:
 
-- real memory apply for update/archive
+- real memory apply for archive
 - OpenCode worker
 - Docker runtime
 - memory index/LanceDB
@@ -187,7 +187,7 @@ Memory index:
 
 Do not implement real memory writes unless the task explicitly says so.
 
-Before any real memory apply exists, the required chain is:
+For real memory apply, the required chain is:
 
 ```text
 proposal
@@ -273,7 +273,7 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence:
 
-1. real apply for update/archive later
+1. real apply for archive later
 2. OpenCode worker
 3. Docker runtime
 4. memory index/LanceDB

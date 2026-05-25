@@ -66,10 +66,11 @@ Implemented:
 - domain config
 - context packs
 - memory proposal/lint/dry-run/approval/preflight
+- safe memory apply for create/append/update with backup/restore chain
 
 Not implemented yet:
 
-- real memory apply
+- real memory apply for archive
 - OpenCode worker
 - Docker runtime
 - memory index

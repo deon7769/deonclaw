@@ -366,7 +366,7 @@ Safety checks:
 
 ## Apply Execute
 
-`deonctl memory proposal apply-execute` performs the real memory write for the limited create/append MVP:
+`deonctl memory proposal apply-execute` performs the real memory write for the limited create/append/update MVP:
 
 ```bash
 deonctl memory proposal apply-execute \
@@ -404,10 +404,12 @@ Supported operations:
 - `create` writes content to a temporary file in the target directory, validates the temporary content, then renames it to a new target and fails if the target already exists
 - `append` builds a temporary file from the current target content plus the new content, validates the temporary content, rechecks the current target SHA-256 against the backup plan before rename, then renames it to the target
 - `append` creates the file through the same controlled create path when the approved append target is still missing
+- `update` replaces the entire target content with the approved patch content
+- `update` requires the target to exist and requires the backup plan item to have `exists: true`
+- `update` writes the replacement content to a temporary file in the target directory, validates the temporary content, rechecks the current target SHA-256 against the backup plan before rename, then renames it to the target
 
 Unsupported operations:
 
-- `update` fails with `operation not implemented`
 - `archive` fails with `operation not implemented`
 
 Apply execution creates target directories when needed.
@@ -454,4 +456,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, restore dry-run, restore execute, and real apply for `create`/`append`. It still does not implement real `update`/`archive` apply or commit memory changes.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, restore dry-run, restore execute, and real apply for `create`/`append`/`update`. It still does not implement real `archive` apply or commit memory changes.
