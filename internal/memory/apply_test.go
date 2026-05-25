@@ -46,6 +46,114 @@ func TestApplyDryRunCreateValidPasses(t *testing.T) {
 	}
 }
 
+func TestApplyDryRunArchiveValidShowsMoveAction(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyProposal("mem-apply-archive", "general", "/vault/mysecondbrain/memory/inbox/current.md", OperationArchive, "")
+	proposal.Patches = []MemoryPatch{
+		{
+			TargetPath:  "/vault/mysecondbrain/memory/inbox/current.md",
+			Operation:   OperationArchive,
+			ArchivePath: "/vault/mysecondbrain/memory/inbox/archive/current.md",
+		},
+	}
+
+	preview, err := BuildApplyDryRunPreview(proposal, policy)
+	if err != nil {
+		t.Fatalf("BuildApplyDryRunPreview() error = %v", err)
+	}
+	if preview.Status != ApplyStatusDryRunOK {
+		t.Fatalf("status = %q, want %q", preview.Status, ApplyStatusDryRunOK)
+	}
+	if len(preview.Actions) != 1 {
+		t.Fatalf("actions = %d, want 1", len(preview.Actions))
+	}
+	action := preview.Actions[0]
+	if action.ArchivePath != "/vault/mysecondbrain/memory/inbox/archive/current.md" {
+		t.Fatalf("archive_path = %q, want archive destination", action.ArchivePath)
+	}
+	if action.Description != "would move target_path to archive_path" {
+		t.Fatalf("description = %q, want archive move description", action.Description)
+	}
+}
+
+func TestApplyDryRunArchiveRequiresArchivePath(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyProposal("mem-apply-archive-missing-destination", "general", "/vault/mysecondbrain/memory/inbox/current.md", OperationArchive, "")
+
+	preview, err := BuildApplyDryRunPreview(proposal, policy)
+	if err == nil {
+		t.Fatal("BuildApplyDryRunPreview() error = nil, want archive_path failure")
+	}
+	if preview.Status != ApplyStatusFailed {
+		t.Fatalf("status = %q, want %q", preview.Status, ApplyStatusFailed)
+	}
+	assertApplyPatchViolationContains(t, preview, "archive_path is required")
+}
+
+func TestApplyDryRunArchiveRejectsSameArchivePath(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	targetPath := "/vault/mysecondbrain/memory/inbox/current.md"
+	proposal := testApplyProposal("mem-apply-archive-same-path", "general", targetPath, OperationArchive, "")
+	proposal.Patches = []MemoryPatch{
+		{TargetPath: targetPath, Operation: OperationArchive, ArchivePath: targetPath},
+	}
+
+	preview, err := BuildApplyDryRunPreview(proposal, policy)
+	if err == nil {
+		t.Fatal("BuildApplyDryRunPreview() error = nil, want equal path failure")
+	}
+	assertApplyPatchViolationContains(t, preview, "archive_path must differ from target_path")
+}
+
+func TestApplyDryRunArchiveRejectsArchivePathTraversal(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyProposal("mem-apply-archive-traversal", "general", "/vault/mysecondbrain/memory/inbox/current.md", OperationArchive, "")
+	proposal.Patches = []MemoryPatch{
+		{TargetPath: "/vault/mysecondbrain/memory/inbox/current.md", Operation: OperationArchive, ArchivePath: "../archive/current.md"},
+	}
+
+	preview, err := BuildApplyDryRunPreview(proposal, policy)
+	if err == nil {
+		t.Fatal("BuildApplyDryRunPreview() error = nil, want traversal failure")
+	}
+	assertApplyPatchViolationContains(t, preview, "archive_path")
+	assertApplyPatchViolationContains(t, preview, "path traversal")
+}
+
+func TestApplyDryRunArchiveRejectsProtectedArchivePath(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyProposal("mem-apply-archive-protected", "general", "/vault/mysecondbrain/memory/inbox/current.md", OperationArchive, "")
+	proposal.Patches = []MemoryPatch{
+		{TargetPath: "/vault/mysecondbrain/memory/inbox/current.md", Operation: OperationArchive, ArchivePath: "/vault/mysecondbrain/MEMORY.md"},
+	}
+
+	preview, err := BuildApplyDryRunPreview(proposal, policy)
+	if err == nil {
+		t.Fatal("BuildApplyDryRunPreview() error = nil, want protected archive_path failure")
+	}
+	assertApplyPatchViolationContains(t, preview, "archive_path")
+	assertApplyPatchViolationContains(t, preview, "protected path")
+}
+
+func TestApplyDryRunArchiveRejectsForbiddenArchivePath(t *testing.T) {
+	policy := loadExamplePolicy(t)
+	proposal := testApplyProposal("mem-apply-archive-forbidden", "escalasoft", "/domains/escalasoft_brain/cases/current.md", OperationArchive, "")
+	proposal.Patches = []MemoryPatch{
+		{
+			TargetPath:  "/domains/escalasoft_brain/cases/current.md",
+			Operation:   OperationArchive,
+			ArchivePath: "/vault/mysecondbrain/memory/context/escalasoft-raw.md",
+		},
+	}
+
+	preview, err := BuildApplyDryRunPreview(proposal, policy)
+	if err == nil {
+		t.Fatal("BuildApplyDryRunPreview() error = nil, want forbidden archive_path failure")
+	}
+	assertApplyPatchViolationContains(t, preview, "archive_path")
+	assertApplyPatchViolationContains(t, preview, "forbidden_global_write")
+}
+
 func TestApplyDryRunLintFailureBlocksPreview(t *testing.T) {
 	policy := loadExamplePolicy(t)
 	proposal := testApplyProposal("mem-apply-lint-failed", "escalasoft", "/vault/mysecondbrain/MEMORY.md", OperationUpdate, "bad\n")

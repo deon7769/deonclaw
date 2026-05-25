@@ -799,6 +799,10 @@ func newApplyExecuteFixture(t *testing.T, operation MemoryOperation, initialCont
 		}
 	}
 
+	patch := MemoryPatch{TargetPath: targetPath, Operation: operation, Content: patchContent}
+	if operation == OperationArchive {
+		patch.ArchivePath = filepath.Join(tempDir, "memory", "archive", "target.md")
+	}
 	proposal := NewProposal(NewProposalOptions{
 		ProposalID: "mem-apply-execute-" + string(operation),
 		RunID:      "run-001",
@@ -809,7 +813,7 @@ func newApplyExecuteFixture(t *testing.T, operation MemoryOperation, initialCont
 		Reason:     "Execute apply proposal.",
 		CreatedAt:  time.Date(2026, 5, 24, 11, 0, 0, 0, time.UTC),
 		Patches: []MemoryPatch{
-			{TargetPath: targetPath, Operation: operation, Content: patchContent},
+			patch,
 		},
 	})
 	policy := loadExamplePolicy(t)

@@ -39,9 +39,10 @@ type MemoryProposal struct {
 }
 
 type MemoryPatch struct {
-	TargetPath string          `json:"target_path"`
-	Operation  MemoryOperation `json:"operation"`
-	Content    string          `json:"content,omitempty"`
+	TargetPath  string          `json:"target_path"`
+	Operation   MemoryOperation `json:"operation"`
+	ArchivePath string          `json:"archive_path,omitempty"`
+	Content     string          `json:"content,omitempty"`
 }
 
 type MemoryEvidence struct {
@@ -204,6 +205,11 @@ func (p MemoryProposal) Markdown() ([]byte, error) {
 			output.WriteString("  operation: ")
 			output.WriteString(string(patch.Operation))
 			output.WriteByte('\n')
+			if patch.ArchivePath != "" {
+				output.WriteString("  archive_path: ")
+				output.WriteString(patch.ArchivePath)
+				output.WriteByte('\n')
+			}
 			if patch.Content != "" {
 				output.WriteString("  content: |\n")
 				writeIndented(&output, patch.Content, "    ")

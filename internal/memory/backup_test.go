@@ -144,6 +144,64 @@ func TestBuildBackupPlanDeduplicatesRepeatedTargets(t *testing.T) {
 	}
 }
 
+func TestBuildBackupPlanArchiveIncludesTargetAndDestination(t *testing.T) {
+	tempDir := t.TempDir()
+	targetPath := filepath.Join(tempDir, "memory", "current.md")
+	archivePath := filepath.Join(tempDir, "memory", "archive", "current.md")
+	content := []byte("existing content\n")
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(target dir) error = %v", err)
+	}
+	if err := os.WriteFile(targetPath, content, 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+	proposal := testBackupPlanProposal("mem-backup-archive", []MemoryPatch{
+		{TargetPath: targetPath, Operation: OperationArchive, ArchivePath: archivePath},
+	})
+	policy := loadExamplePolicy(t)
+	approval := mustBuildBackupPlanApproval(t, proposal, policy)
+
+	plan, err := BuildBackupPlan(proposal, approval, policy, NewBackupPlanOptions{BackupRoot: filepath.Join(tempDir, "backups")})
+	if err != nil {
+		t.Fatalf("BuildBackupPlan() error = %v", err)
+	}
+	if len(plan.Items) != 2 {
+		t.Fatalf("items = %d, want target and archive destination", len(plan.Items))
+	}
+	targetItem := findBackupItem(t, plan.Items, targetPath)
+	if !targetItem.Exists {
+		t.Fatalf("target exists = false, want true")
+	}
+	if targetItem.Operation != OperationArchive {
+		t.Fatalf("target operation = %q, want archive", targetItem.Operation)
+	}
+	if targetItem.SHA256 == nil || targetItem.SizeBytes == nil {
+		t.Fatalf("target item missing hash/size: %#v", targetItem)
+	}
+	archiveItem := findBackupItem(t, plan.Items, archivePath)
+	if archiveItem.Exists {
+		t.Fatalf("archive destination exists = true, want false")
+	}
+	if archiveItem.Operation != OperationArchive {
+		t.Fatalf("archive destination operation = %q, want archive", archiveItem.Operation)
+	}
+	if archiveItem.SHA256 != nil || archiveItem.SizeBytes != nil {
+		t.Fatalf("archive destination should not have hash/size: %#v", archiveItem)
+	}
+
+	if len(plan.RestorePlan.Items) != 2 {
+		t.Fatalf("restore items = %d, want target restore and archive removal", len(plan.RestorePlan.Items))
+	}
+	targetRestore := findRestoreItem(t, plan.RestorePlan.Items, targetPath)
+	if !targetRestore.Exists {
+		t.Fatalf("target restore exists = false, want true")
+	}
+	archiveRestore := findRestoreItem(t, plan.RestorePlan.Items, archivePath)
+	if archiveRestore.Exists {
+		t.Fatalf("archive restore exists = true, want remove_if_exists marker")
+	}
+}
+
 func TestBuildBackupPlanPreflightFailureBlocksPlan(t *testing.T) {
 	tempDir := t.TempDir()
 	targetPath := filepath.Join(tempDir, "target.md")
@@ -399,6 +457,28 @@ func mustBuildBackupPlanForMaterialize(t *testing.T, tempDir string, targetPath 
 		t.Fatalf("BuildBackupPlan() error = %v", err)
 	}
 	return plan
+}
+
+func findBackupItem(t *testing.T, items []BackupItem, targetPath string) BackupItem {
+	t.Helper()
+	for _, item := range items {
+		if sameFilesystemPath(item.TargetPath, targetPath) {
+			return item
+		}
+	}
+	t.Fatalf("backup item for target_path %q not found in %#v", targetPath, items)
+	return BackupItem{}
+}
+
+func findRestoreItem(t *testing.T, items []RestoreItem, targetPath string) RestoreItem {
+	t.Helper()
+	for _, item := range items {
+		if sameFilesystemPath(item.TargetPath, targetPath) {
+			return item
+		}
+	}
+	t.Fatalf("restore item for target_path %q not found in %#v", targetPath, items)
+	return RestoreItem{}
 }
 
 func mustReadFile(t *testing.T, path string) []byte {

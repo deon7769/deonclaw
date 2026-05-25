@@ -63,6 +63,7 @@ Patch fallback rules:
 
 - empty patch `target_path` uses the proposal `target_path`
 - empty patch `operation` uses the proposal `operation`
+- archive patches do not infer an `archive_path`; they must provide one explicitly
 
 Patch policy rules:
 
@@ -70,8 +71,14 @@ Patch policy rules:
 - patch `target_path` matching `protected` fails the dry-run
 - patch `target_path` matching isolated-domain `forbidden_global_write` fails the dry-run
 - patch `target_path` matching `allowed_global_bridge` passes with a warning
+- archive patch `archive_path` is required
+- archive patch `archive_path` must differ from `target_path`
+- archive patch `archive_path` must not contain path traversal
+- archive patch `archive_path` is checked against the same memory policy as `target_path`
 - if any patch fails, the apply preview status is `failed`
 - patch violations are included in the apply preview
+
+For archive patches, the apply preview records `archive_path` and describes the dry-run action as moving `target_path` to `archive_path`. This is preview and planning support only; real archive apply is still not implemented.
 
 The optional `--output` flag writes only the preview JSON, commonly named `apply-preview.json`:
 
@@ -216,7 +223,14 @@ Each backup item records:
 - `sha256`, when the target exists
 - suggested `backup_path`
 
+Archive patches require two backup items:
+
+- the source `target_path`, which must exist
+- the destination `archive_path`, which must not exist
+
 The backup plan embeds a restore plan with matching restore items.
+
+For archive patches, the restore plan records enough information to undo the future move: restore the original `target_path` from backup and remove the `archive_path` if it was created.
 
 Backup plan generation does not copy files.
 

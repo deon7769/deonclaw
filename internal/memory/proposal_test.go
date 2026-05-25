@@ -100,6 +100,46 @@ func TestMemoryProposalMarkdownValid(t *testing.T) {
 	}
 }
 
+func TestMemoryProposalArchivePathJSONAndMarkdown(t *testing.T) {
+	proposal := NewProposal(NewProposalOptions{
+		ProposalID: "mem-test-archive",
+		RunID:      "run-archive",
+		TaskID:     "task-archive",
+		Domain:     "general",
+		TargetPath: "memory/context/current.md",
+		Operation:  OperationArchive,
+		Reason:     "Archive stale memory.",
+		Patches: []MemoryPatch{
+			{
+				TargetPath:  "memory/context/current.md",
+				Operation:   OperationArchive,
+				ArchivePath: "memory/archive/current.md",
+			},
+		},
+		CreatedAt: time.Date(2026, 5, 25, 9, 0, 0, 0, time.UTC),
+	})
+
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("JSON() error = %v", err)
+	}
+	var decoded MemoryProposal
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if len(decoded.Patches) != 1 || decoded.Patches[0].ArchivePath != "memory/archive/current.md" {
+		t.Fatalf("patches = %#v, want archive_path", decoded.Patches)
+	}
+
+	markdown, err := proposal.Markdown()
+	if err != nil {
+		t.Fatalf("Markdown() error = %v", err)
+	}
+	if !strings.Contains(string(markdown), "archive_path: memory/archive/current.md") {
+		t.Fatalf("Markdown() = %q, want archive_path", markdown)
+	}
+}
+
 func TestValidateRejectsInvalidOperation(t *testing.T) {
 	proposal := NewProposal(NewProposalOptions{
 		ProposalID: "mem-test-003",

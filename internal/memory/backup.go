@@ -100,28 +100,54 @@ func BuildBackupPlan(proposal MemoryProposal, approval MemoryApproval, policy *M
 
 	seenTargets := map[string]bool{}
 	for _, action := range preview.Actions {
-		targetKey := backupTargetKey(action.TargetPath)
-		if seenTargets[targetKey] {
-			continue
-		}
-		seenTargets[targetKey] = true
+		targets := backupTargetsForAction(action)
+		for _, target := range targets {
+			targetKey := backupTargetKey(target.path)
+			if seenTargets[targetKey] {
+				continue
+			}
+			seenTargets[targetKey] = true
 
-		item, err := buildBackupItem(backupRoot, action.TargetPath, action.Operation)
-		if err != nil {
-			return BackupPlan{}, err
+			item, err := buildBackupItem(backupRoot, target.path, target.operation)
+			if err != nil {
+				return BackupPlan{}, err
+			}
+			if target.mustExist && !item.Exists {
+				return BackupPlan{}, fmt.Errorf("target_path %q must exist for archive backup plan", target.path)
+			}
+			if target.mustBeMissing && item.Exists {
+				return BackupPlan{}, fmt.Errorf("archive_path %q must not exist for archive backup plan", target.path)
+			}
+			plan.Items = append(plan.Items, item)
+			restore.Items = append(restore.Items, RestoreItem{
+				TargetPath: item.TargetPath,
+				BackupPath: item.BackupPath,
+				Exists:     item.Exists,
+				SHA256:     cloneStringPointer(item.SHA256),
+				SizeBytes:  cloneInt64Pointer(item.SizeBytes),
+				Operation:  item.Operation,
+			})
 		}
-		plan.Items = append(plan.Items, item)
-		restore.Items = append(restore.Items, RestoreItem{
-			TargetPath: item.TargetPath,
-			BackupPath: item.BackupPath,
-			Exists:     item.Exists,
-			SHA256:     cloneStringPointer(item.SHA256),
-			SizeBytes:  cloneInt64Pointer(item.SizeBytes),
-			Operation:  item.Operation,
-		})
 	}
 	plan.RestorePlan = restore
 	return plan, nil
+}
+
+type backupPlanTarget struct {
+	path          string
+	operation     MemoryOperation
+	mustExist     bool
+	mustBeMissing bool
+}
+
+func backupTargetsForAction(action ApplyPreviewAction) []backupPlanTarget {
+	if action.Operation != OperationArchive {
+		return []backupPlanTarget{{path: action.TargetPath, operation: action.Operation}}
+	}
+	return []backupPlanTarget{
+		{path: action.TargetPath, operation: action.Operation, mustExist: true},
+		{path: action.ArchivePath, operation: action.Operation, mustBeMissing: true},
+	}
 }
 
 func (p BackupPlan) JSON() ([]byte, error) {

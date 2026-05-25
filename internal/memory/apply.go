@@ -36,6 +36,7 @@ type ApplyPatchViolation struct {
 
 type ApplyPreviewAction struct {
 	TargetPath  string          `json:"target_path"`
+	ArchivePath string          `json:"archive_path,omitempty"`
 	Operation   MemoryOperation `json:"operation"`
 	Description string          `json:"description"`
 	Content     string          `json:"content,omitempty"`
@@ -70,7 +71,7 @@ func BuildApplyDryRunPreview(proposal MemoryProposal, policy *MemoryPolicy) (App
 		for _, violation := range patchLint.Violations {
 			addApplyPatchViolation(&preview, &action, index, violation)
 		}
-		if strings.TrimSpace(patch.Content) == "" {
+		if action.Operation != OperationArchive && strings.TrimSpace(patch.Content) == "" {
 			warning := fmt.Sprintf("patch for %q has empty content", action.TargetPath)
 			addApplyPatchWarning(&preview, &action, index, warning)
 		}
@@ -106,6 +107,7 @@ func buildApplyPreviewAction(proposal MemoryProposal, patch MemoryPatch) ApplyPr
 
 	return ApplyPreviewAction{
 		TargetPath:  targetPath,
+		ArchivePath: strings.TrimSpace(patch.ArchivePath),
 		Operation:   operation,
 		Description: applyPreviewDescription(operation),
 		Content:     patch.Content,
@@ -113,9 +115,45 @@ func buildApplyPreviewAction(proposal MemoryProposal, patch MemoryPatch) ApplyPr
 }
 
 func lintApplyPatch(proposal MemoryProposal, action ApplyPreviewAction, policy *MemoryPolicy) LintResult {
+	result := lintApplyPath(proposal, action.TargetPath, action.Operation, policy)
+	if action.Operation != OperationArchive {
+		return result
+	}
+
+	archivePath := strings.TrimSpace(action.ArchivePath)
+	if archivePath == "" {
+		result.Violations = append(result.Violations, "archive_path is required for archive operation")
+		result.Status = LintStatusFailed
+		return result
+	}
+	if hasPathTraversal(archivePath) {
+		result.Violations = append(result.Violations, fmt.Sprintf("archive_path %q contains path traversal", action.ArchivePath))
+		result.Status = LintStatusFailed
+		return result
+	}
+	if sameFilesystemPath(action.TargetPath, archivePath) {
+		result.Violations = append(result.Violations, "archive_path must differ from target_path")
+		result.Status = LintStatusFailed
+		return result
+	}
+
+	archiveLint := lintApplyPath(proposal, archivePath, action.Operation, policy)
+	for _, warning := range archiveLint.Warnings {
+		result.Warnings = append(result.Warnings, "archive_path "+warning)
+	}
+	for _, violation := range archiveLint.Violations {
+		result.Violations = append(result.Violations, "archive_path "+violation)
+	}
+	if len(result.Violations) > 0 {
+		result.Status = LintStatusFailed
+	}
+	return result
+}
+
+func lintApplyPath(proposal MemoryProposal, targetPath string, operation MemoryOperation, policy *MemoryPolicy) LintResult {
 	patchProposal := proposal
-	patchProposal.TargetPath = action.TargetPath
-	patchProposal.Operation = action.Operation
+	patchProposal.TargetPath = targetPath
+	patchProposal.Operation = operation
 	return LintProposal(patchProposal, policy)
 }
 
@@ -148,7 +186,7 @@ func applyPreviewDescription(operation MemoryOperation) string {
 	case OperationUpdate:
 		return "would replace or update file"
 	case OperationArchive:
-		return "would archive file"
+		return "would move target_path to archive_path"
 	default:
 		return "would process file"
 	}
