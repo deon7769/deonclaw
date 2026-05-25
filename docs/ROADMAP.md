@@ -19,8 +19,9 @@
 
 ### Phase 6 - OpenCode worker
 
-- provider-agnostic worker adapter
-- Z.ai/GLM config example
+- dry-run worker adapter and CLI are implemented
+- real OpenCode run remains next
+- Z.ai/GLM provider wiring remains later
 - event/log/artifact capture
 - same workspace and policy rules as Codex
 

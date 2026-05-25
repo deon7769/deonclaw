@@ -2355,6 +2355,66 @@ func TestRunWorkerCodexDryRunRejectsMismatchedTaskWorker(t *testing.T) {
 	}
 }
 
+func TestRunWorkerOpenCodeDryRun(t *testing.T) {
+	taskPath := writeTaskFile(t, "opencode")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"worker",
+		"opencode",
+		"dry-run",
+		taskPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	output := stdout.String()
+	if !strings.Contains(output, "workspace: .") {
+		t.Fatalf("stdout = %q, want workspace", output)
+	}
+	if !strings.Contains(output, "policy: read-only") {
+		t.Fatalf("stdout = %q, want policy", output)
+	}
+	if !strings.Contains(output, "command: opencode run --cwd . -") {
+		t.Fatalf("stdout = %q, want planned command", output)
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunRejectsInvalidTask(t *testing.T) {
+	taskPath := writeInvalidTaskFile(t, "opencode")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "validation failed") {
+		t.Fatalf("stderr = %q, want validation failure", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "command:") {
+		t.Fatalf("stdout = %q, want no planned command for invalid task", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunRejectsMismatchedTaskWorker(t *testing.T) {
+	taskPath := writeTaskFile(t, "codex")
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"worker", "opencode", "dry-run", taskPath}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	want := `task worker "codex" does not match requested worker "opencode"`
+	if !strings.Contains(stderr.String(), want) {
+		t.Fatalf("stderr = %q, want %q", stderr.String(), want)
+	}
+}
+
 func TestRunWorkerCodexRunRejectsBadArguments(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2670,6 +2730,34 @@ definition_of_done:
 	path := filepath.Join(t.TempDir(), "task.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write task file: %v", err)
+	}
+	return path
+}
+
+func writeInvalidTaskFile(t *testing.T, worker string) string {
+	t.Helper()
+
+	content := `id: invalid-task-001
+domain: general
+worker: ` + worker + `
+goal: "Do not execute"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - command fails before worker execution
+`
+	path := filepath.Join(t.TempDir(), "invalid-task.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write invalid task file: %v", err)
 	}
 	return path
 }

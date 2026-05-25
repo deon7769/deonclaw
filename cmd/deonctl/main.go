@@ -25,6 +25,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workers"
 	"github.com/deon7769/deonclaw/internal/workers/codex"
+	"github.com/deon7769/deonclaw/internal/workers/opencode"
 )
 
 const usage = `deonctl - DeonClaw control CLI
@@ -47,12 +48,17 @@ Usage:
   deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
+  deonctl worker opencode dry-run <task-path>
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
 
 var codexWorkerFactory = func() workers.Worker {
 	return codex.New()
+}
+
+var opencodeWorkerFactory = func() workers.Worker {
+	return opencode.New()
 }
 
 var memoryExecuteApply = memory.ExecuteApply
@@ -232,25 +238,43 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 2
 		}
 	case "worker":
-		if len(args) < 4 || args[1] != "codex" {
+		if len(args) < 4 {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
-		switch args[2] {
-		case "dry-run":
-			if len(args) != 4 {
+		switch args[1] {
+		case "codex":
+			switch args[2] {
+			case "dry-run":
+				if len(args) != 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexDryRun(args[3], stdout, stderr)
+			case "run":
+				opts, err := parseCodexRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexRun(opts, stdout, stderr)
+			default:
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
-			return runCodexDryRun(args[3], stdout, stderr)
-		case "run":
-			opts, err := parseCodexRunOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
+		case "opencode":
+			switch args[2] {
+			case "dry-run":
+				if len(args) != 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runOpenCodeDryRun(args[3], stdout, stderr)
+			default:
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
-			return runCodexRun(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -1770,6 +1794,37 @@ func runCodexDryRun(path string, stdout io.Writer, stderr io.Writer) int {
 	}
 
 	fmt.Fprintf(stdout, "workspace: %s\n", event.Workspace)
+	fmt.Fprintf(stdout, "command: %s\n", strings.Join(event.Command, " "))
+	return 0
+}
+
+func runOpenCodeDryRun(path string, stdout io.Writer, stderr io.Writer) int {
+	task, err := tasks.LoadFromFile(path)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	if err := tasks.Validate(task); err != nil {
+		fmt.Fprintf(stderr, "validation failed: %v\n", err)
+		return 1
+	}
+	if err := ensureTaskWorker(task, "opencode"); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	worker := opencodeWorkerFactory()
+	event, err := worker.DryRun(context.Background(), workers.RunSpec{
+		Task:      task,
+		Workspace: task.Workspace.Path,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "dry-run failed: %v\n", err)
+		return 1
+	}
+
+	fmt.Fprintf(stdout, "workspace: %s\n", event.Workspace)
+	fmt.Fprintf(stdout, "policy: %s\n", event.Sandbox)
 	fmt.Fprintf(stdout, "command: %s\n", strings.Join(event.Command, " "))
 	return 0
 }

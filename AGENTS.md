@@ -29,6 +29,7 @@ Implemented:
 - Go CLI/core
 - SQLite store
 - Codex worker dry-run and run
+- OpenCode worker dry-run
 - isolated Git worktree workspace
 - dirty baseline protection
 - workspace cleanup
@@ -54,7 +55,7 @@ Implemented:
 
 Not implemented yet:
 
-- OpenCode worker
+- OpenCode worker run
 - Docker runtime
 - memory index/LanceDB
 - UI/dashboard
@@ -272,7 +273,7 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence:
 
-1. OpenCode worker
+1. OpenCode worker run
 2. Docker runtime
 3. memory index/LanceDB
 4. UI/dashboard
