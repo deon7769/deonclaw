@@ -67,6 +67,48 @@ func TestExecuteRestoreMissingOriginalTargetRemovesTarget(t *testing.T) {
 	}
 }
 
+func TestExecuteRestoreUndoesArchiveApply(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationArchive, "original memory\n", "")
+	archivePath := fixture.proposal.Patches[0].ArchivePath
+	if _, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{}); err != nil {
+		t.Fatalf("ExecuteApply(archive) error = %v", err)
+	}
+	if _, err := os.Stat(fixture.targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target exists after archive apply: %v", err)
+	}
+	if got := string(mustReadFile(t, archivePath)); got != "original memory\n" {
+		t.Fatalf("archive path content = %q, want moved original", got)
+	}
+	preview, err := BuildRestorePreview(fixture.backupPlan, fixture.backupResult, NewRestorePreviewOptions{})
+	if err != nil {
+		t.Fatalf("BuildRestorePreview() error = %v", err)
+	}
+
+	result, err := ExecuteRestore(fixture.backupPlan, fixture.backupResult, preview, NewRestoreExecuteOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteRestore() error = %v", err)
+	}
+	if got := string(mustReadFile(t, fixture.targetPath)); got != "original memory\n" {
+		t.Fatalf("target content = %q, want restored original", got)
+	}
+	if _, err := os.Stat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archive path exists after restore: %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items = %d, want target restore and archive removal", len(result.Items))
+	}
+	statuses := map[string]RestoreResultItemStatus{}
+	for _, item := range result.Items {
+		statuses[item.TargetPath] = item.Status
+	}
+	if statuses[fixture.targetPath] != RestoreResultStatusRestored {
+		t.Fatalf("target restore status = %q, want %q", statuses[fixture.targetPath], RestoreResultStatusRestored)
+	}
+	if statuses[archivePath] != RestoreResultStatusRemoved {
+		t.Fatalf("archive restore status = %q, want %q", statuses[archivePath], RestoreResultStatusRemoved)
+	}
+}
+
 func TestExecuteRestoreMissingOriginalTargetSkippedWhenAbsent(t *testing.T) {
 	fixture := newRestoreExecuteFixture(t, OperationCreate, "")
 

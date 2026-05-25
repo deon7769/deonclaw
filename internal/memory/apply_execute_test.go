@@ -660,16 +660,248 @@ func TestExecuteApplySecondPatchValidationFailureDoesNotChangeFirstTarget(t *tes
 	assertNoApplyTempFiles(t, secondTarget)
 }
 
-func TestExecuteApplyRejectsArchiveAsUnimplemented(t *testing.T) {
-	fixture := newApplyExecuteFixture(t, OperationArchive, "existing memory\n", "changed memory\n")
+func TestExecuteApplyArchiveMovesTargetToArchivePathAndResult(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationArchive, "existing memory\n", "")
+	archivePath := fixture.proposal.Patches[0].ArchivePath
+
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteApply() error = %v", err)
+	}
+	if _, err := os.Stat(fixture.targetPath); !os.IsNotExist(err) {
+		t.Fatalf("target still exists after archive: %v", err)
+	}
+	if got := string(mustReadFile(t, archivePath)); got != "existing memory\n" {
+		t.Fatalf("archive content = %q, want moved target content", got)
+	}
+	if result.Status != ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusSucceeded)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want 1", len(result.Items))
+	}
+	item := result.Items[0]
+	if item.TargetPath != fixture.targetPath || item.ArchivePath != archivePath || item.Operation != OperationArchive {
+		t.Fatalf("item = %#v, want archive target and archive_path", item)
+	}
+	if item.Status != ApplyResultStatusArchived {
+		t.Fatalf("status = %q, want %q", item.Status, ApplyResultStatusArchived)
+	}
+	if item.BytesWritten != int64(len("existing memory\n")) {
+		t.Fatalf("bytes_written = %d, want moved bytes", item.BytesWritten)
+	}
+	if item.SHA256 != mustFileSHA256(t, archivePath) {
+		t.Fatalf("sha256 = %q, want archive file hash", item.SHA256)
+	}
+	assertApplyResultJSONValid(t, result)
+	assertNoApplyTempFiles(t, fixture.targetPath)
+	assertNoApplyTempFiles(t, archivePath)
+}
+
+func TestExecuteApplyArchiveFailsWithoutArchivePath(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationArchive, "existing memory\n", "")
+	fixture.proposal.Patches[0].ArchivePath = ""
 
 	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
-	if err == nil || !strings.Contains(err.Error(), "operation not implemented") {
-		t.Fatalf("ExecuteApply() error = %v, want operation not implemented", err)
+	if err == nil || !strings.Contains(err.Error(), "apply preflight failed") {
+		t.Fatalf("ExecuteApply() error = %v, want preflight failure", err)
 	}
 	if got := string(mustReadFile(t, fixture.targetPath)); got != "existing memory\n" {
 		t.Fatalf("target content = %q, want unchanged", got)
 	}
+}
+
+func TestExecuteApplyArchiveFailsIfTargetMissing(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationArchive, "existing memory\n", "")
+	archivePath := fixture.proposal.Patches[0].ArchivePath
+	if err := os.Remove(fixture.targetPath); err != nil {
+		t.Fatalf("Remove(target) error = %v", err)
+	}
+
+	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err == nil || (!strings.Contains(err.Error(), "cannot be hashed") && !strings.Contains(err.Error(), "does not exist")) {
+		t.Fatalf("ExecuteApply() error = %v, want missing target failure", err)
+	}
+	if _, err := os.Stat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archive path changed after failure: %v", err)
+	}
+}
+
+func TestExecuteApplyArchiveFailsIfArchivePathExists(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationArchive, "existing memory\n", "")
+	archivePath := fixture.proposal.Patches[0].ArchivePath
+	if err := os.MkdirAll(filepath.Dir(archivePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll(archive dir) error = %v", err)
+	}
+	if err := os.WriteFile(archivePath, []byte("already archived\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(archive path) error = %v", err)
+	}
+
+	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "appeared since backup plan") {
+		t.Fatalf("ExecuteApply() error = %v, want archive appeared failure", err)
+	}
+	if got := string(mustReadFile(t, fixture.targetPath)); got != "existing memory\n" {
+		t.Fatalf("target content = %q, want unchanged", got)
+	}
+	if got := string(mustReadFile(t, archivePath)); got != "already archived\n" {
+		t.Fatalf("archive content = %q, want existing archive preserved", got)
+	}
+}
+
+func TestExecuteApplyArchiveFailsIfTargetChangedSinceBackup(t *testing.T) {
+	fixture := newApplyExecuteFixture(t, OperationArchive, "existing memory\n", "")
+	archivePath := fixture.proposal.Patches[0].ArchivePath
+	if err := os.WriteFile(fixture.targetPath, []byte("changed after backup\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(target) error = %v", err)
+	}
+
+	_, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err == nil || !strings.Contains(err.Error(), "changed since backup plan") {
+		t.Fatalf("ExecuteApply() error = %v, want target changed failure", err)
+	}
+	if got := string(mustReadFile(t, fixture.targetPath)); got != "changed after backup\n" {
+		t.Fatalf("target content = %q, want changed target preserved", got)
+	}
+	if _, err := os.Stat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archive path changed after failure: %v", err)
+	}
+}
+
+func TestExecuteApplyArchiveAndUpdateMultiPatchPasses(t *testing.T) {
+	tempDir := t.TempDir()
+	archiveTarget := filepath.Join(tempDir, "memory", "archive-source.md")
+	archivePath := filepath.Join(tempDir, "memory", "archive", "archive-source.md")
+	updateTarget := filepath.Join(tempDir, "memory", "updated.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, map[string]string{
+		archiveTarget: "archive original\n",
+		updateTarget:  "update original\n",
+	}, []MemoryPatch{
+		{TargetPath: archiveTarget, Operation: OperationArchive, ArchivePath: archivePath},
+		{TargetPath: updateTarget, Operation: OperationUpdate, Content: "update replacement\n"},
+	})
+
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{})
+	if err != nil {
+		t.Fatalf("ExecuteApply() error = %v", err)
+	}
+	if _, err := os.Stat(archiveTarget); !os.IsNotExist(err) {
+		t.Fatalf("archive target still exists after apply: %v", err)
+	}
+	if got := string(mustReadFile(t, archivePath)); got != "archive original\n" {
+		t.Fatalf("archive path content = %q, want original", got)
+	}
+	if got := string(mustReadFile(t, updateTarget)); got != "update replacement\n" {
+		t.Fatalf("update target = %q, want replacement", got)
+	}
+	if result.Status != ApplyResultStatusSucceeded {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusSucceeded)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("items = %d, want 2", len(result.Items))
+	}
+	if result.Items[0].Status != ApplyResultStatusArchived || result.Items[0].ArchivePath != archivePath {
+		t.Fatalf("first item = %#v, want archived source", result.Items[0])
+	}
+	if result.Items[1].Status != ApplyResultStatusUpdated || result.Items[1].TargetPath != updateTarget {
+		t.Fatalf("second item = %#v, want updated target", result.Items[1])
+	}
+	assertApplyResultJSONValid(t, result)
+	assertNoApplyTempFiles(t, updateTarget)
+	assertNoApplyTempFiles(t, archivePath)
+}
+
+func TestExecuteApplyArchiveFirstTargetUnchangedWhenSecondValidationFails(t *testing.T) {
+	tempDir := t.TempDir()
+	archiveTarget := filepath.Join(tempDir, "memory", "archive-source.md")
+	archivePath := filepath.Join(tempDir, "memory", "archive", "archive-source.md")
+	updateTarget := filepath.Join(tempDir, "memory", "updated.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, map[string]string{
+		archiveTarget: "archive original\n",
+		updateTarget:  "update original\n",
+	}, []MemoryPatch{
+		{TargetPath: archiveTarget, Operation: OperationArchive, ArchivePath: archivePath},
+		{TargetPath: updateTarget, Operation: OperationUpdate, Content: "update replacement\n"},
+	})
+
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{
+		atomicWriteOptionsByTarget: map[string]atomicApplyWriteOptions{
+			applyPathKey(updateTarget): {
+				AfterTempWrite: func(tempPath string) error {
+					return os.WriteFile(tempPath, []byte("corrupted update temp\n"), 0o600)
+				},
+			},
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), "temporary apply file") || !strings.Contains(err.Error(), "content") {
+		t.Fatalf("ExecuteApply() error = %v, want second validation failure", err)
+	}
+	if result.Status != ApplyResultStatusFailed {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusFailed)
+	}
+	if got := string(mustReadFile(t, archiveTarget)); got != "archive original\n" {
+		t.Fatalf("archive target = %q, want unchanged", got)
+	}
+	if _, err := os.Stat(archivePath); !os.IsNotExist(err) {
+		t.Fatalf("archive path changed after validation failure: %v", err)
+	}
+	if got := string(mustReadFile(t, updateTarget)); got != "update original\n" {
+		t.Fatalf("update target = %q, want unchanged", got)
+	}
+	assertNoApplyTempFiles(t, updateTarget)
+	assertNoApplyTempFiles(t, archivePath)
+}
+
+func TestExecuteApplyArchiveRenamePartialFailureReportsPartialFailed(t *testing.T) {
+	tempDir := t.TempDir()
+	archiveTarget := filepath.Join(tempDir, "memory", "archive-source.md")
+	archivePath := filepath.Join(tempDir, "memory", "archive", "archive-source.md")
+	updateTarget := filepath.Join(tempDir, "memory", "updated.md")
+	fixture := newApplyExecuteMultiPatchFixture(t, tempDir, map[string]string{
+		archiveTarget: "archive original\n",
+		updateTarget:  "update original\n",
+	}, []MemoryPatch{
+		{TargetPath: archiveTarget, Operation: OperationArchive, ArchivePath: archivePath},
+		{TargetPath: updateTarget, Operation: OperationUpdate, Content: "update replacement\n"},
+	})
+	injectedErr := errors.New("injected archive/update rename failure")
+
+	result, err := ExecuteApply(fixture.proposal, fixture.approval, fixture.policy, fixture.backupPlan, fixture.backupResult, NewApplyExecuteOptions{
+		atomicWriteOptionsByTarget: map[string]atomicApplyWriteOptions{
+			applyPathKey(updateTarget): {
+				Rename: func(tempPath string, targetPath string) error {
+					return injectedErr
+				},
+			},
+		},
+	})
+	if !errors.Is(err, injectedErr) {
+		t.Fatalf("ExecuteApply() error = %v, want injected rename failure", err)
+	}
+	if result.Status != ApplyResultStatusPartialFailed {
+		t.Fatalf("result status = %q, want %q", result.Status, ApplyResultStatusPartialFailed)
+	}
+	if _, err := os.Stat(archiveTarget); !os.IsNotExist(err) {
+		t.Fatalf("archive target still exists after first rename: %v", err)
+	}
+	if got := string(mustReadFile(t, archivePath)); got != "archive original\n" {
+		t.Fatalf("archive path = %q, want moved content", got)
+	}
+	if got := string(mustReadFile(t, updateTarget)); got != "update original\n" {
+		t.Fatalf("update target = %q, want unchanged after partial failure", got)
+	}
+	if len(result.Items) != 1 {
+		t.Fatalf("items = %d, want first archived item only", len(result.Items))
+	}
+	if result.Items[0].Status != ApplyResultStatusArchived || result.Items[0].ArchivePath != archivePath {
+		t.Fatalf("applied item = %#v, want archived source", result.Items[0])
+	}
+	if result.FailedItem == nil || result.FailedItem.TargetPath != updateTarget || result.FailedItem.ArchivePath != "" {
+		t.Fatalf("failed_item = %#v, want update target", result.FailedItem)
+	}
+	assertApplyResultJSONValid(t, result)
+	assertNoApplyTempFiles(t, updateTarget)
+	assertNoApplyTempFiles(t, archivePath)
 }
 
 func TestExecuteApplyTargetChangedAfterBackupResultFails(t *testing.T) {

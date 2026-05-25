@@ -17,6 +17,7 @@ const (
 	ApplyResultStatusCreated  ApplyResultItemStatus = "created"
 	ApplyResultStatusAppended ApplyResultItemStatus = "appended"
 	ApplyResultStatusUpdated  ApplyResultItemStatus = "updated"
+	ApplyResultStatusArchived ApplyResultItemStatus = "archived"
 )
 
 type ApplyResultStatus string
@@ -42,6 +43,7 @@ type ApplyResult struct {
 
 type ApplyResultItem struct {
 	TargetPath   string                `json:"target_path"`
+	ArchivePath  string                `json:"archive_path,omitempty"`
 	Operation    MemoryOperation       `json:"operation"`
 	Status       ApplyResultItemStatus `json:"status"`
 	BytesWritten int64                 `json:"bytes_written"`
@@ -49,9 +51,10 @@ type ApplyResultItem struct {
 }
 
 type ApplyResultFailedItem struct {
-	TargetPath string          `json:"target_path"`
-	Operation  MemoryOperation `json:"operation"`
-	Error      string          `json:"error,omitempty"`
+	TargetPath  string          `json:"target_path"`
+	ArchivePath string          `json:"archive_path,omitempty"`
+	Operation   MemoryOperation `json:"operation"`
+	Error       string          `json:"error,omitempty"`
 }
 
 type ApplyExecutionError struct {
@@ -131,8 +134,9 @@ func (r ApplyResult) JSON() ([]byte, error) {
 }
 
 type preparedApplyItem struct {
-	action   ApplyPreviewAction
-	planItem BackupItem
+	action          ApplyPreviewAction
+	planItem        BackupItem
+	archivePlanItem *BackupItem
 }
 
 func prepareApplyExecution(proposal MemoryProposal, approval MemoryApproval, policy *MemoryPolicy, backupPlan BackupPlan, backupResult BackupResult) ([]preparedApplyItem, error) {
@@ -163,9 +167,15 @@ func prepareApplyExecution(proposal MemoryProposal, approval MemoryApproval, pol
 		if err := validateApplyAction(index, action, planByTarget, createTargets); err != nil {
 			return nil, err
 		}
+		var archivePlanItem *BackupItem
+		if action.Operation == OperationArchive {
+			item := planByTarget[applyPathKey(action.ArchivePath)]
+			archivePlanItem = &item
+		}
 		prepared = append(prepared, preparedApplyItem{
-			action:   action,
-			planItem: planByTarget[applyPathKey(action.TargetPath)],
+			action:          action,
+			planItem:        planByTarget[applyPathKey(action.TargetPath)],
+			archivePlanItem: archivePlanItem,
 		})
 	}
 	return prepared, nil
@@ -370,7 +380,42 @@ func validateApplyAction(index int, action ApplyPreviewAction, planByTarget map[
 			return fmt.Errorf("apply action[%d] target_path %q is a directory", index, action.TargetPath)
 		}
 	case OperationArchive:
-		return fmt.Errorf("apply action[%d] operation not implemented: %s", index, action.Operation)
+		if strings.TrimSpace(action.ArchivePath) == "" {
+			return fmt.Errorf("apply action[%d] archive_path is required", index)
+		}
+		if hasPathTraversal(action.ArchivePath) {
+			return fmt.Errorf("apply action[%d] archive_path %q contains path traversal", index, action.ArchivePath)
+		}
+		if sameFilesystemPath(action.TargetPath, action.ArchivePath) {
+			return fmt.Errorf("apply action[%d] archive_path %q must differ from target_path", index, action.ArchivePath)
+		}
+		archivePlanItem, ok := planByTarget[applyPathKey(action.ArchivePath)]
+		if !ok {
+			return fmt.Errorf("apply action[%d] archive_path %q is not covered by backup plan", index, action.ArchivePath)
+		}
+		if !planItem.Exists {
+			return fmt.Errorf("apply action[%d] archive target_path %q requires backup plan exists=true", index, action.TargetPath)
+		}
+		if archivePlanItem.Exists {
+			return fmt.Errorf("apply action[%d] archive_path %q requires backup plan exists=false", index, action.ArchivePath)
+		}
+		info, err := os.Stat(action.TargetPath)
+		if os.IsNotExist(err) {
+			return fmt.Errorf("apply action[%d] archive target_path %q does not exist", index, action.TargetPath)
+		}
+		if err != nil {
+			return fmt.Errorf("apply action[%d] stat target_path %q: %w", index, action.TargetPath, err)
+		}
+		if info.IsDir() {
+			return fmt.Errorf("apply action[%d] target_path %q is a directory", index, action.TargetPath)
+		}
+		exists, err := targetExists(action.ArchivePath)
+		if err != nil {
+			return fmt.Errorf("apply action[%d] stat archive_path %q: %w", index, action.ArchivePath, err)
+		}
+		if exists {
+			return fmt.Errorf("apply action[%d] archive_path %q already exists", index, action.ArchivePath)
+		}
 	default:
 		return fmt.Errorf("apply action[%d] operation %q is not supported", index, action.Operation)
 	}
@@ -431,7 +476,11 @@ func executeApplyStaged(prepared []preparedApplyItem, opts NewApplyExecuteOption
 			}
 			return applyExecutionFailure(result, status, failedApplyResultItemFromAction(staged[index].action, err), err)
 		}
-		sha256, err := fileSHA256(staged[index].action.TargetPath)
+		resultPath := staged[index].targetPath
+		if staged[index].mode == atomicApplyModeArchive {
+			resultPath = staged[index].archivePath
+		}
+		sha256, err := fileSHA256(resultPath)
 		if err != nil {
 			result.Items = append(result.Items, applyResultItemFromStaged(staged[index], ""))
 			return applyExecutionFailure(result, ApplyResultStatusPartialFailed, failedApplyResultItemFromAction(staged[index].action, err), err)
@@ -460,6 +509,7 @@ func applyExecutionFailure(result ApplyResult, status ApplyResultStatus, failedI
 func applyResultItemFromStaged(item stagedApplyItem, sha256 string) ApplyResultItem {
 	return ApplyResultItem{
 		TargetPath:   item.action.TargetPath,
+		ArchivePath:  item.action.ArchivePath,
 		Operation:    item.action.Operation,
 		Status:       item.status,
 		BytesWritten: item.bytesWritten,
@@ -469,8 +519,9 @@ func applyResultItemFromStaged(item stagedApplyItem, sha256 string) ApplyResultI
 
 func failedApplyResultItemFromAction(action ApplyPreviewAction, err error) *ApplyResultFailedItem {
 	item := &ApplyResultFailedItem{
-		TargetPath: action.TargetPath,
-		Operation:  action.Operation,
+		TargetPath:  action.TargetPath,
+		ArchivePath: action.ArchivePath,
+		Operation:   action.Operation,
 	}
 	if err != nil {
 		item.Error = err.Error()
@@ -482,6 +533,7 @@ type stagedApplyItem struct {
 	action                ApplyPreviewAction
 	planItem              BackupItem
 	targetPath            string
+	archivePath           string
 	content               string
 	tempPath              string
 	mode                  atomicApplyMode
@@ -533,6 +585,8 @@ func prepareApplyActionTemp(item preparedApplyItem, hooksByTarget map[string]ato
 			return stagedApplyItem{}, fmt.Errorf("backup item target_path %q missing sha256 for update", action.TargetPath)
 		}
 		expectedCurrentSHA256 = *planItem.SHA256
+	case OperationArchive:
+		return prepareAtomicArchiveMove(action, planItem, item.archivePlanItem, hooksByTarget)
 	default:
 		return stagedApplyItem{}, fmt.Errorf("operation not implemented: %s", action.Operation)
 	}
@@ -566,6 +620,7 @@ type atomicApplyMode string
 const (
 	atomicApplyModeCreate  atomicApplyMode = "create"
 	atomicApplyModeReplace atomicApplyMode = "replace"
+	atomicApplyModeArchive atomicApplyMode = "archive"
 )
 
 type atomicApplyWriteOptions struct {
@@ -596,6 +651,61 @@ func writeApplyContentAtomically(targetPath string, content string, opts atomicA
 		return staged.bytesWritten, err
 	}
 	return staged.bytesWritten, nil
+}
+
+func prepareAtomicArchiveMove(action ApplyPreviewAction, planItem BackupItem, archivePlanItem *BackupItem, hooksByTarget map[string]atomicApplyWriteOptions) (stagedApplyItem, error) {
+	if strings.TrimSpace(action.ArchivePath) == "" {
+		return stagedApplyItem{}, fmt.Errorf("archive_path is required for target_path %q", action.TargetPath)
+	}
+	if !planItem.Exists {
+		return stagedApplyItem{}, fmt.Errorf("backup item target_path %q must exist for archive", action.TargetPath)
+	}
+	if archivePlanItem == nil {
+		return stagedApplyItem{}, fmt.Errorf("archive_path %q is not covered by backup plan", action.ArchivePath)
+	}
+	if archivePlanItem.Exists {
+		return stagedApplyItem{}, fmt.Errorf("backup item archive_path %q must be missing for archive", action.ArchivePath)
+	}
+	if planItem.SHA256 == nil || strings.TrimSpace(*planItem.SHA256) == "" {
+		return stagedApplyItem{}, fmt.Errorf("backup item target_path %q missing sha256 for archive", action.TargetPath)
+	}
+	info, err := os.Stat(action.TargetPath)
+	if os.IsNotExist(err) {
+		return stagedApplyItem{}, fmt.Errorf("archive target_path %q does not exist", action.TargetPath)
+	}
+	if err != nil {
+		return stagedApplyItem{}, fmt.Errorf("stat target_path %q for archive: %w", action.TargetPath, err)
+	}
+	if info.IsDir() {
+		return stagedApplyItem{}, fmt.Errorf("archive target_path %q is a directory", action.TargetPath)
+	}
+	if err := os.MkdirAll(filepath.Dir(action.ArchivePath), 0o755); err != nil {
+		return stagedApplyItem{}, fmt.Errorf("create archive directory for %q: %w", action.ArchivePath, err)
+	}
+
+	writeOptions := atomicApplyWriteOptions{
+		Mode:                  atomicApplyModeArchive,
+		ExpectedCurrentSHA256: *planItem.SHA256,
+	}
+	if hooksByTarget != nil {
+		if hook, ok := hooksByTarget[applyPathKey(action.TargetPath)]; ok {
+			writeOptions.BeforeRename = hook.BeforeRename
+			writeOptions.Rename = hook.Rename
+		}
+	}
+
+	return stagedApplyItem{
+		action:                action,
+		planItem:              planItem,
+		targetPath:            action.TargetPath,
+		archivePath:           action.ArchivePath,
+		mode:                  writeOptions.Mode,
+		expectedCurrentSHA256: writeOptions.ExpectedCurrentSHA256,
+		bytesWritten:          info.Size(),
+		status:                ApplyResultStatusArchived,
+		beforeRename:          writeOptions.BeforeRename,
+		rename:                writeOptions.Rename,
+	}, nil
 }
 
 func prepareAtomicApplyWrite(targetPath string, content string, opts atomicApplyWriteOptions) (stagedApplyItem, error) {
@@ -645,6 +755,9 @@ func prepareAtomicApplyWrite(targetPath string, content string, opts atomicApply
 }
 
 func validateStagedApplyTemp(item stagedApplyItem) error {
+	if item.mode == atomicApplyModeArchive {
+		return nil
+	}
 	return validateApplyTempContent(item.tempPath, item.content)
 }
 
@@ -674,6 +787,27 @@ func validateStagedApplyTarget(item stagedApplyItem) error {
 		if currentSHA256 != item.expectedCurrentSHA256 {
 			return fmt.Errorf("target_path %q changed before rename", item.targetPath)
 		}
+	case atomicApplyModeArchive:
+		if strings.TrimSpace(item.archivePath) == "" {
+			return fmt.Errorf("archive_path is required for target_path %q", item.targetPath)
+		}
+		if strings.TrimSpace(item.expectedCurrentSHA256) == "" {
+			return fmt.Errorf("expected current sha256 is required for archive target_path %q", item.targetPath)
+		}
+		currentSHA256, err := fileSHA256(item.targetPath)
+		if err != nil {
+			return fmt.Errorf("hash archive target_path %q before rename: %w", item.targetPath, err)
+		}
+		if currentSHA256 != item.expectedCurrentSHA256 {
+			return fmt.Errorf("archive target_path %q changed before rename", item.targetPath)
+		}
+		exists, err := targetExists(item.archivePath)
+		if err != nil {
+			return fmt.Errorf("stat archive_path %q before rename: %w", item.archivePath, err)
+		}
+		if exists {
+			return fmt.Errorf("archive_path %q already exists before rename", item.archivePath)
+		}
 	default:
 		return fmt.Errorf("atomic apply mode %q is not supported", item.mode)
 	}
@@ -684,6 +818,13 @@ func renameStagedApplyItem(item *stagedApplyItem) error {
 	rename := item.rename
 	if rename == nil {
 		rename = os.Rename
+	}
+	if item.mode == atomicApplyModeArchive {
+		if err := rename(item.targetPath, item.archivePath); err != nil {
+			return fmt.Errorf("rename target_path %q to archive_path %q: %w", item.targetPath, item.archivePath, err)
+		}
+		item.renamed = true
+		return nil
 	}
 	if err := rename(item.tempPath, item.targetPath); err != nil {
 		return fmt.Errorf("rename temporary apply file %q to target_path %q: %w", item.tempPath, item.targetPath, err)

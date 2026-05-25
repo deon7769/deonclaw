@@ -14,8 +14,7 @@
 
 ### Phase 5B - Safe memory apply
 
-- apply real for create/append/update
-- apply real for archive later
+- apply real for create/append/update/archive
 - no automatic git commit initially
 
 ### Phase 6 - OpenCode worker

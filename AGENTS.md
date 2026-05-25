@@ -48,13 +48,12 @@ Implemented:
 - apply preflight
 - backup/restore plan
 - backup materialization
-- real memory apply for create/append/update
+- real memory apply for create/append/update/archive
 - restore dry-run
 - restore execute
 
 Not implemented yet:
 
-- real memory apply for archive
 - OpenCode worker
 - Docker runtime
 - memory index/LanceDB
@@ -273,11 +272,10 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence:
 
-1. real apply for archive later
-2. OpenCode worker
-3. Docker runtime
-4. memory index/LanceDB
-5. UI/dashboard
+1. OpenCode worker
+2. Docker runtime
+3. memory index/LanceDB
+4. UI/dashboard
 
 ## Coding style
 

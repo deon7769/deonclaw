@@ -78,7 +78,7 @@ Patch policy rules:
 - if any patch fails, the apply preview status is `failed`
 - patch violations are included in the apply preview
 
-For archive patches, the apply preview records `archive_path` and describes the dry-run action as moving `target_path` to `archive_path`. This is preview and planning support only; real archive apply is still not implemented.
+For archive patches, the apply preview records `archive_path` and describes the dry-run action as moving `target_path` to `archive_path`.
 
 The optional `--output` flag writes only the preview JSON, commonly named `apply-preview.json`:
 
@@ -380,7 +380,7 @@ Safety checks:
 
 ## Apply Execute
 
-`deonctl memory proposal apply-execute` performs the real memory write for the limited create/append/update MVP:
+`deonctl memory proposal apply-execute` performs the real memory write for the limited create/append/update/archive MVP:
 
 ```bash
 deonctl memory proposal apply-execute \
@@ -421,14 +421,14 @@ Supported operations:
 - `update` replaces the entire target content with the approved patch content
 - `update` requires the target to exist and requires the backup plan item to have `exists: true`
 - `update` writes the replacement content to a temporary file in the target directory, validates the temporary content, rechecks the current target SHA-256 against the backup plan before rename, then renames it to the target
-
-Unsupported operations:
-
-- `archive` fails with `operation not implemented`
+- `archive` moves `target_path` to `archive_path`
+- `archive` requires `archive_path`, requires the target to exist, and requires the archive destination to be missing
+- `archive` requires backup plan coverage for both paths: `target_path` with `exists: true` and `archive_path` with `exists: false`
+- `archive` rechecks the current target SHA-256 and archive destination absence before rename, then renames `target_path` to `archive_path`
 
 Apply execution creates target directories when needed.
 
-The generated `apply-result.json` records each applied target, operation, status, bytes written, and final SHA-256.
+The generated `apply-result.json` records each applied target, optional archive path, operation, status, bytes written or moved, and final SHA-256.
 
 Apply execution does not make a Git commit.
 
@@ -470,4 +470,4 @@ For example:
 - Escalasoft proposals must stay inside allowed Escalasoft targets or approved bridge files
 - `allowed_global_bridge` targets are controlled and produce a warning
 
-The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, restore dry-run, restore execute, and real apply for `create`/`append`/`update`. It still does not implement real `archive` apply or commit memory changes.
+The current MVP supports artifact preservation, lint reporting, apply dry-run previews, approval artifacts, apply preflight, backup/restore plans, backup materialization, restore dry-run, restore execute, and real apply for `create`/`append`/`update`/`archive`. It still does not commit memory changes automatically.
