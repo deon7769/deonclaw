@@ -35,6 +35,20 @@ func TestDryRunBuildsReadOnlyCommand(t *testing.T) {
 	}
 }
 
+func TestNewWithCommandFallsBackToOpenCode(t *testing.T) {
+	worker := NewWithCommand("")
+	event, err := worker.DryRun(context.Background(), workers.RunSpec{
+		Task:      opencodeTaskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if got := event.Command[0]; got != "opencode" {
+		t.Fatalf("command = %q, want opencode fallback", got)
+	}
+}
+
 func TestDryRunBuildsWorkspaceWriteCommand(t *testing.T) {
 	worker := New()
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{

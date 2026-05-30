@@ -14,7 +14,9 @@ import (
 
 	artifactspkg "github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/config"
+	configenvpkg "github.com/deon7769/deonclaw/internal/configenv"
 	"github.com/deon7769/deonclaw/internal/contextpack"
+	doctorpkg "github.com/deon7769/deonclaw/internal/doctor"
 	"github.com/deon7769/deonclaw/internal/domains"
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/memory"
@@ -32,6 +34,9 @@ const usage = `deonctl - DeonClaw control CLI
 
 Usage:
   deonctl version
+  deonctl doctor [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
+  deonctl workers doctor [--worker codex|opencode] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
+  deonctl config env [--output-format text|json]
   deonctl task validate <path>
   deonctl domains validate --config <path>
   deonctl domains list --config <path>
@@ -94,6 +99,38 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 	case "version":
 		fmt.Fprintf(stdout, "deonclaw %s\n", config.Version)
 		return 0
+	case "doctor":
+		opts, err := parseDoctorOptions(args[1:])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		return runDoctor(opts, stdout, stderr)
+	case "workers":
+		if len(args) < 2 || args[1] != "doctor" {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		opts, err := parseDoctorOptions(args[2:])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		return runDoctor(opts, stdout, stderr)
+	case "config":
+		if len(args) < 2 || args[1] != "env" {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		opts, err := parseConfigEnvOptions(args[2:])
+		if err != nil {
+			fmt.Fprintf(stderr, "error: %v\n", err)
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		return runConfigEnv(opts, stdout, stderr)
 	case "task":
 		if len(args) < 2 {
 			fmt.Fprint(stderr, usage)
@@ -1772,6 +1809,110 @@ func runDomainsList(opts domainsOptions, stdout io.Writer, stderr io.Writer) int
 	}
 	if err := table.Flush(); err != nil {
 		fmt.Fprintf(stderr, "domains list failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+type doctorOptions struct {
+	outputFormat      string
+	worker            string
+	workersConfigPath string
+	storePath         string
+	artifactsDir      string
+}
+
+func parseDoctorOptions(args []string) (doctorOptions, error) {
+	opts := doctorOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--output-format":
+			if i+1 >= len(args) {
+				return doctorOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		case "--worker":
+			if i+1 >= len(args) {
+				return doctorOptions{}, fmt.Errorf("missing value for --worker")
+			}
+			opts.worker = args[i+1]
+			i++
+		case "--workers-config":
+			if i+1 >= len(args) {
+				return doctorOptions{}, fmt.Errorf("missing value for --workers-config")
+			}
+			opts.workersConfigPath = args[i+1]
+			i++
+		case "--store":
+			if i+1 >= len(args) {
+				return doctorOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return doctorOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		default:
+			return doctorOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return doctorOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runDoctor(opts doctorOptions, stdout io.Writer, stderr io.Writer) int {
+	report, err := doctorpkg.Build(doctorpkg.Options{
+		OutputFormat:      doctorpkg.OutputFormat(opts.outputFormat),
+		Worker:            opts.worker,
+		WorkersConfigPath: opts.workersConfigPath,
+		StorePath:         opts.storePath,
+		ArtifactsDir:      opts.artifactsDir,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "doctor failed: %v\n", err)
+		return 1
+	}
+	if err := doctorpkg.Write(report, doctorpkg.OutputFormat(opts.outputFormat), stdout); err != nil {
+		fmt.Fprintf(stderr, "doctor output failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+type configEnvOptions struct {
+	outputFormat string
+}
+
+func parseConfigEnvOptions(args []string) (configEnvOptions, error) {
+	opts := configEnvOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--output-format":
+			if i+1 >= len(args) {
+				return configEnvOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return configEnvOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return configEnvOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runConfigEnv(opts configEnvOptions, stdout io.Writer, stderr io.Writer) int {
+	report := configenvpkg.Build()
+	if err := configenvpkg.Write(report, configenvpkg.OutputFormat(opts.outputFormat), stdout); err != nil {
+		fmt.Fprintf(stderr, "config env output failed: %v\n", err)
 		return 1
 	}
 	return 0

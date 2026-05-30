@@ -34,6 +34,83 @@ func TestRunVersion(t *testing.T) {
 	}
 }
 
+func TestRunDoctorText(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"doctor"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "deonctl:") || !strings.Contains(stdout.String(), "worker codex:") {
+		t.Fatalf("stdout = %q, want doctor text", stdout.String())
+	}
+}
+
+func TestRunDoctorJSON(t *testing.T) {
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"doctor", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !json.Valid(stdout.Bytes()) {
+		t.Fatalf("stdout is not valid JSON: %s", stdout.String())
+	}
+}
+
+func TestRunWorkersDoctorWithWorkerFilterAndConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "fake-codex")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake) error = %v", err)
+	}
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	workersConfigPath := filepath.Join(tempDir, "workers.yaml")
+	if err := os.WriteFile(workersConfigPath, []byte("workers:\n  codex:\n    command: fake-codex\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(workers config) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"workers", "doctor", "--worker", "codex", "--workers-config", workersConfigPath, "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	var decoded struct {
+		Workers []struct {
+			Name              string `json:"name"`
+			ConfiguredCommand string `json:"configured_command"`
+			Available         bool   `json:"available"`
+		} `json:"workers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if len(decoded.Workers) != 1 || decoded.Workers[0].Name != "codex" || decoded.Workers[0].ConfiguredCommand != "fake-codex" || !decoded.Workers[0].Available {
+		t.Fatalf("workers = %#v, want fake codex available", decoded.Workers)
+	}
+}
+
+func TestRunConfigEnvMasksSecrets(t *testing.T) {
+	t.Setenv("OPENAI_API_KEY", "sk-real-secret")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"config", "env"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	text := stdout.String()
+	if !strings.Contains(text, "OPENAI_API_KEY=set(masked)") {
+		t.Fatalf("stdout = %q, want masked key", text)
+	}
+	if strings.Contains(text, "sk-real-secret") {
+		t.Fatalf("stdout leaked secret: %q", text)
+	}
+}
+
 func TestRunTaskValidate(t *testing.T) {
 	taskPath := writeTaskFile(t, "codex")
 	var stdout bytes.Buffer

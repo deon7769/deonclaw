@@ -1,34 +1,7 @@
 workers:
   codex:
-    type: cli
     command: codex
-    enabled: true
-    mode: exec
-    args:
-      - exec
-      - --json
-      - --sandbox
-      - workspace-write
-    auth:
-      strategy: harness_managed
-    event_stream:
-      format: jsonl
-      stdout: events
-      stderr: logs
-
   opencode:
-    type: cli
     command: opencode
-    enabled: true
-    mode: run
-    auth:
-      strategy: harness_managed
-    provider:
-      preferred: z_ai_glm
-
-  claude-code:
-    type: cli
-    command: claude
-    enabled: false
-    auth:
-      strategy: harness_managed
+  kimi:
+    command: kimi

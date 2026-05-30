@@ -21,6 +21,14 @@ func New() *Worker {
 	return &Worker{command: "opencode"}
 }
 
+func NewWithCommand(command string) *Worker {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		command = "opencode"
+	}
+	return &Worker{command: command}
+}
+
 func (w *Worker) DryRun(ctx context.Context, spec workers.RunSpec) (*workers.WorkerEvent, error) {
 	return w.plan(ctx, spec)
 }
