@@ -73,11 +73,43 @@ func TestDoctorChecksStoreAndArtifactsPaths(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if report.StorePath == nil || !report.StorePath.Exists || !report.StorePath.Writable {
+	if report.StorePath == nil || !report.StorePath.Exists || !report.StorePath.Writable || report.StorePath.State != "exists_writable" {
 		t.Fatalf("store check = %#v, want exists writable", report.StorePath)
 	}
-	if report.ArtifactsDir == nil || !report.ArtifactsDir.Exists || !report.ArtifactsDir.Writable {
+	if report.ArtifactsDir == nil || !report.ArtifactsDir.Exists || !report.ArtifactsDir.Writable || report.ArtifactsDir.State != "exists_writable" {
 		t.Fatalf("artifacts check = %#v, want exists writable", report.ArtifactsDir)
+	}
+}
+
+func TestDoctorStorePathExistingDirectoryInvalid(t *testing.T) {
+	tempDir := t.TempDir()
+	report, err := Build(Options{StorePath: tempDir})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.StorePath == nil {
+		t.Fatal("StorePath = nil, want check")
+	}
+	if report.StorePath.State != "invalid_directory" || !report.StorePath.Exists || report.StorePath.Writable {
+		t.Fatalf("store check = %#v, want invalid_directory", report.StorePath)
+	}
+}
+
+func TestDoctorArtifactsPathExistingFileInvalid(t *testing.T) {
+	tempDir := t.TempDir()
+	artifactsPath := filepath.Join(tempDir, "artifacts-file")
+	if err := os.WriteFile(artifactsPath, []byte("not a dir"), 0o600); err != nil {
+		t.Fatalf("WriteFile(artifacts) error = %v", err)
+	}
+	report, err := Build(Options{ArtifactsDir: artifactsPath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.ArtifactsDir == nil {
+		t.Fatal("ArtifactsDir = nil, want check")
+	}
+	if report.ArtifactsDir.State != "invalid_file" || !report.ArtifactsDir.Exists || report.ArtifactsDir.Writable {
+		t.Fatalf("artifacts check = %#v, want invalid_file", report.ArtifactsDir)
 	}
 }
 
@@ -96,6 +128,21 @@ func TestDoctorChecksMissingStoreParentWritable(t *testing.T) {
 	}
 	if report.StorePath.State != "missing_parent_writable" || !report.StorePath.Writable {
 		t.Fatalf("store check = %#v, want missing_parent_writable", report.StorePath)
+	}
+}
+
+func TestDoctorChecksMissingStoreParentNotWritable(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "missing-parent", "store.db")
+	report, err := Build(Options{StorePath: storePath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.StorePath == nil {
+		t.Fatal("StorePath = nil, want check")
+	}
+	if report.StorePath.State != "missing_parent_not_writable" || report.StorePath.Writable {
+		t.Fatalf("store check = %#v, want missing_parent_not_writable", report.StorePath)
 	}
 }
 
@@ -120,13 +167,35 @@ func TestDoctorChecksArtifactsMissingParentWritable(t *testing.T) {
 	}
 }
 
-func TestWorkersDoctorAllowsKimiDiagnostic(t *testing.T) {
+func TestDoctorChecksArtifactsMissingParentNotWritable(t *testing.T) {
+	tempDir := t.TempDir()
+	artifactsPath := filepath.Join(tempDir, "missing-parent", "artifacts")
+	report, err := Build(Options{ArtifactsDir: artifactsPath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.ArtifactsDir == nil {
+		t.Fatal("ArtifactsDir = nil, want check")
+	}
+	if report.ArtifactsDir.State != "missing_parent_not_writable" || report.ArtifactsDir.Writable {
+		t.Fatalf("artifacts check = %#v, want missing_parent_not_writable", report.ArtifactsDir)
+	}
+}
+
+func TestWorkersDoctorAllowsKimiAsFutureWorkerDiagnostic(t *testing.T) {
 	report, err := Build(Options{Worker: "kimi"})
 	if err != nil {
 		t.Fatalf("Build() error = %v", err)
 	}
-	if len(report.Workers) != 1 || report.Workers[0].Name != "kimi" || report.Workers[0].ConfiguredCommand != "kimi" {
-		t.Fatalf("workers = %#v, want kimi diagnostic", report.Workers)
+	if len(report.Workers) != 1 || report.Workers[0].Name != "kimi" || report.Workers[0].ConfiguredCommand != "kimi" || report.Workers[0].ImplementationStatus != "future_worker" {
+		t.Fatalf("workers = %#v, want kimi future_worker diagnostic", report.Workers)
+	}
+	var out bytes.Buffer
+	if err := Write(report, OutputText, &out); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "status=future_worker") {
+		t.Fatalf("text output = %q, want future_worker status", out.String())
 	}
 }
 

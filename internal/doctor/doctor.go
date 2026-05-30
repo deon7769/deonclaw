@@ -48,12 +48,13 @@ type ToolCheck struct {
 }
 
 type WorkerCheck struct {
-	Name              string    `json:"name"`
-	ConfiguredCommand string    `json:"configured_command"`
-	Available         bool      `json:"available"`
-	Path              string    `json:"path,omitempty"`
-	Error             string    `json:"error,omitempty"`
-	CommandCheck      ToolCheck `json:"command_check"`
+	Name                 string    `json:"name"`
+	ConfiguredCommand    string    `json:"configured_command"`
+	ImplementationStatus string    `json:"implementation_status"`
+	Available            bool      `json:"available"`
+	Path                 string    `json:"path,omitempty"`
+	Error                string    `json:"error,omitempty"`
+	CommandCheck         ToolCheck `json:"command_check"`
 }
 
 type PathCheck struct {
@@ -127,7 +128,7 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 			return err
 		}
 		for _, worker := range report.Workers {
-			if _, err := fmt.Fprintf(out, "worker %s: command=%s available=%t", worker.Name, worker.ConfiguredCommand, worker.Available); err != nil {
+			if _, err := fmt.Fprintf(out, "worker %s: command=%s status=%s available=%t", worker.Name, worker.ConfiguredCommand, worker.ImplementationStatus, worker.Available); err != nil {
 				return err
 			}
 			if worker.Path != "" {
@@ -191,15 +192,23 @@ func workerChecks(cfg workerconfig.Config, workerFilter string) ([]WorkerCheck, 
 		command := cfg.Command(worker)
 		tool := checkTool(command)
 		checks = append(checks, WorkerCheck{
-			Name:              worker,
-			ConfiguredCommand: command,
-			Available:         tool.Available,
-			Path:              tool.Path,
-			Error:             tool.Error,
-			CommandCheck:      tool,
+			Name:                 worker,
+			ConfiguredCommand:    command,
+			ImplementationStatus: implementationStatus(worker),
+			Available:            tool.Available,
+			Path:                 tool.Path,
+			Error:                tool.Error,
+			CommandCheck:         tool,
 		})
 	}
 	return checks, nil
+}
+
+func implementationStatus(worker string) string {
+	if worker == "kimi" {
+		return "future_worker"
+	}
+	return "implemented"
 }
 
 func isKnownWorker(worker string) bool {
@@ -239,18 +248,20 @@ func checkWritableFile(path string) PathCheck {
 		check.Error = err.Error()
 		return check
 	}
-	check.State = "exists"
 	check.Exists = true
 	if info.IsDir() {
+		check.State = "invalid_directory"
 		check.Error = "path is a directory"
 		return check
 	}
 	file, err := os.OpenFile(path, os.O_WRONLY|os.O_APPEND, 0)
 	if err != nil {
+		check.State = "exists_not_writable"
 		check.Error = err.Error()
 		return check
 	}
 	_ = file.Close()
+	check.State = "exists_writable"
 	check.Writable = true
 	return check
 }
@@ -266,20 +277,22 @@ func checkWritableDir(path string) PathCheck {
 		check.Error = err.Error()
 		return check
 	}
-	check.State = "exists"
 	check.Exists = true
 	if !info.IsDir() {
+		check.State = "invalid_file"
 		check.Error = "path is not a directory"
 		return check
 	}
 	temp, err := os.CreateTemp(path, ".deonclaw-doctor-*")
 	if err != nil {
+		check.State = "exists_not_writable"
 		check.Error = err.Error()
 		return check
 	}
 	tempPath := temp.Name()
 	_ = temp.Close()
 	_ = os.Remove(tempPath)
+	check.State = "exists_writable"
 	check.Writable = true
 	return check
 }
