@@ -2505,6 +2505,88 @@ func TestRunWorkerOpenCodeDryRun(t *testing.T) {
 	}
 }
 
+func TestRunWorkerOpenCodeDryRunUsesWorkersConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "workers.yaml")
+	if err := os.WriteFile(configPath, []byte("workers:\n  opencode:\n    command: /usr/local/bin/opencode\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	taskPath := writeTaskFile(t, "opencode")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"worker",
+		"opencode",
+		"dry-run",
+		taskPath,
+		"--workers-config",
+		configPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --cwd . -") {
+		t.Fatalf("stdout = %q, want configured opencode command", stdout.String())
+	}
+}
+
+func TestRunWorkerCodexDryRunUsesWorkersConfig(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "workers.yaml")
+	if err := os.WriteFile(configPath, []byte("workers:\n  codex:\n    command: /usr/local/bin/codex\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	taskPath := writeTaskFile(t, "codex")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"worker",
+		"codex",
+		"dry-run",
+		taskPath,
+		"--workers-config",
+		configPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/codex exec --json --sandbox read-only --cd . -") {
+		t.Fatalf("stdout = %q, want configured codex command", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeRunUsesWorkersConfig(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+
+	tempDir := t.TempDir()
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := filepath.Join(tempDir, "workers.yaml")
+	if err := os.WriteFile(configPath, []byte("workers:\n  opencode:\n    command: "+fakeOpenCode+"\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	taskPath := writeTaskFile(t, "opencode")
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", storePath, "--artifacts-dir", artifactsDir, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "run_id: run-cli-opencode-config-001") {
+		t.Fatalf("stdout = %q, want configured opencode run id", stdout.String())
+	}
+	assertCLIFileContent(t, filepath.Join(artifactsDir, "run-cli-opencode-config-001", "stdout.jsonl"), "{\"type\":\"done\"}\n")
+}
+
 func TestRunWorkerOpenCodeDryRunRejectsInvalidTask(t *testing.T) {
 	taskPath := writeInvalidTaskFile(t, "opencode")
 	var stdout bytes.Buffer
@@ -2577,7 +2659,7 @@ func TestRunWorkerCodexRunRejectsBadArguments(t *testing.T) {
 }
 
 func TestParseCodexRunOptions(t *testing.T) {
-	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml"})
+	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml"})
 	if err != nil {
 		t.Fatalf("parseCodexRunOptions() error = %v", err)
 	}
@@ -2595,6 +2677,9 @@ func TestParseCodexRunOptions(t *testing.T) {
 	}
 	if opts.memoryPolicyPath != "memory-policy.yaml" {
 		t.Fatalf("memoryPolicyPath = %q, want memory-policy.yaml", opts.memoryPolicyPath)
+	}
+	if opts.workersConfigPath != "workers.yaml" {
+		t.Fatalf("workersConfigPath = %q, want workers.yaml", opts.workersConfigPath)
 	}
 }
 
@@ -3073,6 +3158,34 @@ func overrideOpenCodeRunDeps(t *testing.T, result *workers.RunResult, runErr err
 	}
 }
 
+func overrideOpenCodeRunConfigDeps(t *testing.T) func() {
+	t.Helper()
+	oldRunIDFactory := runIDFactory
+	oldGitDiffRunner := gitDiffRunner
+	oldGitSnapshotRunner := gitSnapshotRunner
+	oldWorkspaceManagerFactory := workspaceManagerFactory
+
+	runIDFactory = func() string {
+		return "run-cli-opencode-config-001"
+	}
+	gitDiffRunner = func(context.Context, string) ([]byte, error) {
+		return nil, nil
+	}
+	gitSnapshotRunner = func(context.Context, string) (*git.Snapshot, error) {
+		return &git.Snapshot{}, nil
+	}
+	workspaceManagerFactory = func() workspacePreparer {
+		return cliCreatingWorkspacePreparer{}
+	}
+
+	return func() {
+		runIDFactory = oldRunIDFactory
+		gitDiffRunner = oldGitDiffRunner
+		gitSnapshotRunner = oldGitSnapshotRunner
+		workspaceManagerFactory = oldWorkspaceManagerFactory
+	}
+}
+
 type cliFakeWorker struct {
 	runResult *workers.RunResult
 	runErr    error
@@ -3107,6 +3220,24 @@ func (cliFakeWorkspacePreparer) Prepare(ctx context.Context, spec runtime.Worksp
 }
 
 func (cliFakeWorkspacePreparer) Cleanup(context.Context, *runtime.Workspace) error {
+	return nil
+}
+
+type cliCreatingWorkspacePreparer struct{}
+
+func (cliCreatingWorkspacePreparer) Prepare(ctx context.Context, spec runtime.WorkspaceSpec) (*runtime.Workspace, error) {
+	workspacePath := filepath.Join(spec.RootDir, spec.RunID, "workspace")
+	if err := os.MkdirAll(workspacePath, 0o755); err != nil {
+		return nil, err
+	}
+	return &runtime.Workspace{
+		Path:       workspacePath,
+		SourcePath: spec.SourcePath,
+		Method:     runtime.MethodGitWorktree,
+	}, nil
+}
+
+func (cliCreatingWorkspacePreparer) Cleanup(context.Context, *runtime.Workspace) error {
 	return nil
 }
 

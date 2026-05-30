@@ -58,6 +58,7 @@ type WorkerCheck struct {
 
 type PathCheck struct {
 	Path     string `json:"path"`
+	State    string `json:"state"`
 	Exists   bool   `json:"exists"`
 	Writable bool   `json:"writable"`
 	Error    string `json:"error,omitempty"`
@@ -91,8 +92,12 @@ func Build(opts Options) (Report, error) {
 		Arch:       runtime.GOARCH,
 		WorkingDir: wd,
 		Git:        checkTool("git"),
-		Workers:    workerChecks(workersConfig, opts.Worker),
 	}
+	workerChecks, err := workerChecks(workersConfig, opts.Worker)
+	if err != nil {
+		return Report{}, err
+	}
+	report.Workers = workerChecks
 	if strings.TrimSpace(opts.StorePath) != "" {
 		check := checkWritableFile(opts.StorePath)
 		report.StorePath = &check
@@ -140,7 +145,7 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 			}
 		}
 		if report.StorePath != nil {
-			if _, err := fmt.Fprintf(out, "store_path: %s exists=%t writable=%t", report.StorePath.Path, report.StorePath.Exists, report.StorePath.Writable); err != nil {
+			if _, err := fmt.Fprintf(out, "store_path: %s state=%s exists=%t writable=%t", report.StorePath.Path, report.StorePath.State, report.StorePath.Exists, report.StorePath.Writable); err != nil {
 				return err
 			}
 			if report.StorePath.Error != "" {
@@ -153,7 +158,7 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 			}
 		}
 		if report.ArtifactsDir != nil {
-			if _, err := fmt.Fprintf(out, "artifacts_dir: %s exists=%t writable=%t", report.ArtifactsDir.Path, report.ArtifactsDir.Exists, report.ArtifactsDir.Writable); err != nil {
+			if _, err := fmt.Fprintf(out, "artifacts_dir: %s state=%s exists=%t writable=%t", report.ArtifactsDir.Path, report.ArtifactsDir.State, report.ArtifactsDir.Exists, report.ArtifactsDir.Writable); err != nil {
 				return err
 			}
 			if report.ArtifactsDir.Error != "" {
@@ -171,10 +176,13 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 	}
 }
 
-func workerChecks(cfg workerconfig.Config, workerFilter string) []WorkerCheck {
+func workerChecks(cfg workerconfig.Config, workerFilter string) ([]WorkerCheck, error) {
 	workers := []string{"codex", "opencode"}
 	workerFilter = strings.TrimSpace(workerFilter)
 	if workerFilter != "" {
+		if !isKnownWorker(workerFilter) {
+			return nil, fmt.Errorf("unknown worker %q", workerFilter)
+		}
 		workers = []string{workerFilter}
 	}
 	sort.Strings(workers)
@@ -191,7 +199,16 @@ func workerChecks(cfg workerconfig.Config, workerFilter string) []WorkerCheck {
 			CommandCheck:      tool,
 		})
 	}
-	return checks
+	return checks, nil
+}
+
+func isKnownWorker(worker string) bool {
+	for _, known := range workerconfig.KnownWorkers() {
+		if worker == known {
+			return true
+		}
+	}
+	return false
 }
 
 func checkTool(command string) ToolCheck {
@@ -215,9 +232,14 @@ func checkWritableFile(path string) PathCheck {
 	check := PathCheck{Path: path}
 	info, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return checkMissingFile(path)
+		}
+		check.State = "missing_parent_not_writable"
 		check.Error = err.Error()
 		return check
 	}
+	check.State = "exists"
 	check.Exists = true
 	if info.IsDir() {
 		check.Error = "path is a directory"
@@ -237,9 +259,14 @@ func checkWritableDir(path string) PathCheck {
 	check := PathCheck{Path: path}
 	info, err := os.Stat(path)
 	if err != nil {
+		if os.IsNotExist(err) {
+			return checkCreatableDir(path)
+		}
+		check.State = "missing_parent_not_writable"
 		check.Error = err.Error()
 		return check
 	}
+	check.State = "exists"
 	check.Exists = true
 	if !info.IsDir() {
 		check.Error = "path is not a directory"
@@ -255,6 +282,71 @@ func checkWritableDir(path string) PathCheck {
 	_ = os.Remove(tempPath)
 	check.Writable = true
 	return check
+}
+
+func checkMissingFile(path string) PathCheck {
+	check := PathCheck{Path: path}
+	if err := checkParentWritable(parentDir(path)); err != nil {
+		check.State = "missing_parent_not_writable"
+		check.Error = err.Error()
+		return check
+	}
+	check.State = "missing_parent_writable"
+	check.Writable = true
+	return check
+}
+
+func checkCreatableDir(path string) PathCheck {
+	check := PathCheck{Path: path}
+	tempDir, err := os.MkdirTemp(parentDir(path), ".deonclaw-doctor-*")
+	if err != nil {
+		check.State = "missing_parent_not_writable"
+		check.Error = err.Error()
+		return check
+	}
+	_ = os.Remove(tempDir)
+	check.State = "missing_parent_writable"
+	check.Writable = true
+	return check
+}
+
+func checkParentWritable(parent string) error {
+	info, err := os.Stat(parent)
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("parent path is not a directory")
+	}
+	temp, err := os.CreateTemp(parent, ".deonclaw-doctor-*")
+	if err != nil {
+		return err
+	}
+	tempPath := temp.Name()
+	if err := temp.Close(); err != nil {
+		_ = os.Remove(tempPath)
+		return err
+	}
+	return os.Remove(tempPath)
+}
+
+func parentDir(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "."
+	}
+	path = strings.TrimRight(path, string(os.PathSeparator))
+	if path == "" {
+		return string(os.PathSeparator)
+	}
+	index := strings.LastIndex(path, string(os.PathSeparator))
+	if index < 0 {
+		return "."
+	}
+	if index == 0 {
+		return string(os.PathSeparator)
+	}
+	return path[:index]
 }
 
 func formatTool(check ToolCheck) string {

@@ -25,6 +25,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
+	"github.com/deon7769/deonclaw/internal/workerconfig"
 	"github.com/deon7769/deonclaw/internal/workers"
 	"github.com/deon7769/deonclaw/internal/workers/codex"
 	"github.com/deon7769/deonclaw/internal/workers/opencode"
@@ -35,7 +36,7 @@ const usage = `deonctl - DeonClaw control CLI
 Usage:
   deonctl version
   deonctl doctor [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
-  deonctl workers doctor [--worker codex|opencode] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
+  deonctl workers doctor [--worker codex|opencode|kimi] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
   deonctl config env [--output-format text|json]
   deonctl task validate <path>
   deonctl domains validate --config <path>
@@ -51,10 +52,10 @@ Usage:
   deonctl memory proposal restore --backup-plan <path> --backup-result <path> --dry-run --output <path>
   deonctl memory proposal restore-execute --backup-plan <path> --backup-result <path> --restore-preview <path> --output <path> --confirm-restore
   deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
-  deonctl worker codex dry-run <task-path>
-  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
-  deonctl worker opencode dry-run <task-path>
-  deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path>
+  deonctl worker codex dry-run <task-path> [--workers-config <path>]
+  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>]
+  deonctl worker opencode dry-run <task-path> [--workers-config <path>]
+  deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--workers-config <path>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
@@ -284,11 +285,13 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		case "codex":
 			switch args[2] {
 			case "dry-run":
-				if len(args) != 4 {
+				opts, err := parseWorkerDryRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
 					fmt.Fprint(stderr, usage)
 					return 2
 				}
-				return runCodexDryRun(args[3], stdout, stderr)
+				return runCodexDryRun(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -304,11 +307,13 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		case "opencode":
 			switch args[2] {
 			case "dry-run":
-				if len(args) != 4 {
+				opts, err := parseWorkerDryRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
 					fmt.Fprint(stderr, usage)
 					return 2
 				}
-				return runOpenCodeDryRun(args[3], stdout, stderr)
+				return runOpenCodeDryRun(opts, stdout, stderr)
 			case "run":
 				opts, err := parseOpenCodeRunOptions(args[3:])
 				if err != nil {
@@ -1918,8 +1923,33 @@ func runConfigEnv(opts configEnvOptions, stdout io.Writer, stderr io.Writer) int
 	return 0
 }
 
-func runCodexDryRun(path string, stdout io.Writer, stderr io.Writer) int {
-	task, err := tasks.LoadFromFile(path)
+type workerDryRunOptions struct {
+	taskPath          string
+	workersConfigPath string
+}
+
+func parseWorkerDryRunOptions(args []string) (workerDryRunOptions, error) {
+	if len(args) < 1 {
+		return workerDryRunOptions{}, fmt.Errorf("missing task path")
+	}
+	opts := workerDryRunOptions{taskPath: args[0]}
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--workers-config":
+			if i+1 >= len(args) {
+				return workerDryRunOptions{}, fmt.Errorf("missing value for --workers-config")
+			}
+			opts.workersConfigPath = args[i+1]
+			i++
+		default:
+			return workerDryRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	return opts, nil
+}
+
+func runCodexDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Writer) int {
+	task, err := tasks.LoadFromFile(opts.taskPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -1933,7 +1963,11 @@ func runCodexDryRun(path string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	worker := codexWorkerFactory()
+	worker, err := configuredCodexWorker(opts.workersConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{
 		Task:      task,
 		Workspace: task.Workspace.Path,
@@ -1948,8 +1982,8 @@ func runCodexDryRun(path string, stdout io.Writer, stderr io.Writer) int {
 	return 0
 }
 
-func runOpenCodeDryRun(path string, stdout io.Writer, stderr io.Writer) int {
-	task, err := tasks.LoadFromFile(path)
+func runOpenCodeDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Writer) int {
+	task, err := tasks.LoadFromFile(opts.taskPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -1963,7 +1997,11 @@ func runOpenCodeDryRun(path string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 
-	worker := opencodeWorkerFactory()
+	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{
 		Task:      task,
 		Workspace: task.Workspace.Path,
@@ -1980,11 +2018,12 @@ func runOpenCodeDryRun(path string, stdout io.Writer, stderr io.Writer) int {
 }
 
 type codexRunOptions struct {
-	taskPath         string
-	storePath        string
-	artifactsDir     string
-	domainsPath      string
-	memoryPolicyPath string
+	taskPath          string
+	storePath         string
+	artifactsDir      string
+	domainsPath       string
+	memoryPolicyPath  string
+	workersConfigPath string
 }
 
 func parseCodexRunOptions(args []string) (codexRunOptions, error) {
@@ -2019,6 +2058,12 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 			}
 			opts.memoryPolicyPath = args[i+1]
 			i++
+		case "--workers-config":
+			if i+1 >= len(args) {
+				return codexRunOptions{}, fmt.Errorf("missing value for --workers-config")
+			}
+			opts.workersConfigPath = args[i+1]
+			i++
 		default:
 			return codexRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
@@ -2033,8 +2078,15 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 }
 
 func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
+	worker, err := configuredCodexWorker(opts.workersConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
 	codexRunner := runner.CodexRunner{
-		WorkerFactory:           codexWorkerFactory,
+		WorkerFactory: func() workers.Worker {
+			return worker
+		},
 		RunIDFactory:            runIDFactory,
 		GitDiffRunner:           gitDiffRunner,
 		GitSnapshotRunner:       gitSnapshotRunner,
@@ -2050,9 +2102,10 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 }
 
 type openCodeRunOptions struct {
-	taskPath     string
-	storePath    string
-	artifactsDir string
+	taskPath          string
+	storePath         string
+	artifactsDir      string
+	workersConfigPath string
 }
 
 func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
@@ -2075,6 +2128,12 @@ func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
 			}
 			opts.artifactsDir = args[i+1]
 			i++
+		case "--workers-config":
+			if i+1 >= len(args) {
+				return openCodeRunOptions{}, fmt.Errorf("missing value for --workers-config")
+			}
+			opts.workersConfigPath = args[i+1]
+			i++
 		default:
 			return openCodeRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
@@ -2089,8 +2148,15 @@ func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
 }
 
 func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer) int {
+	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
 	openCodeRunner := runner.OpenCodeRunner{
-		WorkerFactory:           opencodeWorkerFactory,
+		WorkerFactory: func() workers.Worker {
+			return worker
+		},
 		RunIDFactory:            runIDFactory,
 		GitDiffRunner:           gitDiffRunner,
 		GitSnapshotRunner:       gitSnapshotRunner,
@@ -2101,6 +2167,28 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		StorePath:    opts.storePath,
 		ArtifactsDir: opts.artifactsDir,
 	}, stdout, stderr)
+}
+
+func configuredCodexWorker(workersConfigPath string) (workers.Worker, error) {
+	if strings.TrimSpace(workersConfigPath) == "" {
+		return codexWorkerFactory(), nil
+	}
+	cfg, err := workerconfig.Load(workersConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	return codex.NewWithCommand(cfg.Command("codex")), nil
+}
+
+func configuredOpenCodeWorker(workersConfigPath string) (workers.Worker, error) {
+	if strings.TrimSpace(workersConfigPath) == "" {
+		return opencodeWorkerFactory(), nil
+	}
+	cfg, err := workerconfig.Load(workersConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	return opencode.NewWithCommand(cfg.Command("opencode")), nil
 }
 
 type artifactListOptions struct {

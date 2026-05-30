@@ -49,6 +49,20 @@ func TestNewWithCommandFallsBackToOpenCode(t *testing.T) {
 	}
 }
 
+func TestNewWithCommandUsesConfiguredCommand(t *testing.T) {
+	worker := NewWithCommand("/usr/local/bin/opencode")
+	event, err := worker.DryRun(context.Background(), workers.RunSpec{
+		Task:      opencodeTaskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if got := event.Command[0]; got != "/usr/local/bin/opencode" {
+		t.Fatalf("command = %q, want configured command", got)
+	}
+}
+
 func TestDryRunBuildsWorkspaceWriteCommand(t *testing.T) {
 	worker := New()
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{

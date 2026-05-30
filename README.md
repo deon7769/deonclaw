@@ -79,6 +79,9 @@ Not implemented yet:
 ## Quick command map
 
 ```bash
+deonctl doctor
+deonctl workers doctor --output-format json
+deonctl config env
 deonctl task validate examples/tasks/codex-smoke.yaml
 deonctl domains validate --config configs/examples/domains.yaml
 deonctl context build --task examples/tasks/codex-smoke.yaml --domains configs/examples/domains.yaml --output /tmp/context-pack.md

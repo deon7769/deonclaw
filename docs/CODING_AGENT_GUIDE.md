@@ -44,11 +44,24 @@ Do not move business logic back into cmd/deonctl.
 
 ## Test expectations
 
+Before running a real worker command, run:
+
+~~~bash
+deonctl doctor
+~~~
+
+Use worker-scoped diagnostics when command config or PATH is part of the change:
+
+~~~bash
+deonctl workers doctor --worker codex
+deonctl workers doctor --worker opencode
+~~~
+
 Run:
 
-```bash
+~~~bash
 go test ./...
 gofmt -w .
-```
+~~~
 
 Add tests for every new safety rule.

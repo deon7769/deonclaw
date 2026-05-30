@@ -39,6 +39,10 @@ func Default() Config {
 	}
 }
 
+func KnownWorkers() []string {
+	return []string{"codex", "opencode", "kimi"}
+}
+
 func (c Config) Command(worker string) string {
 	worker = strings.TrimSpace(worker)
 	if worker == "" {

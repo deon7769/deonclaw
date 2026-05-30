@@ -80,3 +80,62 @@ func TestDoctorChecksStoreAndArtifactsPaths(t *testing.T) {
 		t.Fatalf("artifacts check = %#v, want exists writable", report.ArtifactsDir)
 	}
 }
+
+func TestDoctorChecksMissingStoreParentWritable(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "missing.db")
+	report, err := Build(Options{StorePath: storePath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.StorePath == nil {
+		t.Fatal("StorePath = nil, want check")
+	}
+	if report.StorePath.Exists {
+		t.Fatalf("store check = %#v, want missing path", report.StorePath)
+	}
+	if report.StorePath.State != "missing_parent_writable" || !report.StorePath.Writable {
+		t.Fatalf("store check = %#v, want missing_parent_writable", report.StorePath)
+	}
+}
+
+func TestDoctorChecksArtifactsMissingParentWritable(t *testing.T) {
+	tempDir := t.TempDir()
+	artifactsPath := filepath.Join(tempDir, "artifacts")
+	report, err := Build(Options{ArtifactsDir: artifactsPath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.ArtifactsDir == nil {
+		t.Fatal("ArtifactsDir = nil, want check")
+	}
+	if report.ArtifactsDir.Exists {
+		t.Fatalf("artifacts check = %#v, want missing path", report.ArtifactsDir)
+	}
+	if report.ArtifactsDir.State != "missing_parent_writable" || !report.ArtifactsDir.Writable {
+		t.Fatalf("artifacts check = %#v, want missing_parent_writable", report.ArtifactsDir)
+	}
+	if _, err := os.Stat(artifactsPath); !os.IsNotExist(err) {
+		t.Fatalf("artifacts dir was left behind: %v", err)
+	}
+}
+
+func TestWorkersDoctorAllowsKimiDiagnostic(t *testing.T) {
+	report, err := Build(Options{Worker: "kimi"})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(report.Workers) != 1 || report.Workers[0].Name != "kimi" || report.Workers[0].ConfiguredCommand != "kimi" {
+		t.Fatalf("workers = %#v, want kimi diagnostic", report.Workers)
+	}
+}
+
+func TestWorkersDoctorRejectsUnknownWorker(t *testing.T) {
+	_, err := Build(Options{Worker: "unknown"})
+	if err == nil {
+		t.Fatal("Build() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), `unknown worker "unknown"`) {
+		t.Fatalf("error = %v, want unknown worker", err)
+	}
+}

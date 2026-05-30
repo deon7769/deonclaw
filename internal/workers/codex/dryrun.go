@@ -28,6 +28,14 @@ func New() *Worker {
 	return newWithRunner("codex", runCommand)
 }
 
+func NewWithCommand(command string) *Worker {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		command = "codex"
+	}
+	return newWithRunner(command, runCommand)
+}
+
 func newWithRunner(command string, runner commandRunner) *Worker {
 	return &Worker{
 		command: command,

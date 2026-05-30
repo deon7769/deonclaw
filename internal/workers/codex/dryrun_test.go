@@ -35,6 +35,34 @@ func TestDryRunBuildsReadOnlyCommand(t *testing.T) {
 	}
 }
 
+func TestNewWithCommandFallsBackToCodex(t *testing.T) {
+	worker := NewWithCommand("")
+	event, err := worker.DryRun(context.Background(), workers.RunSpec{
+		Task:      taskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if got := event.Command[0]; got != "codex" {
+		t.Fatalf("command = %q, want codex fallback", got)
+	}
+}
+
+func TestNewWithCommandUsesConfiguredCommand(t *testing.T) {
+	worker := NewWithCommand("/usr/local/bin/codex")
+	event, err := worker.DryRun(context.Background(), workers.RunSpec{
+		Task:      taskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+	if got := event.Command[0]; got != "/usr/local/bin/codex" {
+		t.Fatalf("command = %q, want configured command", got)
+	}
+}
+
 func TestDryRunBuildsWorkspaceWriteCommand(t *testing.T) {
 	worker := New()
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{
