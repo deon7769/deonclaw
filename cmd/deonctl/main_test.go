@@ -2683,6 +2683,31 @@ func TestParseCodexRunOptions(t *testing.T) {
 	}
 }
 
+func TestParseOpenCodeRunOptions(t *testing.T) {
+	opts, err := parseOpenCodeRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml"})
+	if err != nil {
+		t.Fatalf("parseOpenCodeRunOptions() error = %v", err)
+	}
+	if opts.taskPath != "task.yaml" {
+		t.Fatalf("taskPath = %q, want task.yaml", opts.taskPath)
+	}
+	if opts.storePath != "deonclaw.db" {
+		t.Fatalf("storePath = %q, want deonclaw.db", opts.storePath)
+	}
+	if opts.artifactsDir != "artifacts" {
+		t.Fatalf("artifactsDir = %q, want artifacts", opts.artifactsDir)
+	}
+	if opts.domainsPath != "domains.yaml" {
+		t.Fatalf("domainsPath = %q, want domains.yaml", opts.domainsPath)
+	}
+	if opts.memoryPolicyPath != "memory-policy.yaml" {
+		t.Fatalf("memoryPolicyPath = %q, want memory-policy.yaml", opts.memoryPolicyPath)
+	}
+	if opts.workersConfigPath != "workers.yaml" {
+		t.Fatalf("workersConfigPath = %q, want workers.yaml", opts.workersConfigPath)
+	}
+}
+
 func TestRunArtifactsPruneDryRun(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()

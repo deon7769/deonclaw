@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
@@ -113,6 +115,157 @@ func TestOpenCodeRunnerRunUsesCommonHarnessAndPersistsArtifacts(t *testing.T) {
 		t.Fatalf("run = %#v, want opencode succeeded", gotRun)
 	}
 	assertPersistedArtifactWithMetadata(t, db, "run-opencode-001", filepath.Join(runDir, "summary.md"))
+}
+
+func TestOpenCodeRunnerRunWithoutDomainsKeepsPromptUnset(t *testing.T) {
+	runner := testOpenCodeRunner(t, testOpenCodeRunnerOptions{
+		RunID: "run-opencode-no-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if spec.Prompt != "" {
+						t.Fatalf("prompt = %q, want empty prompt when --domains is not configured", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Worker:    "opencode",
+						Workspace: spec.Workspace,
+						Command:   []string{"opencode", "run", "--cwd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	tempDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), OpenCodeRunOptions{
+		TaskPath:     writeTaskFile(t, "opencode"),
+		StorePath:    filepath.Join(tempDir, "deonclaw.db"),
+		ArtifactsDir: filepath.Join(tempDir, "artifacts"),
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if _, err := os.Stat(filepath.Join(tempDir, "artifacts", "run-opencode-no-context-001", "context-pack.md")); !os.IsNotExist(err) {
+		t.Fatalf("context-pack.md exists without --domains: %v", err)
+	}
+}
+
+func TestOpenCodeRunnerRunWithGeneralContextPack(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	bridgePath := filepath.Join(tempDir, "escalasoft-bridge.md")
+	if err := os.WriteFile(bridgePath, []byte("Escalasoft isolated bridge content\n"), 0o600); err != nil {
+		t.Fatalf("write bridge file: %v", err)
+	}
+	domainsPath := writeDomainsConfigWithBridge(t, bridgePath)
+
+	runner := testOpenCodeRunner(t, testOpenCodeRunnerOptions{
+		RunID: "run-opencode-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if !strings.Contains(spec.Prompt, "# Task Goal\nDo not execute\n\n# Context Pack\n") {
+						t.Fatalf("prompt = %q, want task goal and context pack sections", spec.Prompt)
+					}
+					if strings.Contains(spec.Prompt, "Escalasoft isolated bridge content") {
+						t.Fatalf("prompt leaked isolated bridge content for general task: %q", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Worker:    "opencode",
+						Workspace: spec.Workspace,
+						Command:   []string{"opencode", "run", "--cwd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), OpenCodeRunOptions{
+		TaskPath:     writeTaskFile(t, "opencode"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+		DomainsPath:  domainsPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-opencode-context-001")
+	contextPath := filepath.Join(runDir, "context-pack.md")
+	assertFileContains(t, contextPath, "domain: general")
+	assertFileNotContains(t, contextPath, "Escalasoft isolated bridge content")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker: opencode")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 10")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	assertPersistedArtifactWithMetadata(t, db, "run-opencode-context-001", contextPath)
+}
+
+func TestOpenCodeRunnerRunMemoryProposalLintOK(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	proposalJSON := memoryProposalJSON(t, "mem-opencode-ok", "escalasoft", "/domains/escalasoft_brain/cases/case-001.md", memory.OperationUpdate)
+
+	runner := testOpenCodeRunner(t, testOpenCodeRunnerOptions{
+		RunID: "run-opencode-memory-proposal-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runResult: &workers.RunResult{
+					Worker:    "opencode",
+					Workspace: ".",
+					Command:   []string{"opencode", "run", "--cwd", ".", "-"},
+					Artifacts: []artifacts.Artifact{
+						{Path: "artifacts/memory-proposal.json", Kind: artifacts.KindOther, Content: proposalJSON},
+					},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), OpenCodeRunOptions{
+		TaskPath:         writeTaskFile(t, "opencode"),
+		StorePath:        storePath,
+		ArtifactsDir:     artifactsDir,
+		MemoryPolicyPath: filepath.Join("..", "..", "configs", "examples", "memory-policy.yaml"),
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-opencode-memory-proposal-001")
+	assertMemoryProposalLintStatus(t, filepath.Join(runDir, "memory-proposal-lint.json"), "ok", 0, 0)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker: opencode")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal: ok")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal id: mem-opencode-ok")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	assertPersistedArtifactWithMetadata(t, db, "run-opencode-memory-proposal-001", filepath.Join(runDir, "memory-proposal.json"))
+	assertPersistedArtifactWithMetadata(t, db, "run-opencode-memory-proposal-001", filepath.Join(runDir, "memory-proposal-lint.json"))
 }
 
 func TestOpenCodeRunnerRunAppliesPathPolicyAndKeepsWorkspace(t *testing.T) {

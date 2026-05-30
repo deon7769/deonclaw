@@ -59,7 +59,7 @@ Functional MVP in active development.
 Implemented:
 
 - Codex CLI worker execution
-- OpenCode worker dry-run
+- OpenCode worker dry-run/run
 - isolated Git worktree runs
 - path policy and diff artifacts
 - validation commands
@@ -71,7 +71,6 @@ Implemented:
 
 Not implemented yet:
 
-- OpenCode worker run
 - Docker runtime
 - memory index
 - UI
@@ -87,6 +86,7 @@ deonctl domains validate --config configs/examples/domains.yaml
 deonctl context build --task examples/tasks/codex-smoke.yaml --domains configs/examples/domains.yaml --output /tmp/context-pack.md
 deonctl worker codex dry-run examples/tasks/codex-smoke.yaml
 deonctl worker opencode dry-run <opencode-task.yaml>
+deonctl worker opencode run <opencode-task.yaml> --store deonclaw.db --artifacts-dir artifacts --domains configs/examples/domains.yaml --memory-policy configs/examples/memory-policy.yaml
 deonctl artifacts list --store deonclaw.db
 deonctl memory proposal lint --proposal memory-proposal.json --policy configs/examples/memory-policy.yaml
 ```

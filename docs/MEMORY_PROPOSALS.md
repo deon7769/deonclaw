@@ -19,12 +19,17 @@ DeonClaw preserves these files as run artifacts when a worker returns them.
 
 The proposal artifact is evidence for later review. It is not an approval and it is not an apply step.
 
-## Codex Run Lint
+## Worker Run Lint
 
-`deonctl worker codex run` can lint a preserved proposal when `--memory-policy` is provided:
+`deonctl worker codex run` and `deonctl worker opencode run` can lint a preserved proposal when `--memory-policy` is provided:
 
 ```bash
 deonctl worker codex run <task-path> \
+  --store <path> \
+  --artifacts-dir <path> \
+  --memory-policy configs/examples/memory-policy.yaml
+
+deonctl worker opencode run <task-path> \
   --store <path> \
   --artifacts-dir <path> \
   --memory-policy configs/examples/memory-policy.yaml

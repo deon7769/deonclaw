@@ -55,7 +55,7 @@ Usage:
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
-  deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--workers-config <path>]
+  deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
@@ -2105,6 +2105,8 @@ type openCodeRunOptions struct {
 	taskPath          string
 	storePath         string
 	artifactsDir      string
+	domainsPath       string
+	memoryPolicyPath  string
 	workersConfigPath string
 }
 
@@ -2127,6 +2129,18 @@ func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
 				return openCodeRunOptions{}, fmt.Errorf("missing value for --artifacts-dir")
 			}
 			opts.artifactsDir = args[i+1]
+			i++
+		case "--domains":
+			if i+1 >= len(args) {
+				return openCodeRunOptions{}, fmt.Errorf("missing value for --domains")
+			}
+			opts.domainsPath = args[i+1]
+			i++
+		case "--memory-policy":
+			if i+1 >= len(args) {
+				return openCodeRunOptions{}, fmt.Errorf("missing value for --memory-policy")
+			}
+			opts.memoryPolicyPath = args[i+1]
 			i++
 		case "--workers-config":
 			if i+1 >= len(args) {
@@ -2163,9 +2177,11 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		WorkspaceManagerFactory: workspaceManagerFactory,
 	}
 	return openCodeRunner.Run(context.Background(), runner.OpenCodeRunOptions{
-		TaskPath:     opts.taskPath,
-		StorePath:    opts.storePath,
-		ArtifactsDir: opts.artifactsDir,
+		TaskPath:         opts.taskPath,
+		StorePath:        opts.storePath,
+		ArtifactsDir:     opts.artifactsDir,
+		DomainsPath:      opts.domainsPath,
+		MemoryPolicyPath: opts.memoryPolicyPath,
 	}, stdout, stderr)
 }
 

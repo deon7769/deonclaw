@@ -12,9 +12,11 @@ import (
 )
 
 type OpenCodeRunOptions struct {
-	TaskPath     string
-	StorePath    string
-	ArtifactsDir string
+	TaskPath         string
+	StorePath        string
+	ArtifactsDir     string
+	DomainsPath      string
+	MemoryPolicyPath string
 }
 
 type OpenCodeRunner struct {
@@ -55,9 +57,11 @@ func (r OpenCodeRunner) Run(ctx context.Context, opts OpenCodeRunOptions, stdout
 		WorkspaceManagerFactory: r.WorkspaceManagerFactory,
 	}
 	return codexRunner.Run(ctx, CodexRunOptions{
-		TaskPath:     opts.TaskPath,
-		StorePath:    opts.StorePath,
-		ArtifactsDir: opts.ArtifactsDir,
+		TaskPath:         opts.TaskPath,
+		StorePath:        opts.StorePath,
+		ArtifactsDir:     opts.ArtifactsDir,
+		DomainsPath:      opts.DomainsPath,
+		MemoryPolicyPath: opts.MemoryPolicyPath,
 	}, stdout, stderr)
 }
 
