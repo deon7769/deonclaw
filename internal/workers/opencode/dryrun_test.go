@@ -68,20 +68,6 @@ func TestDryRunRejectsUnsupportedMode(t *testing.T) {
 	}
 }
 
-func TestRunIsNotImplemented(t *testing.T) {
-	worker := New()
-	_, err := worker.Run(context.Background(), workers.RunSpec{
-		Task:      opencodeTaskWithMode("read_only"),
-		Workspace: ".",
-	})
-	if err == nil {
-		t.Fatal("Run() expected error, got nil")
-	}
-	if !strings.Contains(err.Error(), "opencode run is not implemented") {
-		t.Fatalf("error = %v, want not implemented", err)
-	}
-}
-
 func opencodeTaskWithMode(mode string) *tasks.Task {
 	return &tasks.Task{
 		ID:     "task-001",

@@ -9,18 +9,21 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func codexRunSummary(runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, contextPackWarnings []string, memoryProposal memoryProposalCheck, artifactCount int) []byte {
+func codexRunSummary(workerName string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, contextPackWarnings []string, memoryProposal memoryProposalCheck, artifactCount int) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
 	}
+	if workerName == "" {
+		workerName = result.Worker
+	}
 
 	lines := []string{
-		fmt.Sprintf("# Codex run %s", runID),
+		fmt.Sprintf("# %s run %s", workerName, runID),
 		"",
 		fmt.Sprintf("Status: %s", status),
 		fmt.Sprintf("Task: %s", task.ID),
-		"Worker: codex",
+		fmt.Sprintf("Worker: %s", workerName),
 		fmt.Sprintf("Workspace: %s", workspace),
 		fmt.Sprintf("Command: %s", strings.Join(result.Command, " ")),
 		fmt.Sprintf("Events: %d", len(result.Events)),

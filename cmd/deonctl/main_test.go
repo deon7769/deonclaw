@@ -12,10 +12,13 @@ import (
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
+	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runs"
+	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
+	"github.com/deon7769/deonclaw/internal/workers"
 )
 
 func TestRunVersion(t *testing.T) {
@@ -128,6 +131,49 @@ func TestRunContextBuild(t *testing.T) {
 		if !strings.Contains(output, want) {
 			t.Fatalf("output = %q, want %q", output, want)
 		}
+	}
+}
+
+func TestRunWorkerOpenCodeRun(t *testing.T) {
+	restore := overrideOpenCodeRunDeps(t, &workers.RunResult{
+		Worker:    "opencode",
+		Command:   []string{"opencode", "run", "--cwd", "workspace", "-"},
+		Events:    []workers.WorkerEvent{{Type: "message", Worker: "opencode", Payload: []byte("{\"type\":\"message\",\"text\":\"ok\"}")}},
+		Artifacts: []artifacts.Artifact{{Path: "stdout.log", Kind: artifacts.KindLog, Content: []byte("opencode stdout\n")}},
+		Stderr:    "opencode stderr\n",
+	}, nil)
+	defer restore()
+
+	tempDir := t.TempDir()
+	taskPath := writeTaskFile(t, "opencode")
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", storePath, "--artifacts-dir", artifactsDir}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "run_id: run-cli-opencode-001") {
+		t.Fatalf("stdout = %q, want opencode run id", stdout.String())
+	}
+	runDir := filepath.Join(artifactsDir, "run-cli-opencode-001")
+	assertCLIFileContent(t, filepath.Join(runDir, "stdout.log"), "opencode stdout\n")
+	assertCLIFileContent(t, filepath.Join(runDir, "stderr.log"), "opencode stderr\n")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Worker: opencode")
+
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+	gotRun, err := db.Run(context.Background(), "run-cli-opencode-001")
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	if gotRun.Worker != "opencode" || gotRun.Status != runs.StatusSucceeded {
+		t.Fatalf("run = %#v, want opencode succeeded", gotRun)
 	}
 }
 
@@ -2915,6 +2961,78 @@ func readApplyResultFile(t *testing.T, path string) memory.ApplyResult {
 	return result
 }
 
+func overrideOpenCodeRunDeps(t *testing.T, result *workers.RunResult, runErr error) func() {
+	t.Helper()
+	oldWorkerFactory := opencodeWorkerFactory
+	oldRunIDFactory := runIDFactory
+	oldGitDiffRunner := gitDiffRunner
+	oldGitSnapshotRunner := gitSnapshotRunner
+	oldWorkspaceManagerFactory := workspaceManagerFactory
+
+	opencodeWorkerFactory = func() workers.Worker {
+		return cliFakeWorker{runResult: result, runErr: runErr}
+	}
+	runIDFactory = func() string {
+		return "run-cli-opencode-001"
+	}
+	gitDiffRunner = func(context.Context, string) ([]byte, error) {
+		return nil, nil
+	}
+	callCount := 0
+	gitSnapshotRunner = func(context.Context, string) (*git.Snapshot, error) {
+		callCount++
+		return &git.Snapshot{}, nil
+	}
+	workspaceManagerFactory = func() workspacePreparer {
+		return cliFakeWorkspacePreparer{}
+	}
+
+	return func() {
+		opencodeWorkerFactory = oldWorkerFactory
+		runIDFactory = oldRunIDFactory
+		gitDiffRunner = oldGitDiffRunner
+		gitSnapshotRunner = oldGitSnapshotRunner
+		workspaceManagerFactory = oldWorkspaceManagerFactory
+	}
+}
+
+type cliFakeWorker struct {
+	runResult *workers.RunResult
+	runErr    error
+}
+
+func (f cliFakeWorker) DryRun(context.Context, workers.RunSpec) (*workers.WorkerEvent, error) {
+	return nil, nil
+}
+
+func (f cliFakeWorker) Run(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+	result := f.runResult
+	if result != nil {
+		copy := *result
+		copy.Workspace = spec.Workspace
+		if len(copy.Command) == 5 {
+			copy.Command[3] = spec.Workspace
+		}
+		return &copy, f.runErr
+	}
+	return nil, f.runErr
+}
+
+type cliFakeWorkspacePreparer struct{}
+
+func (cliFakeWorkspacePreparer) Prepare(ctx context.Context, spec runtime.WorkspaceSpec) (*runtime.Workspace, error) {
+	workspacePath := filepath.Join(spec.RootDir, spec.RunID, "workspace")
+	return &runtime.Workspace{
+		Path:       workspacePath,
+		SourcePath: spec.SourcePath,
+		Method:     runtime.MethodGitWorktree,
+	}, nil
+}
+
+func (cliFakeWorkspacePreparer) Cleanup(context.Context, *runtime.Workspace) error {
+	return nil
+}
+
 func readRestorePreviewFile(t *testing.T, path string) memory.RestorePreview {
 	t.Helper()
 
@@ -3174,6 +3292,22 @@ func mustReadCLIFile(t *testing.T, path string) []byte {
 		t.Fatalf("ReadFile(%q) error = %v", path, err)
 	}
 	return data
+}
+
+func assertCLIFileContent(t *testing.T, path string, want string) {
+	t.Helper()
+	got := mustReadCLIFile(t, path)
+	if string(got) != want {
+		t.Fatalf("ReadFile(%q) = %q, want %q", path, got, want)
+	}
+}
+
+func assertCLIFileContains(t *testing.T, path string, want string) {
+	t.Helper()
+	got := mustReadCLIFile(t, path)
+	if !strings.Contains(string(got), want) {
+		t.Fatalf("ReadFile(%q) = %q, want %q", path, got, want)
+	}
 }
 
 func readApplyPreflightFile(t *testing.T, path string) memory.ApplyPreflight {

@@ -17,7 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, memoryProposal memoryProposalCheck, createdAt time.Time) ([]artifacts.Artifact, error) {
+func writeCodexRunArtifacts(workerName string, runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, memoryProposal memoryProposalCheck, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -101,7 +101,7 @@ func writeCodexRunArtifacts(runDir string, runID string, task *tasks.Task, resul
 			return nil, err
 		}
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, contextPackWarnings, memoryProposal, artifactCount)); err != nil {
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(workerName, runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, contextPackWarnings, memoryProposal, artifactCount)); err != nil {
 		return nil, err
 	}
 	manifest, err := artifactManifestJSON(writer.artifacts)

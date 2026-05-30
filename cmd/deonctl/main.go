@@ -49,6 +49,7 @@ Usage:
   deonctl worker codex dry-run <task-path>
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>]
   deonctl worker opencode dry-run <task-path>
+  deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path>
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
@@ -271,6 +272,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runOpenCodeDryRun(args[3], stdout, stderr)
+			case "run":
+				opts, err := parseOpenCodeRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runOpenCodeRun(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -1896,6 +1905,60 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		ArtifactsDir:     opts.artifactsDir,
 		DomainsPath:      opts.domainsPath,
 		MemoryPolicyPath: opts.memoryPolicyPath,
+	}, stdout, stderr)
+}
+
+type openCodeRunOptions struct {
+	taskPath     string
+	storePath    string
+	artifactsDir string
+}
+
+func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
+	if len(args) < 1 {
+		return openCodeRunOptions{}, fmt.Errorf("missing task path")
+	}
+
+	opts := openCodeRunOptions{taskPath: args[0]}
+	for i := 1; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return openCodeRunOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return openCodeRunOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		default:
+			return openCodeRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" {
+		return openCodeRunOptions{}, fmt.Errorf("missing --store")
+	}
+	if opts.artifactsDir == "" {
+		return openCodeRunOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	return opts, nil
+}
+
+func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer) int {
+	openCodeRunner := runner.OpenCodeRunner{
+		WorkerFactory:           opencodeWorkerFactory,
+		RunIDFactory:            runIDFactory,
+		GitDiffRunner:           gitDiffRunner,
+		GitSnapshotRunner:       gitSnapshotRunner,
+		WorkspaceManagerFactory: workspaceManagerFactory,
+	}
+	return openCodeRunner.Run(context.Background(), runner.OpenCodeRunOptions{
+		TaskPath:     opts.taskPath,
+		StorePath:    opts.storePath,
+		ArtifactsDir: opts.artifactsDir,
 	}, stdout, stderr)
 }
 

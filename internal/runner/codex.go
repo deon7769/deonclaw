@@ -47,6 +47,7 @@ type CodexRunOptions struct {
 }
 
 type CodexRunner struct {
+	WorkerName              string
 	WorkerFactory           WorkerFactory
 	RunIDFactory            RunIDFactory
 	GitDiffRunner           GitDiffRunner
@@ -57,6 +58,7 @@ type CodexRunner struct {
 
 func NewCodexRunner() CodexRunner {
 	return CodexRunner{
+		WorkerName: "codex",
 		WorkerFactory: func() workers.Worker {
 			return codex.New()
 		},
@@ -74,6 +76,7 @@ func NewCodexRunner() CodexRunner {
 
 func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	r = r.withDefaults()
+	workerName := r.WorkerName
 
 	task, err := tasks.LoadFromFile(opts.TaskPath)
 	if err != nil {
@@ -84,7 +87,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		fmt.Fprintf(stderr, "validation failed: %v\n", err)
 		return 1
 	}
-	if err := ensureTaskWorker(task, "codex"); err != nil {
+	if err := ensureTaskWorker(task, workerName); err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
@@ -141,7 +144,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		ID:            runID,
 		TaskID:        task.ID,
 		Status:        runs.StatusRunning,
-		Worker:        "codex",
+		Worker:        workerName,
 		WorkspacePath: workspace,
 		CreatedAt:     now,
 		UpdatedAt:     now,
@@ -171,9 +174,12 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	})
 	if result == nil {
 		result = &workers.RunResult{
-			Worker:    "codex",
+			Worker:    workerName,
 			Workspace: workspace,
 		}
+	}
+	if result.Worker == "" {
+		result.Worker = workerName
 	}
 	result.Workspace = workspace
 
@@ -239,7 +245,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, memoryProposalCheck, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, memoryProposalCheck, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -284,6 +290,9 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 
 func (r CodexRunner) withDefaults() CodexRunner {
 	defaults := NewCodexRunner()
+	if r.WorkerName == "" {
+		r.WorkerName = defaults.WorkerName
+	}
 	if r.WorkerFactory == nil {
 		r.WorkerFactory = defaults.WorkerFactory
 	}
