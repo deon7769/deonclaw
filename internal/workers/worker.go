@@ -34,6 +34,7 @@ type RunResult struct {
 	Events    []WorkerEvent        `json:"events"`
 	Artifacts []artifacts.Artifact `json:"artifacts,omitempty"`
 	Stderr    string               `json:"stderr,omitempty"`
+	Metadata  map[string]string    `json:"metadata,omitempty"`
 }
 
 type Worker interface {

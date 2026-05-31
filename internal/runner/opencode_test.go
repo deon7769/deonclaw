@@ -46,6 +46,11 @@ func TestOpenCodeRunnerRunUsesCommonHarnessAndPersistsArtifacts(t *testing.T) {
 							{Path: "stdout.log", Kind: artifacts.KindLog, Content: []byte("opencode stdout\n")},
 						},
 						Stderr: "opencode stderr\n",
+						Metadata: map[string]string{
+							"opencode.stdout_format":  "text",
+							"opencode.parsed_events":  "0",
+							"opencode.parse_warnings": "0",
+						},
 					}, nil
 				},
 			}
@@ -99,6 +104,9 @@ func TestOpenCodeRunnerRunUsesCommonHarnessAndPersistsArtifacts(t *testing.T) {
 	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "opencode stderr\n")
 	assertFileContent(t, filepath.Join(runDir, "events.jsonl"), "{\"type\":\"message\",\"text\":\"ok\"}\n")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker: opencode")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "OpenCode stdout format: text")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "OpenCode parsed events: 0")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "OpenCode parse warnings: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: passed")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: removed")
 

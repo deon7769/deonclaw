@@ -44,6 +44,9 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 	if memoryProposal.ProposalID != "" {
 		lines = append(lines, fmt.Sprintf("Memory proposal id: %s", memoryProposal.ProposalID))
 	}
+	if workerName == "opencode" {
+		lines = append(lines, opencodeStdoutSummaryLines(result)...)
+	}
 	lines = appendSmallDetails(lines, "Memory proposal violation", memoryProposal.Violations)
 	lines = appendSmallDetails(lines, "Memory proposal warning", memoryProposal.Warnings)
 	if len(contextPackWarnings) > 0 {
@@ -59,6 +62,27 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 		lines = append(lines, fmt.Sprintf("Cleanup warning: %s", cleanup.Warning))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func opencodeStdoutSummaryLines(result *workers.RunResult) []string {
+	metadata := result.Metadata
+	stdoutFormat := metadata["opencode.stdout_format"]
+	if stdoutFormat == "" {
+		stdoutFormat = "unknown"
+	}
+	parsedEvents := metadata["opencode.parsed_events"]
+	if parsedEvents == "" {
+		parsedEvents = "0"
+	}
+	parseWarnings := metadata["opencode.parse_warnings"]
+	if parseWarnings == "" {
+		parseWarnings = "0"
+	}
+	return []string{
+		fmt.Sprintf("OpenCode stdout format: %s", stdoutFormat),
+		fmt.Sprintf("OpenCode parsed events: %s", parsedEvents),
+		fmt.Sprintf("OpenCode parse warnings: %s", parseWarnings),
+	}
 }
 
 func appendSmallDetails(lines []string, label string, details []string) []string {
