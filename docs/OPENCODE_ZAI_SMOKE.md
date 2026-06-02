@@ -89,12 +89,25 @@ Plan the OpenCode command without executing the worker:
 deonctl worker opencode dry-run examples/tasks/opencode-smoke.yaml --workers-config configs/examples/workers.yaml
 ~~~
 
+The parity smoke command runs the same checks in one path: task validation, worker doctor, required-env validation, and OpenCode dry-run.
+
+~~~bash
+deonctl workers smoke \
+  --worker opencode \
+  --task examples/tasks/opencode-smoke.yaml \
+  --store deonclaw.db \
+  --artifacts-dir artifacts \
+  --workers-config configs/examples/workers.yaml \
+  --dry-run
+~~~
+
 Expected dry-run behavior:
 
 - prints the workspace
 - prints the policy
 - prints a command shaped like `opencode run --cwd . -`
 - if `ZAI_API_KEY` is missing, prints a warning but does not fail
+- `workers smoke --dry-run` does not print required env names in the warning
 
 ## Run
 
@@ -109,11 +122,35 @@ deonctl worker opencode run examples/tasks/opencode-smoke.yaml \
   --workers-config configs/examples/workers.yaml
 ~~~
 
+The parity smoke command can run the full harness with the same flags:
+
+~~~bash
+deonctl workers smoke \
+  --worker opencode \
+  --task examples/tasks/opencode-smoke.yaml \
+  --store deonclaw.db \
+  --artifacts-dir artifacts \
+  --domains configs/examples/domains.yaml \
+  --memory-policy configs/examples/memory-policy.yaml \
+  --workers-config configs/examples/workers.yaml
+~~~
+
 This command requires:
 
 - `opencode` installed and available on `PATH`, or `workers.yaml` pointing at the executable
 - `ZAI_API_KEY` present in the environment
 - a clean source workspace, because the shared runner refuses dirty baselines
+
+If required env is missing, `workers smoke` fails before invoking OpenCode and prints a final summary with `env_required_ok: false` and `status: env_missing`.
+
+The smoke summary includes:
+
+- `worker`
+- `env_required_ok`
+- `command`
+- `run_id`, when a harness run started
+- `artifacts_dir`, when a harness run produced artifacts
+- `status`
 
 DeonClaw still uses the existing OpenCode command contract:
 

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -37,6 +38,7 @@ Usage:
   deonctl version
   deonctl doctor [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
   deonctl workers doctor [--worker codex|opencode|kimi] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
+  deonctl workers smoke --worker opencode --task <task.yaml> --store <path> --artifacts-dir <path> --workers-config <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--dry-run]
   deonctl config env [--output-format text|json]
   deonctl task validate <path>
   deonctl domains validate --config <path>
@@ -109,17 +111,31 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 		}
 		return runDoctor(opts, stdout, stderr)
 	case "workers":
-		if len(args) < 2 || args[1] != "doctor" {
+		if len(args) < 2 {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
-		opts, err := parseDoctorOptions(args[2:])
-		if err != nil {
-			fmt.Fprintf(stderr, "error: %v\n", err)
+		switch args[1] {
+		case "doctor":
+			opts, err := parseDoctorOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runDoctor(opts, stdout, stderr)
+		case "smoke":
+			opts, err := parseWorkersSmokeOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runWorkersSmoke(opts, stdout, stderr)
+		default:
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
-		return runDoctor(opts, stdout, stderr)
 	case "config":
 		if len(args) < 2 || args[1] != "env" {
 			fmt.Fprint(stderr, usage)
@@ -1888,6 +1904,283 @@ func runDoctor(opts doctorOptions, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+type workersSmokeOptions struct {
+	worker            string
+	taskPath          string
+	storePath         string
+	artifactsDir      string
+	domainsPath       string
+	memoryPolicyPath  string
+	workersConfigPath string
+	dryRun            bool
+}
+
+type workersSmokeSummary struct {
+	worker        string
+	envRequiredOK bool
+	command       string
+	runID         string
+	artifactsDir  string
+	status        string
+}
+
+func parseWorkersSmokeOptions(args []string) (workersSmokeOptions, error) {
+	var opts workersSmokeOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--worker":
+			if i+1 >= len(args) {
+				return workersSmokeOptions{}, fmt.Errorf("missing value for --worker")
+			}
+			opts.worker = args[i+1]
+			i++
+		case "--task":
+			if i+1 >= len(args) {
+				return workersSmokeOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskPath = args[i+1]
+			i++
+		case "--store":
+			if i+1 >= len(args) {
+				return workersSmokeOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return workersSmokeOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		case "--domains":
+			if i+1 >= len(args) {
+				return workersSmokeOptions{}, fmt.Errorf("missing value for --domains")
+			}
+			opts.domainsPath = args[i+1]
+			i++
+		case "--memory-policy":
+			if i+1 >= len(args) {
+				return workersSmokeOptions{}, fmt.Errorf("missing value for --memory-policy")
+			}
+			opts.memoryPolicyPath = args[i+1]
+			i++
+		case "--workers-config":
+			if i+1 >= len(args) {
+				return workersSmokeOptions{}, fmt.Errorf("missing value for --workers-config")
+			}
+			opts.workersConfigPath = args[i+1]
+			i++
+		case "--dry-run":
+			opts.dryRun = true
+		default:
+			return workersSmokeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.worker == "" {
+		return workersSmokeOptions{}, fmt.Errorf("missing --worker")
+	}
+	if opts.worker != "opencode" {
+		return workersSmokeOptions{}, fmt.Errorf("workers smoke currently supports only opencode")
+	}
+	if opts.taskPath == "" {
+		return workersSmokeOptions{}, fmt.Errorf("missing --task")
+	}
+	if opts.storePath == "" {
+		return workersSmokeOptions{}, fmt.Errorf("missing --store")
+	}
+	if opts.artifactsDir == "" {
+		return workersSmokeOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	if opts.workersConfigPath == "" {
+		return workersSmokeOptions{}, fmt.Errorf("missing --workers-config")
+	}
+	return opts, nil
+}
+
+func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Writer) int {
+	task, err := tasks.LoadFromFile(opts.taskPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	if err := tasks.Validate(task); err != nil {
+		fmt.Fprintf(stderr, "validation failed: %v\n", err)
+		return 1
+	}
+	if err := ensureTaskWorker(task, opts.worker); err != nil {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return 1
+	}
+
+	report, err := doctorpkg.Build(doctorpkg.Options{
+		Worker:            opts.worker,
+		WorkersConfigPath: opts.workersConfigPath,
+		StorePath:         opts.storePath,
+		ArtifactsDir:      opts.artifactsDir,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "workers doctor failed: %v\n", err)
+		return 1
+	}
+	workerCheck, ok := findWorkerCheck(report, opts.worker)
+	if !ok {
+		fmt.Fprintf(stderr, "workers doctor failed: worker %s not found\n", opts.worker)
+		return 1
+	}
+
+	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, opts.worker)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	missingEnv := workerconfig.MissingRequiredEnv(workerConfig.EnvRequirementChecks())
+	summary := workersSmokeSummary{
+		worker:        opts.worker,
+		envRequiredOK: workerCheck.EnvRequiredOK,
+		command:       workerCheck.ConfiguredCommand,
+	}
+	if len(missingEnv) > 0 {
+		if opts.dryRun {
+			fmt.Fprintf(stderr, "warning: worker %s has missing required env\n", opts.worker)
+		} else {
+			fmt.Fprintf(stderr, "error: worker %s has missing required env\n", opts.worker)
+			summary.status = "env_missing"
+			if err := writeWorkersSmokeSummary(stdout, summary); err != nil {
+				fmt.Fprintf(stderr, "smoke summary failed: %v\n", err)
+			}
+			return 1
+		}
+	}
+
+	if opts.dryRun {
+		return runWorkersSmokeOpenCodeDryRun(opts, task, summary, stdout, stderr)
+	}
+	return runWorkersSmokeOpenCodeRun(opts, summary, stdout, stderr)
+}
+
+func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
+	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	event, err := worker.DryRun(context.Background(), workers.RunSpec{
+		Task:      task,
+		Workspace: task.Workspace.Path,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "dry-run failed: %v\n", err)
+		return 1
+	}
+
+	command := strings.Join(event.Command, " ")
+	fmt.Fprintf(stdout, "workspace: %s\n", event.Workspace)
+	fmt.Fprintf(stdout, "policy: %s\n", event.Sandbox)
+	fmt.Fprintf(stdout, "command: %s\n", command)
+	summary.command = command
+	summary.status = "dry_run"
+	if err := writeWorkersSmokeSummary(stdout, summary); err != nil {
+		fmt.Fprintf(stderr, "smoke summary failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runWorkersSmokeOpenCodeRun(opts workersSmokeOptions, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
+	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	openCodeRunner := runner.OpenCodeRunner{
+		WorkerFactory: func() workers.Worker {
+			return worker
+		},
+		RunIDFactory:            runIDFactory,
+		GitDiffRunner:           gitDiffRunner,
+		GitSnapshotRunner:       gitSnapshotRunner,
+		WorkspaceManagerFactory: workspaceManagerFactory,
+	}
+
+	var runOutput bytes.Buffer
+	code := openCodeRunner.Run(context.Background(), runner.OpenCodeRunOptions{
+		TaskPath:         opts.taskPath,
+		StorePath:        opts.storePath,
+		ArtifactsDir:     opts.artifactsDir,
+		DomainsPath:      opts.domainsPath,
+		MemoryPolicyPath: opts.memoryPolicyPath,
+	}, &runOutput, stderr)
+	if _, err := stdout.Write(runOutput.Bytes()); err != nil {
+		fmt.Fprintf(stderr, "write run output failed: %v\n", err)
+		return 1
+	}
+
+	output := runOutput.String()
+	summary.runID = outputLineValue(output, "run_id")
+	if command := outputLineValue(output, "command"); command != "" {
+		summary.command = command
+	}
+	summary.artifactsDir = outputLineValue(output, "artifacts_dir")
+	if code == 0 {
+		summary.status = "succeeded"
+	} else {
+		summary.status = "failed"
+	}
+	if err := writeWorkersSmokeSummary(stdout, summary); err != nil {
+		fmt.Fprintf(stderr, "smoke summary failed: %v\n", err)
+		return 1
+	}
+	return code
+}
+
+func findWorkerCheck(report doctorpkg.Report, worker string) (doctorpkg.WorkerCheck, bool) {
+	for _, check := range report.Workers {
+		if check.Name == worker {
+			return check, true
+		}
+	}
+	return doctorpkg.WorkerCheck{}, false
+}
+
+func outputLineValue(output string, key string) string {
+	prefix := key + ": "
+	for _, line := range strings.Split(output, "\n") {
+		if strings.HasPrefix(line, prefix) {
+			return strings.TrimSpace(strings.TrimPrefix(line, prefix))
+		}
+	}
+	return ""
+}
+
+func writeWorkersSmokeSummary(out io.Writer, summary workersSmokeSummary) error {
+	if _, err := fmt.Fprintln(out, "smoke_summary:"); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "worker: %s\n", summary.worker); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "env_required_ok: %t\n", summary.envRequiredOK); err != nil {
+		return err
+	}
+	if summary.command != "" {
+		if _, err := fmt.Fprintf(out, "command: %s\n", summary.command); err != nil {
+			return err
+		}
+	}
+	if summary.runID != "" {
+		if _, err := fmt.Fprintf(out, "run_id: %s\n", summary.runID); err != nil {
+			return err
+		}
+	}
+	if summary.artifactsDir != "" {
+		if _, err := fmt.Fprintf(out, "artifacts_dir: %s\n", summary.artifactsDir); err != nil {
+			return err
+		}
+	}
+	_, err := fmt.Fprintf(out, "status: %s\n", summary.status)
+	return err
 }
 
 type configEnvOptions struct {

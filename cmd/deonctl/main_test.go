@@ -2791,6 +2791,188 @@ func TestRunWorkerCodexRunFailsBeforeWorkerWhenRequiredEnvMissing(t *testing.T) 
 	}
 }
 
+func TestRunWorkersSmokeDryRunWithMissingEnvWarnsAndDoesNotFail(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFile(t, "opencode")
+	tempDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts"),
+		"--workers-config", configPath,
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: worker opencode has missing required env") {
+		t.Fatalf("stderr = %q, want sanitized missing env warning", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "smoke_summary:") || !strings.Contains(output, "worker: opencode") {
+		t.Fatalf("stdout = %q, want smoke summary", output)
+	}
+	if !strings.Contains(output, "env_required_ok: false") {
+		t.Fatalf("stdout = %q, want env_required_ok false", output)
+	}
+	if !strings.Contains(output, "command: /usr/local/bin/opencode run --cwd . -") {
+		t.Fatalf("stdout = %q, want planned command", output)
+	}
+	if !strings.Contains(output, "status: dry_run") {
+		t.Fatalf("stdout = %q, want dry_run status", output)
+	}
+	if strings.Contains(output, "run_id:") {
+		t.Fatalf("stdout = %q, want no run_id for dry-run", output)
+	}
+	assertNoSecretReference(t, stdout.String()+stderr.String())
+}
+
+func TestRunWorkersSmokeRunWithMissingEnvFailsBeforeWorker(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	tempDir := t.TempDir()
+	markerPath := filepath.Join(tempDir, "worker-executed")
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFile(t, "opencode")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts"),
+		"--workers-config", configPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "error: worker opencode has missing required env") {
+		t.Fatalf("stderr = %q, want sanitized missing env error", stderr.String())
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("worker marker exists or stat failed: %v", err)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "env_required_ok: false") || !strings.Contains(output, "status: env_missing") {
+		t.Fatalf("stdout = %q, want env_missing summary", output)
+	}
+	if strings.Contains(output, "run_id:") {
+		t.Fatalf("stdout = %q, want no run output", output)
+	}
+	assertNoSecretReference(t, stdout.String()+stderr.String())
+}
+
+func TestRunWorkersSmokeRunWithEnvPresentCallsOpenCodeRun(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+
+	tempDir := t.TempDir()
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFile(t, "opencode")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", artifactsDir,
+		"--workers-config", configPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "run_id: run-cli-opencode-config-001") {
+		t.Fatalf("stdout = %q, want configured opencode run id", output)
+	}
+	if !strings.Contains(output, "env_required_ok: true") {
+		t.Fatalf("stdout = %q, want env_required_ok true", output)
+	}
+	if !strings.Contains(output, "status: succeeded") {
+		t.Fatalf("stdout = %q, want succeeded status", output)
+	}
+	if !strings.Contains(output, "artifacts_dir: "+filepath.Join(artifactsDir, "run-cli-opencode-config-001")) {
+		t.Fatalf("stdout = %q, want artifacts dir", output)
+	}
+	assertCLIFileContent(t, filepath.Join(artifactsDir, "run-cli-opencode-config-001", "stdout.jsonl"), "{\"type\":\"done\"}\n")
+	assertNoSecretReference(t, stdout.String()+stderr.String())
+	if strings.Contains(stdout.String()+stderr.String(), "zai-real-secret") {
+		t.Fatalf("output leaked env value: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunWorkersSmokeInvalidTaskFailsBeforeWorker(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+	tempDir := t.TempDir()
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeInvalidTaskFile(t, "opencode")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts"),
+		"--workers-config", configPath,
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "validation failed") {
+		t.Fatalf("stderr = %q, want validation failure", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "command:") || strings.Contains(stdout.String(), "smoke_summary:") {
+		t.Fatalf("stdout = %q, want no smoke command or summary for invalid task", stdout.String())
+	}
+	assertNoSecretReference(t, stdout.String()+stderr.String())
+}
+
 func TestRunWorkerOpenCodeDryRunRejectsInvalidTask(t *testing.T) {
 	taskPath := writeInvalidTaskFile(t, "opencode")
 	var stdout bytes.Buffer
@@ -3193,6 +3375,13 @@ func unsetEnvForTest(t *testing.T, name string) {
 			_ = os.Unsetenv(name)
 		}
 	})
+}
+
+func assertNoSecretReference(t *testing.T, output string) {
+	t.Helper()
+	if strings.Contains(output, "ZAI_API_KEY") {
+		t.Fatalf("output leaked env name: %q", output)
+	}
 }
 
 func writeInvalidTaskFile(t *testing.T, worker string) string {

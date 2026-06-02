@@ -28,6 +28,7 @@ It is a snapshot of the current MVP contract, not a provider roadmap. Kimi is li
 | event parsing | partial | yes | Codex expects JSONL from codex exec --json. OpenCode accepts jsonl, mixed, text, and empty stdout. |
 | workers-config | yes | yes | Both support --workers-config and fallback commands. |
 | doctor | yes | yes | deonctl workers doctor can check configured commands for both workers. |
+| parity smoke | no | yes | deonctl workers smoke currently supports OpenCode only and runs task validation, worker doctor, env requirement validation, and dry-run/run dispatch. |
 
 ## OpenCode Event Parsing Parity
 
