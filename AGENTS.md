@@ -297,4 +297,12 @@ go test ./...
 gofmt -w .
 ```
 
+For this repository, after the full validation gate passes and the task is ready to ship, use the project-local automation:
+
+```bash
+make ship MSG="short commit message"
+```
+
+`make ship` runs formatting, `git diff --check`, `go test ./...`, then commits and pushes the current branch. It is intentionally scoped to the DeonClaw remote and must not be reused for other repositories.
+
 Do not commit generated secrets, tokens, local auth files, memory vault contents or domain data.
