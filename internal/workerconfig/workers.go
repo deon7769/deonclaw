@@ -13,7 +13,10 @@ type Config struct {
 }
 
 type Worker struct {
-	Command string `yaml:"command" json:"command"`
+	Command  string            `yaml:"command" json:"command"`
+	Provider string            `yaml:"provider,omitempty" json:"provider,omitempty"`
+	Model    string            `yaml:"model,omitempty" json:"model,omitempty"`
+	Env      map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 }
 
 func Load(path string) (Config, error) {
@@ -54,6 +57,21 @@ func (c Config) Command(worker string) string {
 	return Default().Workers[worker].Command
 }
 
+func (c Config) Worker(worker string) Worker {
+	worker = strings.TrimSpace(worker)
+	if worker == "" {
+		return Worker{}
+	}
+	configured, ok := c.Workers[worker]
+	if !ok {
+		configured = Default().Workers[worker]
+	}
+	if strings.TrimSpace(configured.Command) == "" {
+		configured.Command = Default().Workers[worker].Command
+	}
+	return configured
+}
+
 func normalize(cfg *Config) {
 	if cfg.Workers == nil {
 		cfg.Workers = map[string]Worker{}
@@ -61,9 +79,30 @@ func normalize(cfg *Config) {
 	for name, worker := range cfg.Workers {
 		normalizedName := strings.TrimSpace(name)
 		worker.Command = strings.TrimSpace(worker.Command)
+		worker.Provider = strings.TrimSpace(worker.Provider)
+		worker.Model = strings.TrimSpace(worker.Model)
+		worker.Env = normalizeEnv(worker.Env)
 		if normalizedName != name {
 			delete(cfg.Workers, name)
 		}
 		cfg.Workers[normalizedName] = worker
 	}
+}
+
+func normalizeEnv(env map[string]string) map[string]string {
+	if len(env) == 0 {
+		return nil
+	}
+	normalized := make(map[string]string, len(env))
+	for name, value := range env {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		normalized[name] = strings.TrimSpace(value)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }

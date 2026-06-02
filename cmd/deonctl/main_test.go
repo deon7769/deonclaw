@@ -93,8 +93,49 @@ func TestRunWorkersDoctorWithWorkerFilterAndConfig(t *testing.T) {
 	}
 }
 
+func TestRunWorkersDoctorJSONIncludesProviderModel(t *testing.T) {
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake) error = %v", err)
+	}
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	workersConfigPath := filepath.Join(tempDir, "workers.yaml")
+	if err := os.WriteFile(workersConfigPath, []byte(`workers:
+  opencode:
+    command: fake-opencode
+    provider: z_ai_glm
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(workers config) error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"workers", "doctor", "--worker", "opencode", "--workers-config", workersConfigPath, "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	var decoded struct {
+		Workers []struct {
+			Name     string `json:"name"`
+			Provider string `json:"provider"`
+			Model    string `json:"model"`
+		} `json:"workers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if len(decoded.Workers) != 1 || decoded.Workers[0].Name != "opencode" || decoded.Workers[0].Provider != "z_ai_glm" || decoded.Workers[0].Model != "glm-5.1" {
+		t.Fatalf("workers = %#v, want opencode provider/model", decoded.Workers)
+	}
+}
+
 func TestRunConfigEnvMasksSecrets(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-real-secret")
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
@@ -106,7 +147,10 @@ func TestRunConfigEnvMasksSecrets(t *testing.T) {
 	if !strings.Contains(text, "OPENAI_API_KEY=set(masked)") {
 		t.Fatalf("stdout = %q, want masked key", text)
 	}
-	if strings.Contains(text, "sk-real-secret") {
+	if !strings.Contains(text, "ZAI_API_KEY=set(masked)") {
+		t.Fatalf("stdout = %q, want masked ZAI_API_KEY", text)
+	}
+	if strings.Contains(text, "sk-real-secret") || strings.Contains(text, "zai-real-secret") {
 		t.Fatalf("stdout leaked secret: %q", text)
 	}
 }
@@ -2508,7 +2552,14 @@ func TestRunWorkerOpenCodeDryRun(t *testing.T) {
 func TestRunWorkerOpenCodeDryRunUsesWorkersConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "workers.yaml")
-	if err := os.WriteFile(configPath, []byte("workers:\n  opencode:\n    command: /usr/local/bin/opencode\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`workers:
+  opencode:
+    command: /usr/local/bin/opencode
+    provider: z_ai_glm
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
 	}
 	taskPath := writeTaskFile(t, "opencode")
@@ -2567,7 +2618,14 @@ func TestRunWorkerOpenCodeRunUsesWorkersConfig(t *testing.T) {
 		t.Fatalf("WriteFile(fake opencode) error = %v", err)
 	}
 	configPath := filepath.Join(tempDir, "workers.yaml")
-	if err := os.WriteFile(configPath, []byte("workers:\n  opencode:\n    command: "+fakeOpenCode+"\n"), 0o600); err != nil {
+	if err := os.WriteFile(configPath, []byte(`workers:
+  opencode:
+    command: `+fakeOpenCode+`
+    provider: z_ai_glm
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
 	}
 

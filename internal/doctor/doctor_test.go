@@ -63,6 +63,54 @@ func TestWorkersDoctorDetectsFakeCommandOnPath(t *testing.T) {
 	}
 }
 
+func TestWorkersDoctorReportsProviderModel(t *testing.T) {
+	tempDir := t.TempDir()
+	fake := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake) error = %v", err)
+	}
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	configPath := filepath.Join(tempDir, "workers.yaml")
+	if err := os.WriteFile(configPath, []byte(`workers:
+  opencode:
+    command: fake-opencode
+    provider: z_ai_glm
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+
+	report, err := Build(Options{Worker: "opencode", WorkersConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(report.Workers) != 1 {
+		t.Fatalf("workers = %d, want 1", len(report.Workers))
+	}
+	worker := report.Workers[0]
+	if worker.Provider != "z_ai_glm" || worker.Model != "glm-5.1" {
+		t.Fatalf("worker check = %#v, want provider/model", worker)
+	}
+
+	var jsonOut bytes.Buffer
+	if err := Write(report, OutputJSON, &jsonOut); err != nil {
+		t.Fatalf("Write(json) error = %v", err)
+	}
+	if !strings.Contains(jsonOut.String(), `"provider": "z_ai_glm"`) || !strings.Contains(jsonOut.String(), `"model": "glm-5.1"`) {
+		t.Fatalf("json output = %q, want provider/model", jsonOut.String())
+	}
+
+	var textOut bytes.Buffer
+	if err := Write(report, OutputText, &textOut); err != nil {
+		t.Fatalf("Write(text) error = %v", err)
+	}
+	if !strings.Contains(textOut.String(), "provider=z_ai_glm") || !strings.Contains(textOut.String(), "model=glm-5.1") {
+		t.Fatalf("text output = %q, want provider/model", textOut.String())
+	}
+}
+
 func TestDoctorChecksStoreAndArtifactsPaths(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.db")

@@ -40,3 +40,36 @@ func TestDefaultIncludesOpenCodeFallback(t *testing.T) {
 		t.Fatalf("opencode fallback = %q, want opencode", got)
 	}
 }
+
+func TestLoadWorkersConfigProviderModelEnv(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workers.yaml")
+	content := []byte(`workers:
+  opencode:
+    command: opencode
+    provider: z_ai_glm
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	worker := cfg.Worker("opencode")
+	if worker.Command != "opencode" {
+		t.Fatalf("command = %q, want opencode", worker.Command)
+	}
+	if worker.Provider != "z_ai_glm" {
+		t.Fatalf("provider = %q, want z_ai_glm", worker.Provider)
+	}
+	if worker.Model != "glm-5.1" {
+		t.Fatalf("model = %q, want glm-5.1", worker.Model)
+	}
+	if got := worker.Env["ZAI_API_KEY"]; got != "required" {
+		t.Fatalf("ZAI_API_KEY marker = %q, want required", got)
+	}
+}

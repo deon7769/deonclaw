@@ -50,6 +50,8 @@ type ToolCheck struct {
 type WorkerCheck struct {
 	Name                 string    `json:"name"`
 	ConfiguredCommand    string    `json:"configured_command"`
+	Provider             string    `json:"provider,omitempty"`
+	Model                string    `json:"model,omitempty"`
 	ImplementationStatus string    `json:"implementation_status"`
 	Available            bool      `json:"available"`
 	Path                 string    `json:"path,omitempty"`
@@ -131,6 +133,16 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 			if _, err := fmt.Fprintf(out, "worker %s: command=%s status=%s available=%t", worker.Name, worker.ConfiguredCommand, worker.ImplementationStatus, worker.Available); err != nil {
 				return err
 			}
+			if worker.Provider != "" {
+				if _, err := fmt.Fprintf(out, " provider=%s", worker.Provider); err != nil {
+					return err
+				}
+			}
+			if worker.Model != "" {
+				if _, err := fmt.Fprintf(out, " model=%s", worker.Model); err != nil {
+					return err
+				}
+			}
 			if worker.Path != "" {
 				if _, err := fmt.Fprintf(out, " path=%s", worker.Path); err != nil {
 					return err
@@ -189,11 +201,14 @@ func workerChecks(cfg workerconfig.Config, workerFilter string) ([]WorkerCheck, 
 	sort.Strings(workers)
 	checks := make([]WorkerCheck, 0, len(workers))
 	for _, worker := range workers {
-		command := cfg.Command(worker)
+		workerConfig := cfg.Worker(worker)
+		command := workerConfig.Command
 		tool := checkTool(command)
 		checks = append(checks, WorkerCheck{
 			Name:                 worker,
 			ConfiguredCommand:    command,
+			Provider:             workerConfig.Provider,
+			Model:                workerConfig.Model,
 			ImplementationStatus: implementationStatus(worker),
 			Available:            tool.Available,
 			Path:                 tool.Path,

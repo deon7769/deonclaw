@@ -8,6 +8,7 @@ import (
 
 func TestConfigEnvMasksSecrets(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-secret-value")
+	t.Setenv("ZAI_API_KEY", "zai-secret-value")
 	t.Setenv("CUSTOM_PASSWORD", "super-secret")
 
 	report := Build()
@@ -22,7 +23,10 @@ func TestConfigEnvMasksSecrets(t *testing.T) {
 	if !strings.Contains(text, "CUSTOM_PASSWORD=set(masked)") {
 		t.Fatalf("text = %q, want masked CUSTOM_PASSWORD", text)
 	}
-	if strings.Contains(text, "sk-secret-value") || strings.Contains(text, "super-secret") {
+	if !strings.Contains(text, "ZAI_API_KEY=set(masked)") {
+		t.Fatalf("text = %q, want masked ZAI_API_KEY", text)
+	}
+	if strings.Contains(text, "sk-secret-value") || strings.Contains(text, "zai-secret-value") || strings.Contains(text, "super-secret") {
 		t.Fatalf("text leaked secret: %q", text)
 	}
 }

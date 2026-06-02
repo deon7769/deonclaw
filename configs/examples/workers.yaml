@@ -3,5 +3,9 @@ workers:
     command: codex
   opencode:
     command: opencode
+    provider: z_ai_glm
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
   kimi:
     command: kimi
