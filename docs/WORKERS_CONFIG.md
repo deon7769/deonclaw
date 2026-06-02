@@ -96,7 +96,6 @@ If a command is missing, DeonClaw keeps the built-in fallback:
 
 - `codex` -> `codex`
 - `opencode` -> `opencode`
-- `kimi` -> `kimi`
 
 ## Runtime Boundaries
 
@@ -110,8 +109,10 @@ OpenCode still runs through the existing command contract:
 opencode run --cwd <workspace> -
 ~~~
 
-## Kimi
+## Kimi Inspiration
 
-Kimi remains `future_worker`.
+Kimi is `inspiration_only`.
 
-`workers.yaml` may contain a Kimi command for doctor diagnostics, but DeonClaw does not provide a Kimi worker adapter, dry-run command, or run command yet.
+Do not add Kimi to operational `workers.yaml` examples yet. DeonClaw does not provide a Kimi worker adapter, doctor entry, dry-run command, run command, or fallback command.
+
+Kimi can be revisited only through a dedicated future task that defines the worker contract first.

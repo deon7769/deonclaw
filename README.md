@@ -90,5 +90,3 @@ deonctl worker opencode run <opencode-task.yaml> --store deonclaw.db --artifacts
 deonctl artifacts list --store deonclaw.db
 deonctl memory proposal lint --proposal memory-proposal.json --policy configs/examples/memory-policy.yaml
 ```
-
-`deonctl workers doctor --worker kimi` reports configured command diagnostics only. Kimi is marked as `future_worker` until a worker adapter is implemented.

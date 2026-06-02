@@ -22,6 +22,9 @@ func TestDoctorTextWorks(t *testing.T) {
 	if !strings.Contains(text, "deonctl:") || !strings.Contains(text, "working_dir:") || !strings.Contains(text, "worker codex:") {
 		t.Fatalf("doctor text = %q, want core fields", text)
 	}
+	if strings.Contains(text, "worker kimi:") {
+		t.Fatalf("doctor text = %q, want no kimi worker by default", text)
+	}
 }
 
 func TestDoctorJSONIsValid(t *testing.T) {
@@ -294,20 +297,13 @@ func TestDoctorChecksArtifactsMissingParentNotWritable(t *testing.T) {
 	}
 }
 
-func TestWorkersDoctorAllowsKimiAsFutureWorkerDiagnostic(t *testing.T) {
+func TestWorkersDoctorRejectsKimiAsInspirationOnly(t *testing.T) {
 	report, err := Build(Options{Worker: "kimi"})
-	if err != nil {
-		t.Fatalf("Build() error = %v", err)
+	if err == nil {
+		t.Fatalf("Build() workers = %#v, want kimi rejected", report.Workers)
 	}
-	if len(report.Workers) != 1 || report.Workers[0].Name != "kimi" || report.Workers[0].ConfiguredCommand != "kimi" || report.Workers[0].ImplementationStatus != "future_worker" {
-		t.Fatalf("workers = %#v, want kimi future_worker diagnostic", report.Workers)
-	}
-	var out bytes.Buffer
-	if err := Write(report, OutputText, &out); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	if !strings.Contains(out.String(), "status=future_worker") {
-		t.Fatalf("text output = %q, want future_worker status", out.String())
+	if !strings.Contains(err.Error(), `unknown worker "kimi"`) {
+		t.Fatalf("error = %v, want kimi unknown worker", err)
 	}
 }
 

@@ -230,9 +230,6 @@ func workerChecks(cfg workerconfig.Config, workerFilter string) ([]WorkerCheck, 
 }
 
 func implementationStatus(worker string) string {
-	if worker == "kimi" {
-		return "future_worker"
-	}
 	return "implemented"
 }
 

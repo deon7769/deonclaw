@@ -51,13 +51,12 @@ func Default() Config {
 		Workers: map[string]Worker{
 			"codex":    {Command: "codex"},
 			"opencode": {Command: "opencode"},
-			"kimi":     {Command: "kimi"},
 		},
 	}
 }
 
 func KnownWorkers() []string {
-	return []string{"codex", "opencode", "kimi"}
+	return []string{"codex", "opencode"}
 }
 
 func (c Config) Command(worker string) string {

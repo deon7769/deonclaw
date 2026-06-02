@@ -37,7 +37,7 @@ const usage = `deonctl - DeonClaw control CLI
 Usage:
   deonctl version
   deonctl doctor [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
-  deonctl workers doctor [--worker codex|opencode|kimi] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
+  deonctl workers doctor [--worker codex|opencode] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
   deonctl workers smoke --worker opencode --task <task.yaml> --store <path> --artifacts-dir <path> --workers-config <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--dry-run]
   deonctl config env [--output-format text|json]
   deonctl task validate <path>

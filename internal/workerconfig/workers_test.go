@@ -13,8 +13,6 @@ func TestLoadWorkersConfigCommands(t *testing.T) {
     command: codex-test
   opencode:
     command: opencode-test
-  kimi:
-    command: kimi-test
 `)
 	if err := os.WriteFile(path, content, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
@@ -30,14 +28,22 @@ func TestLoadWorkersConfigCommands(t *testing.T) {
 	if got := cfg.Command("opencode"); got != "opencode-test" {
 		t.Fatalf("opencode command = %q, want opencode-test", got)
 	}
-	if got := cfg.Command("kimi"); got != "kimi-test" {
-		t.Fatalf("kimi command = %q, want kimi-test", got)
-	}
 }
 
 func TestDefaultIncludesOpenCodeFallback(t *testing.T) {
 	if got := Default().Command("opencode"); got != "opencode" {
 		t.Fatalf("opencode fallback = %q, want opencode", got)
+	}
+}
+
+func TestKnownWorkersExcludeFutureInspirationOnlyWorkers(t *testing.T) {
+	if got := Default().Command("kimi"); got != "" {
+		t.Fatalf("kimi fallback = %q, want no operational fallback", got)
+	}
+	for _, worker := range KnownWorkers() {
+		if worker == "kimi" {
+			t.Fatalf("KnownWorkers() = %#v, want no kimi", KnownWorkers())
+		}
 	}
 }
 

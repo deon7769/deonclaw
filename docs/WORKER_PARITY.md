@@ -2,14 +2,14 @@
 
 This document tracks operational parity between the implemented workers.
 
-It is a snapshot of the current MVP contract, not a provider roadmap. Kimi is listed only because worker command configuration and doctor diagnostics can mention it.
+It is a snapshot of the current MVP contract, not a provider roadmap. Kimi is inspiration only and is not an operational or diagnostic worker yet.
 
 ## Status Legend
 
 - yes: implemented and covered by the shared runner or worker adapter
 - partial: implemented with worker-specific behavior or remaining caveat
 - no: not implemented
-- future_worker: configured or diagnosable, but no worker adapter exists
+- inspiration_only: future reference only, with no config example, doctor entry, or worker adapter
 
 ## Codex vs OpenCode
 
@@ -57,20 +57,20 @@ Codex is still treated as a JSONL-first worker because the command contract is c
 
 Invalid Codex JSONL can fail parsing. This is intentional for now because Codex has a stricter event contract than OpenCode.
 
-## Kimi
+## Kimi Inspiration
 
-Kimi is not an implemented worker.
+Kimi is not an implemented worker. It is inspiration only until a dedicated implementation task adds an adapter and operational contract.
 
 Current Kimi status:
 
 - worker adapter: no
 - run command: no
 - dry-run command: no
-- workers.yaml command entry: supported as configuration data
-- doctor command check: supported as diagnostic command only
-- implementation_status: future_worker
+- workers.yaml command entry: no example and no operational fallback
+- doctor command check: no
+- status label: inspiration_only
 
-Kimi must remain diagnostic command only until a dedicated worker adapter is explicitly implemented.
+Kimi must remain out of operational config and doctor output until a dedicated worker adapter is explicitly implemented.
 
 ## Current Shared Runner Guarantees
 

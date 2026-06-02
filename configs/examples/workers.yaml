@@ -7,5 +7,3 @@ workers:
     model: glm-5.1
     env:
       ZAI_API_KEY: required
-  kimi:
-    command: kimi
