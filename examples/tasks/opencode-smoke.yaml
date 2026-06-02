@@ -1,0 +1,44 @@
+id: opencode-smoke-001
+title: "OpenCode worker smoke test"
+domain: general
+worker: opencode
+
+goal: >
+  Read the repository and produce a short structured summary.
+  Do not edit files.
+
+mode: read_only
+
+workspace:
+  strategy: local_repo
+  path: .
+
+memory:
+  scope: none
+
+allowed_paths: []
+
+forbidden_paths:
+  - mysecondbrain/**
+  - escalasoft_brain/**
+  - .env
+  - secrets/**
+  - ~/.opencode/**
+  - ~/.config/**
+
+expected_outputs:
+  - artifacts/summary.md
+  - artifacts/stdout.log or artifacts/stdout.jsonl
+  - artifacts/stderr.log
+  - artifacts/events.jsonl
+  - artifacts/diff.patch
+  - artifacts/changed-files.json
+  - artifacts/artifact-manifest.json
+
+definition_of_done:
+  - OpenCode runs through the DeonClaw adapter
+  - stdout is preserved as stdout.log or stdout.jsonl
+  - stderr log is captured
+  - events are normalized into events.jsonl
+  - final summary is written
+  - no files are modified
