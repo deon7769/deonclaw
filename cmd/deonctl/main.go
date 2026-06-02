@@ -1963,6 +1963,13 @@ func runCodexDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Writer
 		return 1
 	}
 
+	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "codex")
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	writeMissingEnvWarnings(stderr, "codex", workerConfig)
+
 	worker, err := configuredCodexWorker(opts.workersConfigPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -1996,6 +2003,13 @@ func runOpenCodeDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Wri
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
+
+	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "opencode")
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	writeMissingEnvWarnings(stderr, "opencode", workerConfig)
 
 	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
 	if err != nil {
@@ -2078,6 +2092,16 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 }
 
 func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
+	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "codex")
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	if err := validateRequiredWorkerEnv("codex", workerConfig); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+
 	worker, err := configuredCodexWorker(opts.workersConfigPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -2162,6 +2186,16 @@ func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
 }
 
 func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer) int {
+	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "opencode")
+	if err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+	if err := validateRequiredWorkerEnv("opencode", workerConfig); err != nil {
+		fmt.Fprintf(stderr, "error: %v\n", err)
+		return 1
+	}
+
 	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -2189,22 +2223,52 @@ func configuredCodexWorker(workersConfigPath string) (workers.Worker, error) {
 	if strings.TrimSpace(workersConfigPath) == "" {
 		return codexWorkerFactory(), nil
 	}
-	cfg, err := workerconfig.Load(workersConfigPath)
+	workerConfig, err := configuredWorkerDefinition(workersConfigPath, "codex")
 	if err != nil {
 		return nil, err
 	}
-	return codex.NewWithCommand(cfg.Command("codex")), nil
+	return codex.NewWithCommand(workerConfig.Command), nil
 }
 
 func configuredOpenCodeWorker(workersConfigPath string) (workers.Worker, error) {
 	if strings.TrimSpace(workersConfigPath) == "" {
 		return opencodeWorkerFactory(), nil
 	}
-	cfg, err := workerconfig.Load(workersConfigPath)
+	workerConfig, err := configuredWorkerDefinition(workersConfigPath, "opencode")
 	if err != nil {
 		return nil, err
 	}
-	return opencode.NewWithCommand(cfg.Command("opencode")), nil
+	return opencode.NewWithCommand(workerConfig.Command), nil
+}
+
+func configuredWorkerDefinition(workersConfigPath string, worker string) (workerconfig.Worker, error) {
+	cfg := workerconfig.Default()
+	if strings.TrimSpace(workersConfigPath) != "" {
+		loaded, err := workerconfig.Load(workersConfigPath)
+		if err != nil {
+			return workerconfig.Worker{}, err
+		}
+		cfg = loaded
+	}
+	return cfg.Worker(worker), nil
+}
+
+func validateRequiredWorkerEnv(worker string, workerConfig workerconfig.Worker) error {
+	missing := workerconfig.MissingRequiredEnv(workerConfig.EnvRequirementChecks())
+	if len(missing) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(missing))
+	for _, check := range missing {
+		names = append(names, check.Name)
+	}
+	return fmt.Errorf("worker %s missing required env: %s", worker, strings.Join(names, ", "))
+}
+
+func writeMissingEnvWarnings(stderr io.Writer, worker string, workerConfig workerconfig.Worker) {
+	for _, check := range workerconfig.MissingRequiredEnv(workerConfig.EnvRequirementChecks()) {
+		fmt.Fprintf(stderr, "warning: worker %s required env %s is missing\n", worker, check.Name)
+	}
 }
 
 type artifactListOptions struct {

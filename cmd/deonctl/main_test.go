@@ -133,6 +133,63 @@ func TestRunWorkersDoctorJSONIncludesProviderModel(t *testing.T) {
 	}
 }
 
+func TestRunWorkersDoctorJSONReportsMissingRequiredEnv(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	workersConfigPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: opencode
+    env:
+      ZAI_API_KEY: required
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"workers", "doctor", "--worker", "opencode", "--workers-config", workersConfigPath, "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	var decoded struct {
+		Workers []struct {
+			EnvRequiredOK   bool `json:"env_required_ok"`
+			EnvRequirements []struct {
+				Name        string `json:"name"`
+				Requirement string `json:"requirement"`
+				State       string `json:"state"`
+			} `json:"env_requirements"`
+		} `json:"workers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if len(decoded.Workers) != 1 || decoded.Workers[0].EnvRequiredOK || len(decoded.Workers[0].EnvRequirements) != 1 || decoded.Workers[0].EnvRequirements[0].State != "missing" {
+		t.Fatalf("workers = %#v, want missing required env", decoded.Workers)
+	}
+}
+
+func TestRunWorkersDoctorJSONReportsSetMaskedRequiredEnv(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+	workersConfigPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: opencode
+    env:
+      ZAI_API_KEY: required
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"workers", "doctor", "--worker", "opencode", "--workers-config", workersConfigPath, "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	text := stdout.String()
+	if !strings.Contains(text, `"env_required_ok": true`) || !strings.Contains(text, `"state": "set_masked"`) {
+		t.Fatalf("stdout = %q, want set_masked env requirement", text)
+	}
+	if strings.Contains(text, "zai-real-secret") {
+		t.Fatalf("stdout leaked secret: %q", text)
+	}
+}
+
 func TestRunConfigEnvMasksSecrets(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-real-secret")
 	t.Setenv("ZAI_API_KEY", "zai-real-secret")
@@ -2582,6 +2639,30 @@ func TestRunWorkerOpenCodeDryRunUsesWorkersConfig(t *testing.T) {
 	}
 }
 
+func TestRunWorkerOpenCodeDryRunWarnsWhenRequiredEnvMissing(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFile(t, "opencode")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --cwd . -") {
+		t.Fatalf("stdout = %q, want planned command", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: worker opencode required env ZAI_API_KEY is missing") {
+		t.Fatalf("stderr = %q, want missing env warning", stderr.String())
+	}
+}
+
 func TestRunWorkerCodexDryRunUsesWorkersConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "workers.yaml")
@@ -2611,6 +2692,7 @@ func TestRunWorkerCodexDryRunUsesWorkersConfig(t *testing.T) {
 func TestRunWorkerOpenCodeRunUsesWorkersConfig(t *testing.T) {
 	restore := overrideOpenCodeRunConfigDeps(t)
 	defer restore()
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
 
 	tempDir := t.TempDir()
 	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
@@ -2643,6 +2725,70 @@ func TestRunWorkerOpenCodeRunUsesWorkersConfig(t *testing.T) {
 		t.Fatalf("stdout = %q, want configured opencode run id", stdout.String())
 	}
 	assertCLIFileContent(t, filepath.Join(artifactsDir, "run-cli-opencode-config-001", "stdout.jsonl"), "{\"type\":\"done\"}\n")
+}
+
+func TestRunWorkerOpenCodeRunFailsBeforeWorkerWhenRequiredEnvMissing(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+	unsetEnvForTest(t, "ZAI_API_KEY")
+
+	tempDir := t.TempDir()
+	markerPath := filepath.Join(tempDir, "worker-executed")
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+    env:
+      ZAI_API_KEY: required
+`)
+
+	taskPath := writeTaskFile(t, "opencode")
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", storePath, "--artifacts-dir", artifactsDir, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "worker opencode missing required env: ZAI_API_KEY") {
+		t.Fatalf("stderr = %q, want missing env error", stderr.String())
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("worker marker exists or stat failed: %v", err)
+	}
+	if strings.Contains(stdout.String(), "run_id:") {
+		t.Fatalf("stdout = %q, want no run output", stdout.String())
+	}
+}
+
+func TestRunWorkerCodexRunFailsBeforeWorkerWhenRequiredEnvMissing(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	tempDir := t.TempDir()
+	configPath := writeCLIWorkersConfig(t, `workers:
+  codex:
+    command: codex
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFile(t, "codex")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "codex", "run", taskPath, "--store", filepath.Join(tempDir, "deonclaw.db"), "--artifacts-dir", filepath.Join(tempDir, "artifacts"), "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "worker codex missing required env: ZAI_API_KEY") {
+		t.Fatalf("stderr = %q, want missing env error", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "run_id:") {
+		t.Fatalf("stdout = %q, want no run output", stdout.String())
+	}
 }
 
 func TestRunWorkerOpenCodeDryRunRejectsInvalidTask(t *testing.T) {
@@ -3023,6 +3169,30 @@ definition_of_done:
 		t.Fatalf("write task file: %v", err)
 	}
 	return path
+}
+
+func writeCLIWorkersConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "workers.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write workers config file: %v", err)
+	}
+	return path
+}
+
+func unsetEnvForTest(t *testing.T, name string) {
+	t.Helper()
+	oldValue, hadOldValue := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("Unsetenv(%s) error = %v", name, err)
+	}
+	t.Cleanup(func() {
+		if hadOldValue {
+			_ = os.Setenv(name, oldValue)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
 }
 
 func writeInvalidTaskFile(t *testing.T, worker string) string {

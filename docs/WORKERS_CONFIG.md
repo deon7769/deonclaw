@@ -43,6 +43,43 @@ workers:
 
 `deonctl config env` masks sensitive values including `ZAI_API_KEY`.
 
+## Environment Requirements
+
+`env` entries declare required environment variables by name:
+
+~~~yaml
+workers:
+  opencode:
+    command: opencode
+    env:
+      ZAI_API_KEY: required
+~~~
+
+`required` validates presence only. If the variable exists in the process environment, DeonClaw reports it as `set_masked`; it does not inspect, print, or validate the value.
+
+If a required variable is absent, DeonClaw reports it as `missing`.
+
+Doctor output includes requirement state per worker:
+
+~~~text
+worker opencode: command=opencode status=implemented available=false env_required_ok=false
+worker opencode env ZAI_API_KEY: requirement=required state=missing
+~~~
+
+JSON doctor output includes the same data in `env_requirements` with:
+
+- `name`
+- `requirement`
+- `state`: `set_masked` or `missing`
+
+Run behavior:
+
+- `worker codex run` fails before worker execution when a configured `required` env is missing.
+- `worker opencode run` fails before worker execution when a configured `required` env is missing.
+- dry-run commands do not fail for missing required env; they print a warning so command planning remains usable.
+
+Secrets must come from the process environment or an external secret manager. Never put actual secret values in `workers.yaml`.
+
 ## Compatibility
 
 Simple command-only config remains valid:
@@ -64,6 +101,8 @@ If a command is missing, DeonClaw keeps the built-in fallback:
 ## Runtime Boundaries
 
 Provider and model are diagnostic config only in the current task. They are not injected into worker command arguments and they do not trigger a real provider call.
+
+Environment requirements are validation metadata only. DeonClaw does not inject env values into worker command arguments.
 
 OpenCode still runs through the existing command contract:
 

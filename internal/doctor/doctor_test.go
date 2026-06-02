@@ -111,6 +111,70 @@ func TestWorkersDoctorReportsProviderModel(t *testing.T) {
 	}
 }
 
+func TestWorkersDoctorReportsMissingRequiredEnv(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeDoctorWorkersConfig(t, `workers:
+  opencode:
+    command: opencode
+    env:
+      ZAI_API_KEY: required
+`)
+
+	report, err := Build(Options{Worker: "opencode", WorkersConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	worker := report.Workers[0]
+	if worker.EnvRequiredOK {
+		t.Fatalf("EnvRequiredOK = true, want false for missing required env")
+	}
+	if len(worker.EnvRequirements) != 1 || worker.EnvRequirements[0].Name != "ZAI_API_KEY" || worker.EnvRequirements[0].Requirement != "required" || worker.EnvRequirements[0].State != "missing" {
+		t.Fatalf("env requirements = %#v, want missing ZAI_API_KEY", worker.EnvRequirements)
+	}
+
+	var out bytes.Buffer
+	if err := Write(report, OutputText, &out); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if !strings.Contains(out.String(), "env_required_ok=false") || !strings.Contains(out.String(), "worker opencode env ZAI_API_KEY: requirement=required state=missing") {
+		t.Fatalf("text output = %q, want missing env indication", out.String())
+	}
+}
+
+func TestWorkersDoctorReportsSetMaskedRequiredEnv(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-secret-value")
+	configPath := writeDoctorWorkersConfig(t, `workers:
+  opencode:
+    command: opencode
+    env:
+      ZAI_API_KEY: required
+`)
+
+	report, err := Build(Options{Worker: "opencode", WorkersConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	worker := report.Workers[0]
+	if !worker.EnvRequiredOK {
+		t.Fatalf("EnvRequiredOK = false, want true for set required env")
+	}
+	if len(worker.EnvRequirements) != 1 || worker.EnvRequirements[0].State != "set_masked" {
+		t.Fatalf("env requirements = %#v, want set_masked", worker.EnvRequirements)
+	}
+
+	var out bytes.Buffer
+	if err := Write(report, OutputJSON, &out); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	text := out.String()
+	if !strings.Contains(text, `"state": "set_masked"`) {
+		t.Fatalf("json output = %q, want set_masked", text)
+	}
+	if strings.Contains(text, "zai-secret-value") {
+		t.Fatalf("json output leaked secret: %q", text)
+	}
+}
+
 func TestDoctorChecksStoreAndArtifactsPaths(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.db")
@@ -255,4 +319,28 @@ func TestWorkersDoctorRejectsUnknownWorker(t *testing.T) {
 	if !strings.Contains(err.Error(), `unknown worker "unknown"`) {
 		t.Fatalf("error = %v, want unknown worker", err)
 	}
+}
+
+func writeDoctorWorkersConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "workers.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	return path
+}
+
+func unsetEnvForTest(t *testing.T, name string) {
+	t.Helper()
+	oldValue, hadOldValue := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("Unsetenv(%s) error = %v", name, err)
+	}
+	t.Cleanup(func() {
+		if hadOldValue {
+			_ = os.Setenv(name, oldValue)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
 }

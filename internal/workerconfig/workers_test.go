@@ -73,3 +73,45 @@ func TestLoadWorkersConfigProviderModelEnv(t *testing.T) {
 		t.Fatalf("ZAI_API_KEY marker = %q, want required", got)
 	}
 }
+
+func TestEnvRequirementChecksReportMissingAndSetMasked(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	cfg := Config{Workers: map[string]Worker{
+		"opencode": {Env: map[string]string{"ZAI_API_KEY": "required"}},
+	}}
+
+	checks := cfg.EnvRequirementChecks("opencode")
+	if len(checks) != 1 {
+		t.Fatalf("checks = %#v, want one check", checks)
+	}
+	if checks[0].Name != "ZAI_API_KEY" || checks[0].Requirement != EnvRequirementRequired || checks[0].State != EnvStateMissing {
+		t.Fatalf("check = %#v, want missing required ZAI_API_KEY", checks[0])
+	}
+	if err := cfg.ValidateRequiredEnv("opencode"); err == nil {
+		t.Fatal("ValidateRequiredEnv() error = nil, want missing env error")
+	}
+
+	t.Setenv("ZAI_API_KEY", "")
+	checks = cfg.EnvRequirementChecks("opencode")
+	if len(checks) != 1 || checks[0].State != EnvStateSetMasked {
+		t.Fatalf("checks = %#v, want set_masked", checks)
+	}
+	if err := cfg.ValidateRequiredEnv("opencode"); err != nil {
+		t.Fatalf("ValidateRequiredEnv() error = %v, want nil", err)
+	}
+}
+
+func unsetEnvForTest(t *testing.T, name string) {
+	t.Helper()
+	oldValue, hadOldValue := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("Unsetenv(%s) error = %v", name, err)
+	}
+	t.Cleanup(func() {
+		if hadOldValue {
+			_ = os.Setenv(name, oldValue)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
+}

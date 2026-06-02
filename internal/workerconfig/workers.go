@@ -3,9 +3,17 @@ package workerconfig
 import (
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"gopkg.in/yaml.v3"
+)
+
+const (
+	EnvRequirementRequired = "required"
+
+	EnvStateSetMasked = "set_masked"
+	EnvStateMissing   = "missing"
 )
 
 type Config struct {
@@ -17,6 +25,12 @@ type Worker struct {
 	Provider string            `yaml:"provider,omitempty" json:"provider,omitempty"`
 	Model    string            `yaml:"model,omitempty" json:"model,omitempty"`
 	Env      map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
+}
+
+type EnvRequirementCheck struct {
+	Name        string `json:"name"`
+	Requirement string `json:"requirement"`
+	State       string `json:"state"`
 }
 
 func Load(path string) (Config, error) {
@@ -72,6 +86,62 @@ func (c Config) Worker(worker string) Worker {
 	return configured
 }
 
+func (c Config) EnvRequirementChecks(worker string) []EnvRequirementCheck {
+	return c.Worker(worker).EnvRequirementChecks()
+}
+
+func (c Config) MissingRequiredEnv(worker string) []EnvRequirementCheck {
+	return MissingRequiredEnv(c.EnvRequirementChecks(worker))
+}
+
+func (c Config) ValidateRequiredEnv(worker string) error {
+	missing := c.MissingRequiredEnv(worker)
+	if len(missing) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(missing))
+	for _, check := range missing {
+		names = append(names, check.Name)
+	}
+	return fmt.Errorf("worker %s missing required env: %s", worker, strings.Join(names, ", "))
+}
+
+func (w Worker) EnvRequirementChecks() []EnvRequirementCheck {
+	if len(w.Env) == 0 {
+		return nil
+	}
+	names := make([]string, 0, len(w.Env))
+	for name := range w.Env {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	checks := make([]EnvRequirementCheck, 0, len(names))
+	for _, name := range names {
+		requirement := normalizeEnvRequirement(w.Env[name])
+		state := EnvStateMissing
+		if _, ok := os.LookupEnv(name); ok {
+			state = EnvStateSetMasked
+		}
+		checks = append(checks, EnvRequirementCheck{
+			Name:        name,
+			Requirement: requirement,
+			State:       state,
+		})
+	}
+	return checks
+}
+
+func MissingRequiredEnv(checks []EnvRequirementCheck) []EnvRequirementCheck {
+	missing := []EnvRequirementCheck{}
+	for _, check := range checks {
+		if check.Requirement == EnvRequirementRequired && check.State == EnvStateMissing {
+			missing = append(missing, check)
+		}
+	}
+	return missing
+}
+
 func normalize(cfg *Config) {
 	if cfg.Workers == nil {
 		cfg.Workers = map[string]Worker{}
@@ -99,10 +169,14 @@ func normalizeEnv(env map[string]string) map[string]string {
 		if name == "" {
 			continue
 		}
-		normalized[name] = strings.TrimSpace(value)
+		normalized[name] = normalizeEnvRequirement(value)
 	}
 	if len(normalized) == 0 {
 		return nil
 	}
 	return normalized
+}
+
+func normalizeEnvRequirement(requirement string) string {
+	return strings.ToLower(strings.TrimSpace(requirement))
 }

@@ -48,15 +48,17 @@ type ToolCheck struct {
 }
 
 type WorkerCheck struct {
-	Name                 string    `json:"name"`
-	ConfiguredCommand    string    `json:"configured_command"`
-	Provider             string    `json:"provider,omitempty"`
-	Model                string    `json:"model,omitempty"`
-	ImplementationStatus string    `json:"implementation_status"`
-	Available            bool      `json:"available"`
-	Path                 string    `json:"path,omitempty"`
-	Error                string    `json:"error,omitempty"`
-	CommandCheck         ToolCheck `json:"command_check"`
+	Name                 string                             `json:"name"`
+	ConfiguredCommand    string                             `json:"configured_command"`
+	Provider             string                             `json:"provider,omitempty"`
+	Model                string                             `json:"model,omitempty"`
+	EnvRequiredOK        bool                               `json:"env_required_ok"`
+	EnvRequirements      []workerconfig.EnvRequirementCheck `json:"env_requirements,omitempty"`
+	ImplementationStatus string                             `json:"implementation_status"`
+	Available            bool                               `json:"available"`
+	Path                 string                             `json:"path,omitempty"`
+	Error                string                             `json:"error,omitempty"`
+	CommandCheck         ToolCheck                          `json:"command_check"`
 }
 
 type PathCheck struct {
@@ -130,7 +132,7 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 			return err
 		}
 		for _, worker := range report.Workers {
-			if _, err := fmt.Fprintf(out, "worker %s: command=%s status=%s available=%t", worker.Name, worker.ConfiguredCommand, worker.ImplementationStatus, worker.Available); err != nil {
+			if _, err := fmt.Fprintf(out, "worker %s: command=%s status=%s available=%t env_required_ok=%t", worker.Name, worker.ConfiguredCommand, worker.ImplementationStatus, worker.Available, worker.EnvRequiredOK); err != nil {
 				return err
 			}
 			if worker.Provider != "" {
@@ -155,6 +157,11 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 			}
 			if _, err := fmt.Fprintln(out); err != nil {
 				return err
+			}
+			for _, envRequirement := range worker.EnvRequirements {
+				if _, err := fmt.Fprintf(out, "worker %s env %s: requirement=%s state=%s\n", worker.Name, envRequirement.Name, envRequirement.Requirement, envRequirement.State); err != nil {
+					return err
+				}
 			}
 		}
 		if report.StorePath != nil {
@@ -204,11 +211,14 @@ func workerChecks(cfg workerconfig.Config, workerFilter string) ([]WorkerCheck, 
 		workerConfig := cfg.Worker(worker)
 		command := workerConfig.Command
 		tool := checkTool(command)
+		envRequirements := workerConfig.EnvRequirementChecks()
 		checks = append(checks, WorkerCheck{
 			Name:                 worker,
 			ConfiguredCommand:    command,
 			Provider:             workerConfig.Provider,
 			Model:                workerConfig.Model,
+			EnvRequiredOK:        len(workerconfig.MissingRequiredEnv(envRequirements)) == 0,
+			EnvRequirements:      envRequirements,
 			ImplementationStatus: implementationStatus(worker),
 			Available:            tool.Available,
 			Path:                 tool.Path,
