@@ -15,7 +15,19 @@ import (
 )
 
 type Worker struct {
-	command string
+	command      string
+	modelProfile string
+	provider     string
+	model        string
+	modelArg     string
+}
+
+type Options struct {
+	Command      string
+	ModelProfile string
+	Provider     string
+	Model        string
+	ModelArg     string
 }
 
 const (
@@ -28,15 +40,25 @@ const (
 )
 
 func New() *Worker {
-	return &Worker{command: "opencode"}
+	return NewWithOptions(Options{Command: "opencode"})
 }
 
 func NewWithCommand(command string) *Worker {
-	command = strings.TrimSpace(command)
+	return NewWithOptions(Options{Command: command})
+}
+
+func NewWithOptions(opts Options) *Worker {
+	command := strings.TrimSpace(opts.Command)
 	if command == "" {
 		command = "opencode"
 	}
-	return &Worker{command: command}
+	return &Worker{
+		command:      command,
+		modelProfile: strings.TrimSpace(opts.ModelProfile),
+		provider:     strings.TrimSpace(opts.Provider),
+		model:        strings.TrimSpace(opts.Model),
+		modelArg:     strings.TrimSpace(opts.ModelArg),
+	}
 }
 
 func (w *Worker) DryRun(ctx context.Context, spec workers.RunSpec) (*workers.WorkerEvent, error) {
@@ -61,6 +83,15 @@ func (w *Worker) Run(ctx context.Context, spec workers.RunSpec) (*workers.RunRes
 	stdoutBytes := stdout.Bytes()
 	stderrBytes := []byte(stderr.String())
 	stdoutAnalysis := analyzeStdout(stdoutBytes, plan.Command, plan.Workspace)
+	metadata := map[string]string{
+		"opencode.stdout_format":  stdoutAnalysis.Format,
+		"opencode.parsed_events":  strconv.Itoa(stdoutAnalysis.ParsedEvents),
+		"opencode.parse_warnings": strconv.Itoa(len(stdoutAnalysis.ParseWarnings)),
+	}
+	for key, value := range w.modelMetadata() {
+		metadata[key] = value
+	}
+
 	result := &workers.RunResult{
 		Worker:    "opencode",
 		Command:   plan.Command,
@@ -69,11 +100,7 @@ func (w *Worker) Run(ctx context.Context, spec workers.RunSpec) (*workers.RunRes
 		Events:    stdoutAnalysis.Events,
 		Artifacts: append(stdoutAnalysis.Artifacts, artifacts.Artifact{Path: "stderr.log", Kind: artifacts.KindLog, Content: stderrBytes}),
 		Stderr:    string(stderrBytes),
-		Metadata: map[string]string{
-			"opencode.stdout_format":  stdoutAnalysis.Format,
-			"opencode.parsed_events":  strconv.Itoa(stdoutAnalysis.ParsedEvents),
-			"opencode.parse_warnings": strconv.Itoa(len(stdoutAnalysis.ParseWarnings)),
-		},
+		Metadata:  metadata,
 	}
 	if runErr != nil {
 		return result, fmt.Errorf("opencode command failed: %w", runErr)
@@ -102,7 +129,11 @@ func (w *Worker) plan(ctx context.Context, spec workers.RunSpec) (*workers.Worke
 		return nil, errors.New("workspace is required")
 	}
 
-	command := []string{w.command, "run", "--dir", workspace, "--format", "json", "<prompt>"}
+	command := []string{w.command, "run", "--dir", workspace, "--format", "json"}
+	if w.modelArg != "" {
+		command = append(command, "--model", w.modelArg)
+	}
+	command = append(command, "<prompt>")
 	return &workers.WorkerEvent{
 		Type:      workers.EventDryRunPlanned,
 		Worker:    "opencode",
@@ -110,6 +141,23 @@ func (w *Worker) plan(ctx context.Context, spec workers.RunSpec) (*workers.Worke
 		Workspace: workspace,
 		Sandbox:   policy,
 	}, nil
+}
+
+func (w *Worker) modelMetadata() map[string]string {
+	metadata := map[string]string{}
+	if w.modelProfile != "" {
+		metadata["model_profile"] = w.modelProfile
+	}
+	if w.provider != "" {
+		metadata["provider"] = w.provider
+	}
+	if w.model != "" {
+		metadata["model"] = w.model
+	}
+	if w.modelArg != "" {
+		metadata["model_arg"] = w.modelArg
+	}
+	return metadata
 }
 
 func commandArgsWithPrompt(args []string, prompt string) []string {

@@ -63,6 +63,28 @@ func TestNewWithCommandUsesConfiguredCommand(t *testing.T) {
 	}
 }
 
+func TestDryRunAddsModelWhenConfigured(t *testing.T) {
+	worker := NewWithOptions(Options{
+		Command:      "/usr/local/bin/opencode",
+		ModelProfile: "opencode-zai-glm-5-1",
+		Provider:     "z-ai",
+		Model:        "glm-5.1",
+		ModelArg:     "z-ai/glm-5.1",
+	})
+	event, err := worker.DryRun(context.Background(), workers.RunSpec{
+		Task:      opencodeTaskWithMode("read_only"),
+		Workspace: ".",
+	})
+	if err != nil {
+		t.Fatalf("DryRun() error = %v", err)
+	}
+
+	wantCommand := []string{"/usr/local/bin/opencode", "run", "--dir", ".", "--format", "json", "--model", "z-ai/glm-5.1", "<prompt>"}
+	if !reflect.DeepEqual(event.Command, wantCommand) {
+		t.Fatalf("Command = %#v, want %#v", event.Command, wantCommand)
+	}
+}
+
 func TestDryRunBuildsWorkspaceWriteCommand(t *testing.T) {
 	worker := New()
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{

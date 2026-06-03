@@ -51,6 +51,43 @@ func TestRunCapturesPlainStdoutAndStderr(t *testing.T) {
 	}
 }
 
+func TestRunExecutesConfiguredModelAndKeepsPromptMaskedInResult(t *testing.T) {
+	argsPath := filepath.Join(t.TempDir(), "args.txt")
+	body := "printf '%s\\n' \"$*\" > " + shellQuote(argsPath) + "\nprintf '%s\\n' '{\"type\":\"done\"}'"
+	script := writeRawExecutableScript(t, body)
+	worker := NewWithOptions(Options{
+		Command:      script,
+		ModelProfile: "opencode-zai-glm-5-1",
+		Provider:     "z-ai",
+		Model:        "glm-5.1",
+		ModelArg:     "z-ai/glm-5.1",
+	})
+
+	result, err := worker.Run(context.Background(), workers.RunSpec{
+		Task:      &tasks.Task{Goal: "do not leak this prompt", Mode: "read_only"},
+		Workspace: t.TempDir(),
+	})
+	if err != nil {
+		t.Fatalf("Run() error = %v", err)
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	if !strings.Contains(string(args), "--model z-ai/glm-5.1") {
+		t.Fatalf("args = %q, want --model", args)
+	}
+	if got := strings.Join(result.Command, " "); !strings.Contains(got, "--model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("result command = %q, want masked model command", got)
+	}
+	if strings.Contains(strings.Join(result.Command, " "), "do not leak this prompt") {
+		t.Fatalf("result command leaked prompt: %#v", result.Command)
+	}
+	if result.Metadata["model_profile"] != "opencode-zai-glm-5-1" || result.Metadata["provider"] != "z-ai" || result.Metadata["model"] != "glm-5.1" || result.Metadata["model_arg"] != "z-ai/glm-5.1" {
+		t.Fatalf("metadata = %#v, want model profile metadata", result.Metadata)
+	}
+}
+
 func TestRunCapturesJSONLStdoutAsEvents(t *testing.T) {
 	script := writeExecutableScript(t, "printf '%s\\n' '{\"type\":\"message\",\"text\":\"ok\"}'")
 	result, err := (&Worker{command: script}).Run(context.Background(), workers.RunSpec{
@@ -191,4 +228,22 @@ func writeExecutableScript(t *testing.T, body string) string {
 		t.Fatalf("WriteFile(script) error = %v", err)
 	}
 	return path
+}
+
+func writeRawExecutableScript(t *testing.T, body string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "opencode-fake.sh")
+	content := strings.Join([]string{
+		"#!/bin/sh",
+		body,
+		"",
+	}, "\n")
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatalf("WriteFile(script) error = %v", err)
+	}
+	return path
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }

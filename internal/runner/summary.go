@@ -66,6 +66,7 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 
 func opencodeStdoutSummaryLines(result *workers.RunResult) []string {
 	metadata := result.Metadata
+	lines := modelProfileSummaryLines(metadata)
 	stdoutFormat := metadata["opencode.stdout_format"]
 	if stdoutFormat == "" {
 		stdoutFormat = "unknown"
@@ -78,11 +79,32 @@ func opencodeStdoutSummaryLines(result *workers.RunResult) []string {
 	if parseWarnings == "" {
 		parseWarnings = "0"
 	}
-	return []string{
+	lines = append(lines,
 		fmt.Sprintf("OpenCode stdout format: %s", stdoutFormat),
 		fmt.Sprintf("OpenCode parsed events: %s", parsedEvents),
 		fmt.Sprintf("OpenCode parse warnings: %s", parseWarnings),
+	)
+	return lines
+}
+
+func modelProfileSummaryLines(metadata map[string]string) []string {
+	if len(metadata) == 0 {
+		return nil
 	}
+	lines := []string{}
+	if value := metadata["model_profile"]; value != "" {
+		lines = append(lines, fmt.Sprintf("Model profile: %s", value))
+	}
+	if value := metadata["provider"]; value != "" {
+		lines = append(lines, fmt.Sprintf("Provider: %s", value))
+	}
+	if value := metadata["model"]; value != "" {
+		lines = append(lines, fmt.Sprintf("Model: %s", value))
+	}
+	if value := metadata["model_arg"]; value != "" {
+		lines = append(lines, fmt.Sprintf("Model arg: %s", value))
+	}
+	return lines
 }
 
 func appendSmallDetails(lines []string, label string, details []string) []string {

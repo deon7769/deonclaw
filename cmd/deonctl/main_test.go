@@ -2701,6 +2701,9 @@ func TestRunWorkerOpenCodeDryRunWarnsWhenRequiredEnvMissing(t *testing.T) {
 	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
 		t.Fatalf("stdout = %q, want planned command", stdout.String())
 	}
+	if strings.Contains(stdout.String(), "Do not execute") {
+		t.Fatalf("stdout = %q, want masked prompt", stdout.String())
+	}
 	if !strings.Contains(stderr.String(), "warning: worker opencode required env ZAI_API_KEY is missing") {
 		t.Fatalf("stderr = %q, want missing env warning", stderr.String())
 	}
@@ -2728,8 +2731,11 @@ model_profiles:
 	if code != 0 {
 		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
-		t.Fatalf("stdout = %q, want planned command", stdout.String())
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want planned command with model", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Do not execute") {
+		t.Fatalf("stdout = %q, want masked prompt", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "warning: worker opencode required env ZAI_API_KEY is missing") {
 		t.Fatalf("stderr = %q, want profile missing env warning", stderr.String())
@@ -2905,6 +2911,7 @@ model_profiles:
     worker: opencode
     provider: z-ai
     model: glm-5.1
+    model_arg: z-ai/glm-5.1
     env:
       ZAI_API_KEY: required
 `)
@@ -2936,8 +2943,9 @@ func TestRunWorkerOpenCodeRunWithProfileEnvPresentCallsOpenCodeRun(t *testing.T)
 	t.Setenv("ZAI_API_KEY", "dummy")
 
 	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "opencode-args")
 	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
 		t.Fatalf("WriteFile(fake opencode) error = %v", err)
 	}
 	configPath := writeCLIWorkersConfig(t, `workers:
@@ -2948,6 +2956,7 @@ model_profiles:
     worker: opencode
     provider: z-ai
     model: glm-5.1
+    model_arg: z-ai/glm-5.1
     env:
       ZAI_API_KEY: required
 `)
@@ -2963,6 +2972,25 @@ model_profiles:
 	if !strings.Contains(stdout.String(), "run_id: run-cli-opencode-config-001") {
 		t.Fatalf("stdout = %q, want configured opencode run id", stdout.String())
 	}
+	if !strings.Contains(stdout.String(), "command: "+fakeOpenCode+" run --dir ") || !strings.Contains(stdout.String(), "--format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want masked command with --model", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "Do not execute") {
+		t.Fatalf("stdout = %q, want masked prompt", stdout.String())
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	if !strings.Contains(string(args), "--model z-ai/glm-5.1") {
+		t.Fatalf("opencode args = %q, want --model", args)
+	}
+	runDir := filepath.Join(artifactsDir, "run-cli-opencode-config-001")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "# opencode run run-cli-opencode-config-001")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model profile: opencode-zai-glm-5-1")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Provider: z-ai")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model: glm-5.1")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model arg: z-ai/glm-5.1")
 	if strings.Contains(stdout.String()+stderr.String(), "dummy") {
 		t.Fatalf("output leaked env value: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
@@ -3050,6 +3078,7 @@ model_profiles:
     worker: opencode
     provider: z-ai
     model: glm-5.1
+    model_arg: z-ai/glm-5.1
     env:
       ZAI_API_KEY: required
 `)
@@ -3076,6 +3105,9 @@ model_profiles:
 	output := stdout.String()
 	if !strings.Contains(output, "env_required_ok: false") || !strings.Contains(output, "status: dry_run") {
 		t.Fatalf("stdout = %q, want dry-run env_missing summary", output)
+	}
+	if !strings.Contains(output, "command: /usr/local/bin/opencode run --dir . --format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want smoke command with --model", output)
 	}
 	assertNoSecretReference(t, stdout.String()+stderr.String())
 }

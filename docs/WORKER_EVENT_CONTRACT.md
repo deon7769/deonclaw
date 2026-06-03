@@ -139,12 +139,28 @@ OpenCode adds worker metadata to RunResult.Metadata:
 - opencode.stdout_format
 - opencode.parsed_events
 - opencode.parse_warnings
+- model_profile, when the task selected one
+- provider, when the selected profile defines it
+- model, when the selected profile defines it
+- model_arg, when the selected profile defines it
 
 The shared summary renders these as:
 
+- Model profile: profile name
+- Provider: provider id
+- Model: model id
+- Model arg: OpenCode --model argument
 - OpenCode stdout format: jsonl|mixed|text|empty
 - OpenCode parsed events: N
 - OpenCode parse warnings: N
+
+When `model_arg` is set for an OpenCode model profile, the command is:
+
+~~~bash
+opencode run --dir <workspace> --format json --model <model_arg> "<prompt>"
+~~~
+
+The prompt remains masked as `<prompt>` in dry-run output, RunResult.Command, summaries, and artifacts.
 
 ## Run Failure Rules
 

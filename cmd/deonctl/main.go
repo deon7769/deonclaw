@@ -2057,11 +2057,11 @@ func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Write
 	if opts.dryRun {
 		return runWorkersSmokeOpenCodeDryRun(opts, task, summary, stdout, stderr)
 	}
-	return runWorkersSmokeOpenCodeRun(opts, summary, stdout, stderr)
+	return runWorkersSmokeOpenCodeRun(opts, task, summary, stdout, stderr)
 }
 
 func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
-	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+	worker, err := configuredOpenCodeWorkerForTask(opts.workersConfigPath, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -2088,8 +2088,8 @@ func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, s
 	return 0
 }
 
-func runWorkersSmokeOpenCodeRun(opts workersSmokeOptions, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
-	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+func runWorkersSmokeOpenCodeRun(opts workersSmokeOptions, task *tasks.Task, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
+	worker, err := configuredOpenCodeWorkerForTask(opts.workersConfigPath, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -2288,7 +2288,7 @@ func runOpenCodeDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Wri
 	}
 	writeMissingEnvWarnings(stderr, "opencode", envRequirements)
 
-	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+	worker, err := configuredOpenCodeWorkerForTask(opts.workersConfigPath, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -2483,7 +2483,7 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		return 1
 	}
 
-	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
+	worker, err := configuredOpenCodeWorkerForTask(opts.workersConfigPath, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -2526,6 +2526,29 @@ func configuredOpenCodeWorker(workersConfigPath string) (workers.Worker, error) 
 		return nil, err
 	}
 	return opencode.NewWithCommand(workerConfig.Command), nil
+}
+
+func configuredOpenCodeWorkerForTask(workersConfigPath string, task *tasks.Task) (workers.Worker, error) {
+	if strings.TrimSpace(workersConfigPath) == "" && (task == nil || strings.TrimSpace(task.ModelProfile) == "") {
+		return opencodeWorkerFactory(), nil
+	}
+	cfg, err := configuredWorkersConfig(workersConfigPath)
+	if err != nil {
+		return nil, err
+	}
+	workerConfig := cfg.Worker("opencode")
+	opts := opencode.Options{Command: workerConfig.Command}
+	if task != nil && strings.TrimSpace(task.ModelProfile) != "" {
+		profile, err := cfg.ResolveModelProfile("opencode", task.ModelProfile)
+		if err != nil {
+			return nil, err
+		}
+		opts.ModelProfile = task.ModelProfile
+		opts.Provider = profile.Provider
+		opts.Model = profile.Model
+		opts.ModelArg = profile.ModelArg
+	}
+	return opencode.NewWithOptions(opts), nil
 }
 
 func configuredWorkerDefinition(workersConfigPath string, worker string) (workerconfig.Worker, error) {

@@ -2,7 +2,7 @@
 
 DeonClaw loads worker command settings from `workers.yaml` when commands receive `--workers-config`.
 
-The current config is command-first. Provider metadata can be recorded for diagnostics and future routing, but the OpenCode run contract does not consume provider or model fields yet.
+The current config is command-first. Provider metadata can be recorded for diagnostics and future routing. When an OpenCode task selects a model profile with `model_arg`, DeonClaw passes that value as `--model <model_arg>` to OpenCode.
 
 ## Fields
 
@@ -70,7 +70,8 @@ Resolver rules:
 - If `model_profile` is set, the profile must exist in `workers.yaml`.
 - `model_profiles.<name>.worker` must match the task `worker`.
 - Profile `env` requirements are validated together with worker-level `env` requirements.
-- `model_arg` is diagnostic metadata for now. It is not injected into the real worker command yet.
+- For OpenCode, `model_arg` becomes `--model <model_arg>` in dry-run and run commands.
+- If `model_arg` is empty, DeonClaw keeps the existing worker command.
 
 Doctor can list profiles when requested:
 
@@ -169,7 +170,15 @@ If a command is missing, DeonClaw keeps the built-in fallback:
 
 Provider and model are diagnostic config only in the current task. They are not injected into worker command arguments and they do not trigger a real provider call.
 
-Model profiles are also diagnostic and validation metadata in the current contract. DeonClaw resolves them, checks worker/profile compatibility, and validates required env presence, but it does not alter the real command with `model_arg` yet.
+Model profiles are diagnostic and validation metadata plus OpenCode model selection. DeonClaw resolves them, checks worker/profile compatibility, validates required env presence, and passes `model_arg` as `--model` only for OpenCode.
+
+OpenCode with a selected model profile that defines `model_arg` runs through:
+
+~~~bash
+opencode run --dir <workspace> --format json --model <model_arg> "<prompt>"
+~~~
+
+Dry-runs, summaries, and artifacts keep the prompt masked as `<prompt>`.
 
 Environment requirements are validation metadata only. DeonClaw does not inject env values into worker command arguments.
 
