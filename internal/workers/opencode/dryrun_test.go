@@ -20,7 +20,7 @@ func TestDryRunBuildsReadOnlyCommand(t *testing.T) {
 		t.Fatalf("DryRun() error = %v", err)
 	}
 
-	wantCommand := []string{"opencode", "run", "--cwd", ".", "-"}
+	wantCommand := []string{"opencode", "run", "--dir", ".", "--format", "json", "<prompt>"}
 	if !reflect.DeepEqual(event.Command, wantCommand) {
 		t.Fatalf("Command = %#v, want %#v", event.Command, wantCommand)
 	}
@@ -73,7 +73,7 @@ func TestDryRunBuildsWorkspaceWriteCommand(t *testing.T) {
 		t.Fatalf("DryRun() error = %v", err)
 	}
 
-	wantCommand := []string{"opencode", "run", "--cwd", "workspaces/run-001", "-"}
+	wantCommand := []string{"opencode", "run", "--dir", "workspaces/run-001", "--format", "json", "<prompt>"}
 	if !reflect.DeepEqual(event.Command, wantCommand) {
 		t.Fatalf("Command = %#v, want %#v", event.Command, wantCommand)
 	}

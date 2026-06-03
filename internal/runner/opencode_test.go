@@ -38,7 +38,7 @@ func TestOpenCodeRunnerRunUsesCommonHarnessAndPersistsArtifacts(t *testing.T) {
 					return &workers.RunResult{
 						Worker:    "opencode",
 						Workspace: spec.Workspace,
-						Command:   []string{"opencode", "run", "--cwd", spec.Workspace, "-"},
+						Command:   []string{"opencode", "run", "--dir", spec.Workspace, "--format", "json", "<prompt>"},
 						Events: []workers.WorkerEvent{
 							{Type: "message", Worker: "opencode", Payload: []byte("{\"type\":\"message\",\"text\":\"ok\"}")},
 						},
@@ -95,7 +95,7 @@ func TestOpenCodeRunnerRunUsesCommonHarnessAndPersistsArtifacts(t *testing.T) {
 	if !cleanupCalled {
 		t.Fatal("workspace cleanup was not called for succeeded run")
 	}
-	if !strings.Contains(stdout.String(), "command: opencode run --cwd "+wantWorkspace+" -") {
+	if !strings.Contains(stdout.String(), "command: opencode run --dir "+wantWorkspace+" --format json <prompt>") {
 		t.Fatalf("stdout = %q, want opencode command", stdout.String())
 	}
 
@@ -137,7 +137,7 @@ func TestOpenCodeRunnerRunWithoutDomainsKeepsPromptUnset(t *testing.T) {
 					return &workers.RunResult{
 						Worker:    "opencode",
 						Workspace: spec.Workspace,
-						Command:   []string{"opencode", "run", "--cwd", spec.Workspace, "-"},
+						Command:   []string{"opencode", "run", "--dir", spec.Workspace, "--format", "json", "<prompt>"},
 					}, nil
 				},
 			}
@@ -187,7 +187,7 @@ func TestOpenCodeRunnerRunWithGeneralContextPack(t *testing.T) {
 					return &workers.RunResult{
 						Worker:    "opencode",
 						Workspace: spec.Workspace,
-						Command:   []string{"opencode", "run", "--cwd", spec.Workspace, "-"},
+						Command:   []string{"opencode", "run", "--dir", spec.Workspace, "--format", "json", "<prompt>"},
 					}, nil
 				},
 			}
@@ -237,7 +237,7 @@ func TestOpenCodeRunnerRunMemoryProposalLintOK(t *testing.T) {
 				runResult: &workers.RunResult{
 					Worker:    "opencode",
 					Workspace: ".",
-					Command:   []string{"opencode", "run", "--cwd", ".", "-"},
+					Command:   []string{"opencode", "run", "--dir", ".", "--format", "json", "<prompt>"},
 					Artifacts: []artifacts.Artifact{
 						{Path: "artifacts/memory-proposal.json", Kind: artifacts.KindOther, Content: proposalJSON},
 					},

@@ -105,7 +105,7 @@ Expected dry-run behavior:
 
 - prints the workspace
 - prints the policy
-- prints a command shaped like `opencode run --cwd . -`
+- prints a command shaped like `opencode run --dir . --format json <prompt>`
 - if `ZAI_API_KEY` is missing, prints a warning but does not fail
 - `workers smoke --dry-run` does not print required env names in the warning
 
@@ -152,11 +152,13 @@ The smoke summary includes:
 - `artifacts_dir`, when a harness run produced artifacts
 - `status`
 
-DeonClaw still uses the existing OpenCode command contract:
+DeonClaw uses the current non-interactive OpenCode CLI contract:
 
 ~~~bash
-opencode run --cwd <workspace> -
+opencode run --dir <workspace> --format json "<prompt>"
 ~~~
+
+Smoke output reports the prompt argument as `<prompt>` so task text is not echoed in DeonClaw output.
 
 ## Expected Artifacts
 

@@ -103,11 +103,13 @@ Provider and model are diagnostic config only in the current task. They are not 
 
 Environment requirements are validation metadata only. DeonClaw does not inject env values into worker command arguments.
 
-OpenCode still runs through the existing command contract:
+OpenCode runs through the current non-interactive OpenCode CLI contract:
 
 ~~~bash
-opencode run --cwd <workspace> -
+opencode run --dir <workspace> --format json "<prompt>"
 ~~~
+
+DeonClaw reports the prompt argument as `<prompt>` in dry-runs, summaries, and artifacts so task text is not echoed in DeonClaw output.
 
 ## Kimi Inspiration
 

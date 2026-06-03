@@ -49,9 +49,8 @@ func (w *Worker) Run(ctx context.Context, spec workers.RunSpec) (*workers.RunRes
 		return nil, err
 	}
 
-	cmd := exec.CommandContext(ctx, plan.Command[0], plan.Command[1:]...)
+	cmd := exec.CommandContext(ctx, plan.Command[0], commandArgsWithPrompt(plan.Command[1:], workerPrompt(spec))...)
 	cmd.Dir = plan.Workspace
-	cmd.Stdin = strings.NewReader(workerPrompt(spec))
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -103,7 +102,7 @@ func (w *Worker) plan(ctx context.Context, spec workers.RunSpec) (*workers.Worke
 		return nil, errors.New("workspace is required")
 	}
 
-	command := []string{w.command, "run", "--cwd", workspace, "-"}
+	command := []string{w.command, "run", "--dir", workspace, "--format", "json", "<prompt>"}
 	return &workers.WorkerEvent{
 		Type:      workers.EventDryRunPlanned,
 		Worker:    "opencode",
@@ -111,6 +110,19 @@ func (w *Worker) plan(ctx context.Context, spec workers.RunSpec) (*workers.Worke
 		Workspace: workspace,
 		Sandbox:   policy,
 	}, nil
+}
+
+func commandArgsWithPrompt(args []string, prompt string) []string {
+	if len(args) == 0 {
+		return nil
+	}
+	commandArgs := append([]string(nil), args...)
+	for i, arg := range commandArgs {
+		if arg == "<prompt>" {
+			commandArgs[i] = prompt
+		}
+	}
+	return commandArgs
 }
 
 func policyForMode(mode string) (string, error) {

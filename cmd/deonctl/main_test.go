@@ -315,7 +315,7 @@ func TestRunContextBuild(t *testing.T) {
 func TestRunWorkerOpenCodeRun(t *testing.T) {
 	restore := overrideOpenCodeRunDeps(t, &workers.RunResult{
 		Worker:    "opencode",
-		Command:   []string{"opencode", "run", "--cwd", "workspace", "-"},
+		Command:   []string{"opencode", "run", "--dir", "workspace", "--format", "json", "<prompt>"},
 		Events:    []workers.WorkerEvent{{Type: "message", Worker: "opencode", Payload: []byte("{\"type\":\"message\",\"text\":\"ok\"}")}},
 		Artifacts: []artifacts.Artifact{{Path: "stdout.log", Kind: artifacts.KindLog, Content: []byte("opencode stdout\n")}},
 		Stderr:    "opencode stderr\n",
@@ -2601,7 +2601,7 @@ func TestRunWorkerOpenCodeDryRun(t *testing.T) {
 	if !strings.Contains(output, "policy: read-only") {
 		t.Fatalf("stdout = %q, want policy", output)
 	}
-	if !strings.Contains(output, "command: opencode run --cwd . -") {
+	if !strings.Contains(output, "command: opencode run --dir . --format json <prompt>") {
 		t.Fatalf("stdout = %q, want planned command", output)
 	}
 }
@@ -2634,7 +2634,7 @@ func TestRunWorkerOpenCodeDryRunUsesWorkersConfig(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --cwd . -") {
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
 		t.Fatalf("stdout = %q, want configured opencode command", stdout.String())
 	}
 }
@@ -2655,7 +2655,7 @@ func TestRunWorkerOpenCodeDryRunWarnsWhenRequiredEnvMissing(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --cwd . -") {
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
 		t.Fatalf("stdout = %q, want planned command", stdout.String())
 	}
 	if !strings.Contains(stderr.String(), "warning: worker opencode required env ZAI_API_KEY is missing") {
@@ -2826,7 +2826,7 @@ func TestRunWorkersSmokeDryRunWithMissingEnvWarnsAndDoesNotFail(t *testing.T) {
 	if !strings.Contains(output, "env_required_ok: false") {
 		t.Fatalf("stdout = %q, want env_required_ok false", output)
 	}
-	if !strings.Contains(output, "command: /usr/local/bin/opencode run --cwd . -") {
+	if !strings.Contains(output, "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
 		t.Fatalf("stdout = %q, want planned command", output)
 	}
 	if !strings.Contains(output, "status: dry_run") {
