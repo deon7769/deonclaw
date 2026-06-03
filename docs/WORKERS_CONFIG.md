@@ -23,7 +23,62 @@ workers:
     model: glm-5.1
     env:
       ZAI_API_KEY: required
+
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+      - general
 ~~~
+
+## Model Profiles
+
+`model_profiles` define reusable model metadata and env requirements for a worker. A task can opt into a profile with `model_profile`.
+
+Example:
+
+~~~yaml
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+      - general
+~~~
+
+Task example:
+
+~~~yaml
+worker: opencode
+model_profile: opencode-zai-glm-5-1
+~~~
+
+Resolver rules:
+
+- If `model_profile` is empty, DeonClaw keeps the existing worker behavior.
+- If `model_profile` is set, the profile must exist in `workers.yaml`.
+- `model_profiles.<name>.worker` must match the task `worker`.
+- Profile `env` requirements are validated together with worker-level `env` requirements.
+- `model_arg` is diagnostic metadata for now. It is not injected into the real worker command yet.
+
+Doctor can list profiles when requested:
+
+~~~bash
+deonctl workers doctor --worker opencode --workers-config configs/examples/workers.yaml --profiles
+~~~
+
+Profile entries include provider, model, model_arg, tags, and env requirement states. Secrets are never printed.
 
 ## Z.ai / GLM Example
 
@@ -37,6 +92,18 @@ workers:
     model: glm-5.1
     env:
       ZAI_API_KEY: required
+
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+      - general
 ~~~
 
 `ZAI_API_KEY` must come from the process environment or a separate secret manager. Do not put real secret values in `workers.yaml`.
@@ -76,6 +143,7 @@ Run behavior:
 
 - `worker codex run` fails before worker execution when a configured `required` env is missing.
 - `worker opencode run` fails before worker execution when a configured `required` env is missing.
+- Worker runs also fail before execution when the selected task `model_profile` has a missing `required` env.
 - dry-run commands do not fail for missing required env; they print a warning so command planning remains usable.
 
 Secrets must come from the process environment or an external secret manager. Never put actual secret values in `workers.yaml`.
@@ -100,6 +168,8 @@ If a command is missing, DeonClaw keeps the built-in fallback:
 ## Runtime Boundaries
 
 Provider and model are diagnostic config only in the current task. They are not injected into worker command arguments and they do not trigger a real provider call.
+
+Model profiles are also diagnostic and validation metadata in the current contract. DeonClaw resolves them, checks worker/profile compatibility, and validates required env presence, but it does not alter the real command with `model_arg` yet.
 
 Environment requirements are validation metadata only. DeonClaw does not inject env values into worker command arguments.
 

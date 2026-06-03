@@ -30,6 +30,7 @@ func normalize(task *Task) {
 	task.Title = strings.TrimSpace(task.Title)
 	task.Domain = strings.TrimSpace(task.Domain)
 	task.Worker = strings.TrimSpace(task.Worker)
+	task.ModelProfile = strings.TrimSpace(task.ModelProfile)
 	task.Goal = strings.TrimSpace(task.Goal)
 	task.Mode = strings.TrimSpace(task.Mode)
 	task.Workspace.Strategy = strings.TrimSpace(task.Workspace.Strategy)

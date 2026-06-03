@@ -74,6 +74,38 @@ definition_of_done:
 	}
 }
 
+func TestParseModelProfile(t *testing.T) {
+	task, err := Parse([]byte(`id: profile-task-001
+title: Profile task
+domain: general
+worker: opencode
+model_profile: " opencode-zai-glm-5-1 "
+goal: Run with model profile
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - profile parsed
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if task.ModelProfile != "opencode-zai-glm-5-1" {
+		t.Fatalf("ModelProfile = %q, want opencode-zai-glm-5-1", task.ModelProfile)
+	}
+	if err := Validate(task); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestLoadCodexSmokeExample(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "examples", "tasks", "codex-smoke.yaml")
 	if _, err := os.Stat(path); err != nil {

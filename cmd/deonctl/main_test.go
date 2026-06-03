@@ -190,6 +190,49 @@ func TestRunWorkersDoctorJSONReportsSetMaskedRequiredEnv(t *testing.T) {
 	}
 }
 
+func TestRunWorkersDoctorJSONListsModelProfilesWhenRequested(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	workersConfigPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+      - general
+`)
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"workers", "doctor", "--worker", "opencode", "--workers-config", workersConfigPath, "--profiles", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	var decoded struct {
+		ModelProfiles []struct {
+			Name          string   `json:"name"`
+			Worker        string   `json:"worker"`
+			Provider      string   `json:"provider"`
+			Model         string   `json:"model"`
+			ModelArg      string   `json:"model_arg"`
+			Tags          []string `json:"tags"`
+			EnvRequiredOK bool     `json:"env_required_ok"`
+		} `json:"model_profiles"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if len(decoded.ModelProfiles) != 1 || decoded.ModelProfiles[0].Name != "opencode-zai-glm-5-1" || decoded.ModelProfiles[0].Worker != "opencode" || decoded.ModelProfiles[0].Provider != "z-ai" || decoded.ModelProfiles[0].Model != "glm-5.1" || decoded.ModelProfiles[0].ModelArg != "z-ai/glm-5.1" || decoded.ModelProfiles[0].EnvRequiredOK {
+		t.Fatalf("model_profiles = %#v, want missing opencode z-ai profile", decoded.ModelProfiles)
+	}
+}
+
 func TestRunConfigEnvMasksSecrets(t *testing.T) {
 	t.Setenv("OPENAI_API_KEY", "sk-real-secret")
 	t.Setenv("ZAI_API_KEY", "zai-real-secret")
@@ -2663,6 +2706,83 @@ func TestRunWorkerOpenCodeDryRunWarnsWhenRequiredEnvMissing(t *testing.T) {
 	}
 }
 
+func TestRunWorkerOpenCodeDryRunWarnsWhenProfileRequiredEnvMissing(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFileWithModelProfile(t, "opencode", "opencode-zai-glm-5-1")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
+		t.Fatalf("stdout = %q, want planned command", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: worker opencode required env ZAI_API_KEY is missing") {
+		t.Fatalf("stderr = %q, want profile missing env warning", stderr.String())
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunRejectsMissingModelProfile(t *testing.T) {
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+`)
+	taskPath := writeTaskFileWithModelProfile(t, "opencode", "opencode-zai-glm-5-1")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `model profile "opencode-zai-glm-5-1" not found`) {
+		t.Fatalf("stderr = %q, want missing model profile error", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "command:") {
+		t.Fatalf("stdout = %q, want no command", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunRejectsModelProfileWorkerMismatch(t *testing.T) {
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  codex-profile:
+    worker: codex
+    provider: openai
+    model: gpt-5
+`)
+	taskPath := writeTaskFileWithModelProfile(t, "opencode", "codex-profile")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `model profile "codex-profile" worker "codex" does not match task worker "opencode"`) {
+		t.Fatalf("stderr = %q, want worker mismatch error", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "command:") {
+		t.Fatalf("stdout = %q, want no command", stdout.String())
+	}
+}
+
 func TestRunWorkerCodexDryRunUsesWorkersConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "workers.yaml")
@@ -2766,6 +2886,88 @@ func TestRunWorkerOpenCodeRunFailsBeforeWorkerWhenRequiredEnvMissing(t *testing.
 	}
 }
 
+func TestRunWorkerOpenCodeRunFailsBeforeWorkerWhenProfileRequiredEnvMissing(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+	unsetEnvForTest(t, "ZAI_API_KEY")
+
+	tempDir := t.TempDir()
+	markerPath := filepath.Join(tempDir, "worker-executed")
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`)
+
+	taskPath := writeTaskFileWithModelProfile(t, "opencode", "opencode-zai-glm-5-1")
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", storePath, "--artifacts-dir", artifactsDir, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "worker opencode missing required env: ZAI_API_KEY") {
+		t.Fatalf("stderr = %q, want missing profile env error", stderr.String())
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("worker marker exists or stat failed: %v", err)
+	}
+	if strings.Contains(stdout.String(), "run_id:") {
+		t.Fatalf("stdout = %q, want no run output", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeRunWithProfileEnvPresentCallsOpenCodeRun(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+	t.Setenv("ZAI_API_KEY", "dummy")
+
+	tempDir := t.TempDir()
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFileWithModelProfile(t, "opencode", "opencode-zai-glm-5-1")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", filepath.Join(tempDir, "deonclaw.db"), "--artifacts-dir", artifactsDir, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "run_id: run-cli-opencode-config-001") {
+		t.Fatalf("stdout = %q, want configured opencode run id", stdout.String())
+	}
+	if strings.Contains(stdout.String()+stderr.String(), "dummy") {
+		t.Fatalf("output leaked env value: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
 func TestRunWorkerCodexRunFailsBeforeWorkerWhenRequiredEnvMissing(t *testing.T) {
 	unsetEnvForTest(t, "ZAI_API_KEY")
 	tempDir := t.TempDir()
@@ -2834,6 +3036,46 @@ func TestRunWorkersSmokeDryRunWithMissingEnvWarnsAndDoesNotFail(t *testing.T) {
 	}
 	if strings.Contains(output, "run_id:") {
 		t.Fatalf("stdout = %q, want no run_id for dry-run", output)
+	}
+	assertNoSecretReference(t, stdout.String()+stderr.String())
+}
+
+func TestRunWorkersSmokeDryRunWithProfileMissingEnvWarnsAndDoesNotFail(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    env:
+      ZAI_API_KEY: required
+`)
+	taskPath := writeTaskFileWithModelProfile(t, "opencode", "opencode-zai-glm-5-1")
+	tempDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts"),
+		"--workers-config", configPath,
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: worker opencode has missing required env") {
+		t.Fatalf("stderr = %q, want sanitized missing env warning", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "env_required_ok: false") || !strings.Contains(output, "status: dry_run") {
+		t.Fatalf("stdout = %q, want dry-run env_missing summary", output)
 	}
 	assertNoSecretReference(t, stdout.String()+stderr.String())
 }
@@ -3347,6 +3589,36 @@ definition_of_done:
   - command fails before worker execution
 `
 	path := filepath.Join(t.TempDir(), "task.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write task file: %v", err)
+	}
+	return path
+}
+
+func writeTaskFileWithModelProfile(t *testing.T, worker string, modelProfile string) string {
+	t.Helper()
+
+	content := `id: worker-profile-001
+title: "Worker profile"
+domain: general
+worker: ` + worker + `
+model_profile: ` + modelProfile + `
+goal: "Do not execute unless validation passes"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - command validates profile
+`
+	path := filepath.Join(t.TempDir(), "task-with-profile.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write task file: %v", err)
 	}

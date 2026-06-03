@@ -178,6 +178,72 @@ func TestWorkersDoctorReportsSetMaskedRequiredEnv(t *testing.T) {
 	}
 }
 
+func TestWorkersDoctorListsModelProfilesWhenRequested(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeDoctorWorkersConfig(t, `workers:
+  opencode:
+    command: opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+      - general
+`)
+
+	report, err := Build(Options{Worker: "opencode", WorkersConfigPath: configPath, IncludeProfiles: true})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(report.ModelProfiles) != 1 {
+		t.Fatalf("model_profiles = %#v, want one profile", report.ModelProfiles)
+	}
+	profile := report.ModelProfiles[0]
+	if profile.Name != "opencode-zai-glm-5-1" || profile.Worker != "opencode" || profile.Provider != "z-ai" || profile.Model != "glm-5.1" || profile.ModelArg != "z-ai/glm-5.1" {
+		t.Fatalf("profile = %#v, want opencode z-ai glm profile", profile)
+	}
+	if profile.EnvRequiredOK || len(profile.EnvRequirements) != 1 || profile.EnvRequirements[0].State != "missing" {
+		t.Fatalf("profile env = %#v env_ok=%t, want missing", profile.EnvRequirements, profile.EnvRequiredOK)
+	}
+
+	var textOut bytes.Buffer
+	if err := Write(report, OutputText, &textOut); err != nil {
+		t.Fatalf("Write(text) error = %v", err)
+	}
+	text := textOut.String()
+	if !strings.Contains(text, "model_profile opencode-zai-glm-5-1: worker=opencode env_required_ok=false provider=z-ai model=glm-5.1 model_arg=z-ai/glm-5.1 tags=coding,general") {
+		t.Fatalf("text output = %q, want model profile details", text)
+	}
+	if !strings.Contains(text, "model_profile opencode-zai-glm-5-1 env ZAI_API_KEY: requirement=required state=missing") {
+		t.Fatalf("text output = %q, want model profile env requirement", text)
+	}
+}
+
+func TestWorkersDoctorDoesNotListModelProfilesByDefault(t *testing.T) {
+	configPath := writeDoctorWorkersConfig(t, `workers:
+  opencode:
+    command: opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+`)
+
+	report, err := Build(Options{Worker: "opencode", WorkersConfigPath: configPath})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if len(report.ModelProfiles) != 0 {
+		t.Fatalf("model_profiles = %#v, want none by default", report.ModelProfiles)
+	}
+}
+
 func TestDoctorChecksStoreAndArtifactsPaths(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "store.db")

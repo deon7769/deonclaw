@@ -5,6 +5,7 @@ type Task struct {
 	Title            string         `yaml:"title" json:"title"`
 	Domain           string         `yaml:"domain" json:"domain"`
 	Worker           string         `yaml:"worker" json:"worker"`
+	ModelProfile     string         `yaml:"model_profile,omitempty" json:"model_profile,omitempty"`
 	Goal             string         `yaml:"goal" json:"goal"`
 	Mode             string         `yaml:"mode" json:"mode"`
 	Workspace        WorkspaceSpec  `yaml:"workspace" json:"workspace"`

@@ -7,3 +7,15 @@ workers:
     model: glm-5.1
     env:
       ZAI_API_KEY: required
+
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+      - general

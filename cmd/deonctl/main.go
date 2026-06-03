@@ -36,8 +36,8 @@ const usage = `deonctl - DeonClaw control CLI
 
 Usage:
   deonctl version
-  deonctl doctor [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
-  deonctl workers doctor [--worker codex|opencode] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>]
+  deonctl doctor [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>] [--profiles]
+  deonctl workers doctor [--worker codex|opencode] [--output-format text|json] [--store <path>] [--artifacts-dir <path>] [--workers-config <path>] [--profiles]
   deonctl workers smoke --worker opencode --task <task.yaml> --store <path> --artifacts-dir <path> --workers-config <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--dry-run]
   deonctl config env [--output-format text|json]
   deonctl task validate <path>
@@ -1838,6 +1838,7 @@ func runDomainsList(opts domainsOptions, stdout io.Writer, stderr io.Writer) int
 type doctorOptions struct {
 	outputFormat      string
 	worker            string
+	includeProfiles   bool
 	workersConfigPath string
 	storePath         string
 	artifactsDir      string
@@ -1859,6 +1860,8 @@ func parseDoctorOptions(args []string) (doctorOptions, error) {
 			}
 			opts.worker = args[i+1]
 			i++
+		case "--profiles":
+			opts.includeProfiles = true
 		case "--workers-config":
 			if i+1 >= len(args) {
 				return doctorOptions{}, fmt.Errorf("missing value for --workers-config")
@@ -1891,6 +1894,7 @@ func runDoctor(opts doctorOptions, stdout io.Writer, stderr io.Writer) int {
 	report, err := doctorpkg.Build(doctorpkg.Options{
 		OutputFormat:      doctorpkg.OutputFormat(opts.outputFormat),
 		Worker:            opts.worker,
+		IncludeProfiles:   opts.includeProfiles,
 		WorkersConfigPath: opts.workersConfigPath,
 		StorePath:         opts.storePath,
 		ArtifactsDir:      opts.artifactsDir,
@@ -2000,22 +2004,15 @@ func parseWorkersSmokeOptions(args []string) (workersSmokeOptions, error) {
 }
 
 func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Writer) int {
-	task, err := tasks.LoadFromFile(opts.taskPath)
+	task, err := loadValidatedWorkerTask(opts.taskPath, opts.worker)
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	if err := tasks.Validate(task); err != nil {
-		fmt.Fprintf(stderr, "validation failed: %v\n", err)
-		return 1
-	}
-	if err := ensureTaskWorker(task, opts.worker); err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		writeTaskLoadError(stderr, err)
 		return 1
 	}
 
 	report, err := doctorpkg.Build(doctorpkg.Options{
 		Worker:            opts.worker,
+		IncludeProfiles:   task.ModelProfile != "",
 		WorkersConfigPath: opts.workersConfigPath,
 		StorePath:         opts.storePath,
 		ArtifactsDir:      opts.artifactsDir,
@@ -2030,16 +2027,19 @@ func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Write
 		return 1
 	}
 
-	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, opts.worker)
+	workerConfig, envRequirements, err := configuredWorkerDefinitionForTask(opts.workersConfigPath, task, opts.worker)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	missingEnv := workerconfig.MissingRequiredEnv(workerConfig.EnvRequirementChecks())
+	missingEnv := workerconfig.MissingRequiredEnv(envRequirements)
 	summary := workersSmokeSummary{
 		worker:        opts.worker,
-		envRequiredOK: workerCheck.EnvRequiredOK,
-		command:       workerCheck.ConfiguredCommand,
+		envRequiredOK: len(missingEnv) == 0,
+		command:       workerConfig.Command,
+	}
+	if summary.command == "" {
+		summary.command = workerCheck.ConfiguredCommand
 	}
 	if len(missingEnv) > 0 {
 		if opts.dryRun {
@@ -2242,26 +2242,18 @@ func parseWorkerDryRunOptions(args []string) (workerDryRunOptions, error) {
 }
 
 func runCodexDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Writer) int {
-	task, err := tasks.LoadFromFile(opts.taskPath)
+	task, err := loadValidatedWorkerTask(opts.taskPath, "codex")
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	if err := tasks.Validate(task); err != nil {
-		fmt.Fprintf(stderr, "validation failed: %v\n", err)
-		return 1
-	}
-	if err := ensureTaskWorker(task, "codex"); err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		writeTaskLoadError(stderr, err)
 		return 1
 	}
 
-	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "codex")
+	_, envRequirements, err := configuredWorkerDefinitionForTask(opts.workersConfigPath, task, "codex")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	writeMissingEnvWarnings(stderr, "codex", workerConfig)
+	writeMissingEnvWarnings(stderr, "codex", envRequirements)
 
 	worker, err := configuredCodexWorker(opts.workersConfigPath)
 	if err != nil {
@@ -2283,26 +2275,18 @@ func runCodexDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Writer
 }
 
 func runOpenCodeDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Writer) int {
-	task, err := tasks.LoadFromFile(opts.taskPath)
+	task, err := loadValidatedWorkerTask(opts.taskPath, "opencode")
 	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
-	if err := tasks.Validate(task); err != nil {
-		fmt.Fprintf(stderr, "validation failed: %v\n", err)
-		return 1
-	}
-	if err := ensureTaskWorker(task, "opencode"); err != nil {
-		fmt.Fprintf(stderr, "%v\n", err)
+		writeTaskLoadError(stderr, err)
 		return 1
 	}
 
-	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "opencode")
+	_, envRequirements, err := configuredWorkerDefinitionForTask(opts.workersConfigPath, task, "opencode")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	writeMissingEnvWarnings(stderr, "opencode", workerConfig)
+	writeMissingEnvWarnings(stderr, "opencode", envRequirements)
 
 	worker, err := configuredOpenCodeWorker(opts.workersConfigPath)
 	if err != nil {
@@ -2385,12 +2369,17 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 }
 
 func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
-	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "codex")
+	task, err := loadValidatedWorkerTask(opts.taskPath, "codex")
+	if err != nil {
+		writeTaskLoadError(stderr, err)
+		return 1
+	}
+	_, envRequirements, err := configuredWorkerDefinitionForTask(opts.workersConfigPath, task, "codex")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := validateRequiredWorkerEnv("codex", workerConfig); err != nil {
+	if err := validateRequiredWorkerEnv("codex", envRequirements); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
@@ -2479,12 +2468,17 @@ func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
 }
 
 func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer) int {
-	workerConfig, err := configuredWorkerDefinition(opts.workersConfigPath, "opencode")
+	task, err := loadValidatedWorkerTask(opts.taskPath, "opencode")
+	if err != nil {
+		writeTaskLoadError(stderr, err)
+		return 1
+	}
+	_, envRequirements, err := configuredWorkerDefinitionForTask(opts.workersConfigPath, task, "opencode")
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	if err := validateRequiredWorkerEnv("opencode", workerConfig); err != nil {
+	if err := validateRequiredWorkerEnv("opencode", envRequirements); err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
@@ -2535,19 +2529,65 @@ func configuredOpenCodeWorker(workersConfigPath string) (workers.Worker, error) 
 }
 
 func configuredWorkerDefinition(workersConfigPath string, worker string) (workerconfig.Worker, error) {
-	cfg := workerconfig.Default()
-	if strings.TrimSpace(workersConfigPath) != "" {
-		loaded, err := workerconfig.Load(workersConfigPath)
-		if err != nil {
-			return workerconfig.Worker{}, err
-		}
-		cfg = loaded
+	cfg, err := configuredWorkersConfig(workersConfigPath)
+	if err != nil {
+		return workerconfig.Worker{}, err
 	}
 	return cfg.Worker(worker), nil
 }
 
-func validateRequiredWorkerEnv(worker string, workerConfig workerconfig.Worker) error {
-	missing := workerconfig.MissingRequiredEnv(workerConfig.EnvRequirementChecks())
+func configuredWorkerDefinitionForTask(workersConfigPath string, task *tasks.Task, worker string) (workerconfig.Worker, []workerconfig.EnvRequirementCheck, error) {
+	cfg, err := configuredWorkersConfig(workersConfigPath)
+	if err != nil {
+		return workerconfig.Worker{}, nil, err
+	}
+	profileName := ""
+	if task != nil {
+		profileName = task.ModelProfile
+	}
+	envRequirements, err := cfg.EnvRequirementChecksFor(worker, profileName)
+	if err != nil {
+		return workerconfig.Worker{}, nil, err
+	}
+	return cfg.Worker(worker), envRequirements, nil
+}
+
+func configuredWorkersConfig(workersConfigPath string) (workerconfig.Config, error) {
+	cfg := workerconfig.Default()
+	if strings.TrimSpace(workersConfigPath) != "" {
+		loaded, err := workerconfig.Load(workersConfigPath)
+		if err != nil {
+			return workerconfig.Config{}, err
+		}
+		cfg = loaded
+	}
+	return cfg, nil
+}
+
+func loadValidatedWorkerTask(taskPath string, worker string) (*tasks.Task, error) {
+	task, err := tasks.LoadFromFile(taskPath)
+	if err != nil {
+		return nil, err
+	}
+	if err := tasks.Validate(task); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+	if err := ensureTaskWorker(task, worker); err != nil {
+		return nil, err
+	}
+	return task, nil
+}
+
+func writeTaskLoadError(stderr io.Writer, err error) {
+	if strings.HasPrefix(err.Error(), "validation failed:") || strings.HasPrefix(err.Error(), "task worker ") {
+		fmt.Fprintf(stderr, "%v\n", err)
+		return
+	}
+	fmt.Fprintf(stderr, "error: %v\n", err)
+}
+
+func validateRequiredWorkerEnv(worker string, envRequirements []workerconfig.EnvRequirementCheck) error {
+	missing := workerconfig.MissingRequiredEnv(envRequirements)
 	if len(missing) == 0 {
 		return nil
 	}
@@ -2558,8 +2598,8 @@ func validateRequiredWorkerEnv(worker string, workerConfig workerconfig.Worker) 
 	return fmt.Errorf("worker %s missing required env: %s", worker, strings.Join(names, ", "))
 }
 
-func writeMissingEnvWarnings(stderr io.Writer, worker string, workerConfig workerconfig.Worker) {
-	for _, check := range workerconfig.MissingRequiredEnv(workerConfig.EnvRequirementChecks()) {
+func writeMissingEnvWarnings(stderr io.Writer, worker string, envRequirements []workerconfig.EnvRequirementCheck) {
+	for _, check := range workerconfig.MissingRequiredEnv(envRequirements) {
 		fmt.Fprintf(stderr, "warning: worker %s required env %s is missing\n", worker, check.Name)
 	}
 }

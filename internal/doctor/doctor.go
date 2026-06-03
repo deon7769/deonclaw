@@ -24,20 +24,22 @@ const (
 type Options struct {
 	OutputFormat      OutputFormat
 	Worker            string
+	IncludeProfiles   bool
 	WorkersConfigPath string
 	StorePath         string
 	ArtifactsDir      string
 }
 
 type Report struct {
-	Version      string        `json:"version"`
-	OS           string        `json:"os"`
-	Arch         string        `json:"arch"`
-	WorkingDir   string        `json:"working_dir"`
-	Git          ToolCheck     `json:"git"`
-	Workers      []WorkerCheck `json:"workers"`
-	StorePath    *PathCheck    `json:"store_path,omitempty"`
-	ArtifactsDir *PathCheck    `json:"artifacts_dir,omitempty"`
+	Version       string              `json:"version"`
+	OS            string              `json:"os"`
+	Arch          string              `json:"arch"`
+	WorkingDir    string              `json:"working_dir"`
+	Git           ToolCheck           `json:"git"`
+	Workers       []WorkerCheck       `json:"workers"`
+	ModelProfiles []ModelProfileCheck `json:"model_profiles,omitempty"`
+	StorePath     *PathCheck          `json:"store_path,omitempty"`
+	ArtifactsDir  *PathCheck          `json:"artifacts_dir,omitempty"`
 }
 
 type ToolCheck struct {
@@ -59,6 +61,17 @@ type WorkerCheck struct {
 	Path                 string                             `json:"path,omitempty"`
 	Error                string                             `json:"error,omitempty"`
 	CommandCheck         ToolCheck                          `json:"command_check"`
+}
+
+type ModelProfileCheck struct {
+	Name            string                             `json:"name"`
+	Worker          string                             `json:"worker"`
+	Provider        string                             `json:"provider,omitempty"`
+	Model           string                             `json:"model,omitempty"`
+	ModelArg        string                             `json:"model_arg,omitempty"`
+	Tags            []string                           `json:"tags,omitempty"`
+	EnvRequiredOK   bool                               `json:"env_required_ok"`
+	EnvRequirements []workerconfig.EnvRequirementCheck `json:"env_requirements,omitempty"`
 }
 
 type PathCheck struct {
@@ -103,6 +116,9 @@ func Build(opts Options) (Report, error) {
 		return Report{}, err
 	}
 	report.Workers = workerChecks
+	if opts.IncludeProfiles {
+		report.ModelProfiles = modelProfileChecks(workersConfig, opts.Worker)
+	}
 	if strings.TrimSpace(opts.StorePath) != "" {
 		check := checkWritableFile(opts.StorePath)
 		report.StorePath = &check
@@ -160,6 +176,39 @@ func Write(report Report, format OutputFormat, out io.Writer) error {
 			}
 			for _, envRequirement := range worker.EnvRequirements {
 				if _, err := fmt.Fprintf(out, "worker %s env %s: requirement=%s state=%s\n", worker.Name, envRequirement.Name, envRequirement.Requirement, envRequirement.State); err != nil {
+					return err
+				}
+			}
+		}
+		for _, profile := range report.ModelProfiles {
+			if _, err := fmt.Fprintf(out, "model_profile %s: worker=%s env_required_ok=%t", profile.Name, profile.Worker, profile.EnvRequiredOK); err != nil {
+				return err
+			}
+			if profile.Provider != "" {
+				if _, err := fmt.Fprintf(out, " provider=%s", profile.Provider); err != nil {
+					return err
+				}
+			}
+			if profile.Model != "" {
+				if _, err := fmt.Fprintf(out, " model=%s", profile.Model); err != nil {
+					return err
+				}
+			}
+			if profile.ModelArg != "" {
+				if _, err := fmt.Fprintf(out, " model_arg=%s", profile.ModelArg); err != nil {
+					return err
+				}
+			}
+			if len(profile.Tags) > 0 {
+				if _, err := fmt.Fprintf(out, " tags=%s", strings.Join(profile.Tags, ",")); err != nil {
+					return err
+				}
+			}
+			if _, err := fmt.Fprintln(out); err != nil {
+				return err
+			}
+			for _, envRequirement := range profile.EnvRequirements {
+				if _, err := fmt.Fprintf(out, "model_profile %s env %s: requirement=%s state=%s\n", profile.Name, envRequirement.Name, envRequirement.Requirement, envRequirement.State); err != nil {
 					return err
 				}
 			}
@@ -227,6 +276,35 @@ func workerChecks(cfg workerconfig.Config, workerFilter string) ([]WorkerCheck, 
 		})
 	}
 	return checks, nil
+}
+
+func modelProfileChecks(cfg workerconfig.Config, workerFilter string) []ModelProfileCheck {
+	workerFilter = strings.TrimSpace(workerFilter)
+	names := make([]string, 0, len(cfg.ModelProfiles))
+	for name := range cfg.ModelProfiles {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+
+	checks := make([]ModelProfileCheck, 0, len(names))
+	for _, name := range names {
+		profile := cfg.ModelProfiles[name]
+		if workerFilter != "" && profile.Worker != workerFilter {
+			continue
+		}
+		envRequirements := profile.EnvRequirementChecks()
+		checks = append(checks, ModelProfileCheck{
+			Name:            name,
+			Worker:          profile.Worker,
+			Provider:        profile.Provider,
+			Model:           profile.Model,
+			ModelArg:        profile.ModelArg,
+			Tags:            profile.Tags,
+			EnvRequiredOK:   len(workerconfig.MissingRequiredEnv(envRequirements)) == 0,
+			EnvRequirements: envRequirements,
+		})
+	}
+	return checks
 }
 
 func implementationStatus(worker string) string {

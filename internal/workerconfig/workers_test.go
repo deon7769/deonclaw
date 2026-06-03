@@ -80,6 +80,116 @@ func TestLoadWorkersConfigProviderModelEnv(t *testing.T) {
 	}
 }
 
+func TestLoadWorkersConfigModelProfiles(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "workers.yaml")
+	content := []byte(`workers:
+  opencode:
+    command: opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+      - general
+`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	profile, err := cfg.ResolveModelProfile("opencode", "opencode-zai-glm-5-1")
+	if err != nil {
+		t.Fatalf("ResolveModelProfile() error = %v", err)
+	}
+	if profile.Worker != "opencode" || profile.Provider != "z-ai" || profile.Model != "glm-5.1" || profile.ModelArg != "z-ai/glm-5.1" {
+		t.Fatalf("profile = %#v, want opencode z-ai glm-5.1", profile)
+	}
+	if len(profile.Tags) != 2 || profile.Tags[0] != "coding" || profile.Tags[1] != "general" {
+		t.Fatalf("tags = %#v, want coding/general", profile.Tags)
+	}
+	if got := profile.Env["ZAI_API_KEY"]; got != "required" {
+		t.Fatalf("profile ZAI_API_KEY marker = %q, want required", got)
+	}
+}
+
+func TestResolveModelProfileRejectsMissingAndWorkerMismatch(t *testing.T) {
+	cfg := Config{ModelProfiles: map[string]ModelProfile{
+		"opencode-zai-glm-5-1": {
+			Worker: "opencode",
+			Model:  "glm-5.1",
+		},
+	}}
+
+	if _, err := cfg.ResolveModelProfile("opencode", "missing-profile"); err == nil {
+		t.Fatal("ResolveModelProfile(missing) error = nil, want error")
+	}
+	if _, err := cfg.ResolveModelProfile("codex", "opencode-zai-glm-5-1"); err == nil {
+		t.Fatal("ResolveModelProfile(worker mismatch) error = nil, want error")
+	}
+	if _, err := cfg.ResolveModelProfile("opencode", ""); err != nil {
+		t.Fatalf("ResolveModelProfile(empty) error = %v, want nil", err)
+	}
+}
+
+func TestEnvRequirementChecksForMergesWorkerAndModelProfile(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	unsetEnvForTest(t, "OPENAI_API_KEY")
+	cfg := Config{
+		Workers: map[string]Worker{
+			"opencode": {Env: map[string]string{"OPENAI_API_KEY": "required"}},
+		},
+		ModelProfiles: map[string]ModelProfile{
+			"opencode-zai-glm-5-1": {
+				Worker: "opencode",
+				Env:    map[string]string{"ZAI_API_KEY": "required"},
+			},
+		},
+	}
+
+	checks, err := cfg.EnvRequirementChecksFor("opencode", "opencode-zai-glm-5-1")
+	if err != nil {
+		t.Fatalf("EnvRequirementChecksFor() error = %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("checks = %#v, want two merged checks", checks)
+	}
+	if checks[0].Name != "OPENAI_API_KEY" || checks[0].State != EnvStateMissing || checks[1].Name != "ZAI_API_KEY" || checks[1].State != EnvStateMissing {
+		t.Fatalf("checks = %#v, want sorted missing checks", checks)
+	}
+
+	t.Setenv("ZAI_API_KEY", "dummy")
+	checks, err = cfg.EnvRequirementChecksFor("opencode", "opencode-zai-glm-5-1")
+	if err != nil {
+		t.Fatalf("EnvRequirementChecksFor() error = %v", err)
+	}
+	if checks[1].Name != "ZAI_API_KEY" || checks[1].State != EnvStateSetMasked {
+		t.Fatalf("checks = %#v, want profile env set_masked", checks)
+	}
+}
+
+func TestEnvRequirementChecksForTaskWithoutProfileKeepsWorkerBehavior(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	cfg := Config{Workers: map[string]Worker{
+		"opencode": {Env: map[string]string{"ZAI_API_KEY": "required"}},
+	}}
+
+	checks, err := cfg.EnvRequirementChecksFor("opencode", "")
+	if err != nil {
+		t.Fatalf("EnvRequirementChecksFor() error = %v", err)
+	}
+	if len(checks) != 1 || checks[0].Name != "ZAI_API_KEY" || checks[0].State != EnvStateMissing {
+		t.Fatalf("checks = %#v, want worker env requirement", checks)
+	}
+}
+
 func TestEnvRequirementChecksReportMissingAndSetMasked(t *testing.T) {
 	unsetEnvForTest(t, "ZAI_API_KEY")
 	cfg := Config{Workers: map[string]Worker{
