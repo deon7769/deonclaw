@@ -55,7 +55,7 @@ Usage:
   deonctl memory proposal restore --backup-plan <path> --backup-result <path> --dry-run --output <path>
   deonctl memory proposal restore-execute --backup-plan <path> --backup-result <path> --restore-preview <path> --output <path> --confirm-restore
   deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
-  deonctl runs report --store <path> [--by model_profile] [--output-format text|json]
+  deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -2653,6 +2653,9 @@ func writeMissingEnvWarnings(stderr io.Writer, worker string, envRequirements []
 type runsReportOptions struct {
 	storePath    string
 	by           string
+	worker       string
+	status       runs.RunStatus
+	since        *time.Time
 	outputFormat string
 }
 
@@ -2671,6 +2674,32 @@ func parseRunsReportOptions(args []string) (runsReportOptions, error) {
 				return runsReportOptions{}, fmt.Errorf("missing value for --by")
 			}
 			opts.by = args[i+1]
+			i++
+		case "--worker":
+			if i+1 >= len(args) {
+				return runsReportOptions{}, fmt.Errorf("missing value for --worker")
+			}
+			opts.worker = args[i+1]
+			i++
+		case "--status":
+			if i+1 >= len(args) {
+				return runsReportOptions{}, fmt.Errorf("missing value for --status")
+			}
+			status, err := parseRunsReportStatus(args[i+1])
+			if err != nil {
+				return runsReportOptions{}, err
+			}
+			opts.status = status
+			i++
+		case "--since":
+			if i+1 >= len(args) {
+				return runsReportOptions{}, fmt.Errorf("missing value for --since")
+			}
+			since, err := parseRunsReportSince(args[i+1])
+			if err != nil {
+				return runsReportOptions{}, err
+			}
+			opts.since = &since
 			i++
 		case "--output-format":
 			if i+1 >= len(args) {
@@ -2694,6 +2723,26 @@ func parseRunsReportOptions(args []string) (runsReportOptions, error) {
 	return opts, nil
 }
 
+func parseRunsReportStatus(value string) (runs.RunStatus, error) {
+	switch runs.RunStatus(value) {
+	case runs.StatusSucceeded, runs.StatusFailed, runs.StatusPolicyFailed:
+		return runs.RunStatus(value), nil
+	default:
+		return "", fmt.Errorf("unsupported --status %q", value)
+	}
+}
+
+func parseRunsReportSince(value string) (time.Time, error) {
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed.UTC(), nil
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("invalid --since %q", value)
+	}
+	return parsed.UTC(), nil
+}
+
 func runRunsReport(opts runsReportOptions, stdout io.Writer, stderr io.Writer) int {
 	db, err := storepkg.OpenSQLite(opts.storePath)
 	if err != nil {
@@ -2702,7 +2751,12 @@ func runRunsReport(opts runsReportOptions, stdout io.Writer, stderr io.Writer) i
 	}
 	defer db.Close()
 
-	report, err := runreport.Build(context.Background(), db, runreport.Options{GroupBy: opts.by})
+	report, err := runreport.Build(context.Background(), db, runreport.Options{
+		GroupBy: opts.by,
+		Worker:  opts.worker,
+		Status:  opts.status,
+		Since:   opts.since,
+	})
 	if err != nil {
 		fmt.Fprintf(stderr, "runs report failed: %v\n", err)
 		return 1

@@ -3677,6 +3677,44 @@ func TestRunRunsReportJSONByModelProfile(t *testing.T) {
 	}
 }
 
+func TestRunRunsReportFilters(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	saveCLIRunsReportTask(t, ctx, db)
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	saveCLIRunsReportRun(t, ctx, db, "run-old", runs.StatusSucceeded, "opencode", base)
+	saveCLIRunsReportRun(t, ctx, db, "run-codex", runs.StatusSucceeded, "codex", base.Add(24*time.Hour))
+	saveCLIRunsReportRun(t, ctx, db, "run-failed", runs.StatusFailed, "opencode", base.Add(48*time.Hour))
+	saveCLIRunsReportRun(t, ctx, db, "run-want", runs.StatusSucceeded, "opencode", base.Add(72*time.Hour))
+	for _, runID := range []string{"run-old", "run-codex", "run-failed", "run-want"} {
+		saveCLIRunsReportTrace(t, ctx, db, tempDir, runID, "{\n  \"worker\": \"opencode\",\n  \"model_profile\": \"opencode-zai-glm-5-1\",\n  \"duration_ms\": 100,\n  \"parsed_events\": 1,\n  \"parse_warnings\": 0,\n  \"validation_status\": \"passed\",\n  \"changed_paths_count\": 1\n}")
+	}
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"runs", "report", "--store", storePath, "--by", "model_profile", "--worker", "opencode", "--status", "succeeded", "--since", "2026-06-03", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	var decoded struct {
+		TotalRuns int `json:"total_runs"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; stdout=%s", err, stdout.String())
+	}
+	if decoded.TotalRuns != 1 {
+		t.Fatalf("decoded.TotalRuns = %d, want 1", decoded.TotalRuns)
+	}
+}
+
 func TestParseArtifactPruneOptions(t *testing.T) {
 	opts, err := parseArtifactPruneOptions([]string{"--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--older-than", "30d", "--dry-run"})
 	if err != nil {

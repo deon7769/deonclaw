@@ -85,6 +85,63 @@ func TestBuildRunWithoutTraceDoesNotBreak(t *testing.T) {
 	}
 }
 
+func TestBuildSplitsTraceWithoutModelProfile(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	db, err := store.OpenSQLite(filepath.Join(tempDir, "deonclaw.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	saveReportTask(t, ctx, db)
+	createdAt := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	saveReportRun(t, ctx, db, "run-legacy", runs.StatusSucceeded, "codex", createdAt)
+	saveReportRun(t, ctx, db, "run-no-profile", runs.StatusSucceeded, "opencode", createdAt.Add(time.Second))
+	saveTraceArtifact(t, ctx, db, tempDir, "run-no-profile", "{\n  \"worker\": \"opencode\",\n  \"model_profile\": \"\",\n  \"duration_ms\": 100,\n  \"parsed_events\": 1,\n  \"parse_warnings\": 0,\n  \"validation_status\": \"passed\",\n  \"changed_paths_count\": 1\n}")
+
+	report, err := Build(ctx, db, Options{GroupBy: GroupByModelProfile})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	assertGroup(t, report.ByModelProfile, UnknownLegacyGroup, 1, 1, 0, 0, 0)
+	assertGroup(t, report.ByModelProfile, NoModelProfileGroup, 1, 1, 0, 0, 0)
+}
+
+func TestBuildFiltersWorkerStatusAndSince(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	db, err := store.OpenSQLite(filepath.Join(tempDir, "deonclaw.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	saveReportTask(t, ctx, db)
+	base := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
+	saveReportRun(t, ctx, db, "run-old", runs.StatusSucceeded, "opencode", base)
+	saveReportRun(t, ctx, db, "run-codex", runs.StatusSucceeded, "codex", base.Add(24*time.Hour))
+	saveReportRun(t, ctx, db, "run-failed", runs.StatusFailed, "opencode", base.Add(48*time.Hour))
+	saveReportRun(t, ctx, db, "run-want", runs.StatusSucceeded, "opencode", base.Add(72*time.Hour))
+	for _, runID := range []string{"run-old", "run-codex", "run-failed", "run-want"} {
+		saveTraceArtifact(t, ctx, db, tempDir, runID, "{\n  \"worker\": \"opencode\",\n  \"model_profile\": \"opencode-zai-glm-5-1\",\n  \"duration_ms\": 100,\n  \"parsed_events\": 1,\n  \"parse_warnings\": 0,\n  \"validation_status\": \"passed\",\n  \"changed_paths_count\": 1\n}")
+	}
+	since := base.Add(48 * time.Hour)
+
+	report, err := Build(ctx, db, Options{
+		GroupBy: GroupByModelProfile,
+		Worker:  "opencode",
+		Status:  runs.StatusSucceeded,
+		Since:   &since,
+	})
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	if report.TotalRuns != 1 || len(report.ByModelProfile) != 1 || report.ByModelProfile[0].Group != "opencode-zai-glm-5-1" {
+		t.Fatalf("report = %#v, want only filtered opencode succeeded run", report)
+	}
+}
+
 func TestWriteJSONValid(t *testing.T) {
 	var output bytes.Buffer
 	report := Report{TotalRuns: 1, Succeeded: 1, ByWorker: []GroupReport{{Group: "codex", TotalRuns: 1, Succeeded: 1}}}

@@ -113,7 +113,7 @@ The trace must not contain raw prompts or environment variable values. Environme
 
 Runs that predate `execution-trace.json` remain reportable as `unknown/legacy`. Legacy rows still contribute run status and worker counts, but trace-derived metrics stay unknown.
 
-`deonctl runs report --store <path> --by model_profile` adds model profile grouping. Missing profiles and missing traces are grouped as `unknown/legacy`.
+`deonctl runs report --store <path> --by model_profile --worker opencode --status succeeded --since 2026-06-03` adds model profile grouping and optional read-only filters. Runs without `execution-trace.json` are grouped as `unknown/legacy`; runs with a readable trace but an empty `model_profile` are grouped as `no_model_profile`.
 
 ## Stdout And Stderr
 

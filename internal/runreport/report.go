@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"text/tabwriter"
+	"time"
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/runs"
@@ -20,11 +21,15 @@ const (
 	GroupByNone         = ""
 	GroupByModelProfile = "model_profile"
 
-	UnknownLegacyGroup = "unknown/legacy"
+	UnknownLegacyGroup  = "unknown/legacy"
+	NoModelProfileGroup = "no_model_profile"
 )
 
 type Options struct {
 	GroupBy string
+	Worker  string
+	Status  runs.RunStatus
+	Since   *time.Time
 }
 
 type Report struct {
@@ -98,6 +103,16 @@ func Build(ctx context.Context, db store.Store, opts Options) (Report, error) {
 	profileGroups := map[string]*accumulator{}
 
 	for _, runRecord := range runRecords {
+		if opts.Worker != "" && runRecord.Worker != opts.Worker {
+			continue
+		}
+		if opts.Status != "" && runRecord.Status != opts.Status {
+			continue
+		}
+		if opts.Since != nil && runRecord.CreatedAt.Before(*opts.Since) {
+			continue
+		}
+
 		trace, hasTrace, err := loadExecutionTrace(ctx, db, runRecord.ID)
 		if err != nil {
 			return Report{}, err
@@ -114,7 +129,7 @@ func Build(ctx context.Context, db store.Store, opts Options) (Report, error) {
 		if opts.GroupBy == GroupByModelProfile {
 			profileKey := UnknownLegacyGroup
 			if hasTrace {
-				profileKey = groupKey(trace.ModelProfile)
+				profileKey = modelProfileGroupKey(trace.ModelProfile)
 			}
 			accumulateGroup(profileGroups, profileKey, runRecord, trace, hasTrace)
 		}
@@ -267,6 +282,14 @@ func groupKey(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
 		return UnknownLegacyGroup
+	}
+	return value
+}
+
+func modelProfileGroupKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return NoModelProfileGroup
 	}
 	return value
 }
