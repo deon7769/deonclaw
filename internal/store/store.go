@@ -18,6 +18,7 @@ type Store interface {
 	Task(context.Context, string) (*tasks.Task, error)
 	SaveRun(context.Context, *runs.Run) error
 	Run(context.Context, string) (*runs.Run, error)
+	ListRuns(context.Context) ([]runs.Run, error)
 	SaveEvent(context.Context, *events.Event) error
 	EventsByRun(context.Context, string) ([]events.Event, error)
 	SaveArtifact(context.Context, *artifacts.Artifact) error

@@ -107,6 +107,14 @@ The trace is an audit artifact for the runner lifecycle. It records:
 
 The trace must not contain raw prompts or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
 
+## Runs Report
+
+`deonctl runs report --store <path>` reads persisted run rows from SQLite and uses `execution-trace.json` when available to aggregate duration, parsed events, parse warnings, validation status, changed path counts, and model profile.
+
+Runs that predate `execution-trace.json` remain reportable as `unknown/legacy`. Legacy rows still contribute run status and worker counts, but trace-derived metrics stay unknown.
+
+`deonctl runs report --store <path> --by model_profile` adds model profile grouping. Missing profiles and missing traces are grouped as `unknown/legacy`.
+
 ## Stdout And Stderr
 
 Workers must preserve raw stdout as a run artifact and preserve stderr as stderr.log.

@@ -308,6 +308,43 @@ func TestSQLiteStoreListArtifactsFiltersByRunAndStatus(t *testing.T) {
 	}
 }
 
+func TestSQLiteStoreListRuns(t *testing.T) {
+	ctx := context.Background()
+	store, err := OpenSQLite(filepath.Join(t.TempDir(), "deonclaw.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer store.Close()
+
+	task := minimalTask()
+	if err := store.SaveTask(ctx, task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+
+	first := time.Date(2026, 5, 18, 12, 0, 0, 0, time.UTC)
+	second := first.Add(time.Second)
+	runsToSave := []runs.Run{
+		{ID: "run-second", TaskID: task.ID, Status: runs.StatusFailed, Worker: "opencode", WorkspacePath: "workspace", CreatedAt: second, UpdatedAt: second},
+		{ID: "run-first", TaskID: task.ID, Status: runs.StatusSucceeded, Worker: "codex", WorkspacePath: "workspace", CreatedAt: first, UpdatedAt: first},
+	}
+	for i := range runsToSave {
+		if err := store.SaveRun(ctx, &runsToSave[i]); err != nil {
+			t.Fatalf("SaveRun(%q) error = %v", runsToSave[i].ID, err)
+		}
+	}
+
+	gotRuns, err := store.ListRuns(ctx)
+	if err != nil {
+		t.Fatalf("ListRuns() error = %v", err)
+	}
+	if len(gotRuns) != 2 {
+		t.Fatalf("len(runs) = %d, want 2", len(gotRuns))
+	}
+	if gotRuns[0].ID != "run-first" || gotRuns[1].ID != "run-second" {
+		t.Fatalf("runs order = %#v, want created_at order", gotRuns)
+	}
+}
+
 func TestSQLiteStoreReturnsNotFound(t *testing.T) {
 	ctx := context.Background()
 	store, err := OpenSQLite(filepath.Join(t.TempDir(), "deonclaw.db"))

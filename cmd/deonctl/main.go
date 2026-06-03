@@ -22,6 +22,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runner"
+	"github.com/deon7769/deonclaw/internal/runreport"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
@@ -54,6 +55,7 @@ Usage:
   deonctl memory proposal restore --backup-plan <path> --backup-result <path> --dry-run --output <path>
   deonctl memory proposal restore-execute --backup-plan <path> --backup-result <path> --restore-preview <path> --output <path> --confirm-restore
   deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
+  deonctl runs report --store <path> [--by model_profile] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -342,6 +344,24 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "runs":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "report":
+			opts, err := parseRunsReportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runRunsReport(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -2628,6 +2648,76 @@ func writeMissingEnvWarnings(stderr io.Writer, worker string, envRequirements []
 	for _, check := range workerconfig.MissingRequiredEnv(envRequirements) {
 		fmt.Fprintf(stderr, "warning: worker %s required env %s is missing\n", worker, check.Name)
 	}
+}
+
+type runsReportOptions struct {
+	storePath    string
+	by           string
+	outputFormat string
+}
+
+func parseRunsReportOptions(args []string) (runsReportOptions, error) {
+	opts := runsReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return runsReportOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--by":
+			if i+1 >= len(args) {
+				return runsReportOptions{}, fmt.Errorf("missing value for --by")
+			}
+			opts.by = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return runsReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return runsReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" {
+		return runsReportOptions{}, fmt.Errorf("missing --store")
+	}
+	if opts.by != "" && opts.by != runreport.GroupByModelProfile {
+		return runsReportOptions{}, fmt.Errorf("unsupported --by %q", opts.by)
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return runsReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRunsReport(opts runsReportOptions, stdout io.Writer, stderr io.Writer) int {
+	db, err := storepkg.OpenSQLite(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "open store failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+
+	report, err := runreport.Build(context.Background(), db, runreport.Options{GroupBy: opts.by})
+	if err != nil {
+		fmt.Fprintf(stderr, "runs report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = runreport.WriteJSON(report, stdout)
+	default:
+		err = runreport.WriteText(report, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "runs report failed: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 type artifactListOptions struct {

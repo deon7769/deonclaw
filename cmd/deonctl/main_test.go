@@ -3604,6 +3604,79 @@ func TestRunArtifactsList(t *testing.T) {
 	}
 }
 
+func TestRunRunsReportLegacyText(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	saveCLIRunsReportTask(t, ctx, db)
+	createdAt := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	saveCLIRunsReportRun(t, ctx, db, "run-legacy", runs.StatusSucceeded, "codex", createdAt)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"runs", "report", "--store", storePath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"runs_report:", "total_runs: 1", "succeeded: 1", "legacy_runs: 1", "by_worker:", "codex"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestRunRunsReportJSONByModelProfile(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	saveCLIRunsReportTask(t, ctx, db)
+	createdAt := time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC)
+	saveCLIRunsReportRun(t, ctx, db, "run-profile", runs.StatusFailed, "opencode", createdAt)
+	saveCLIRunsReportTrace(t, ctx, db, tempDir, "run-profile", "{\n  \"worker\": \"opencode\",\n  \"model_profile\": \"opencode-zai-glm-5-1\",\n  \"duration_ms\": 120,\n  \"parsed_events\": 3,\n  \"parse_warnings\": 2,\n  \"validation_status\": \"failed\",\n  \"changed_paths_count\": 5\n}")
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"runs", "report", "--store", storePath, "--by", "model_profile", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	var decoded struct {
+		TotalRuns        int `json:"total_runs"`
+		Failed           int `json:"failed"`
+		ValidationFailed int `json:"validation_failed"`
+		ByModelProfile   []struct {
+			Group      string `json:"group"`
+			TotalRuns  int    `json:"total_runs"`
+			Failed     int    `json:"failed"`
+			LegacyRuns int    `json:"legacy_runs"`
+		} `json:"by_model_profile"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("json.Unmarshal() error = %v; stdout=%s", err, stdout.String())
+	}
+	if decoded.TotalRuns != 1 || decoded.Failed != 1 || decoded.ValidationFailed != 1 {
+		t.Fatalf("decoded = %#v, want failed validation profile report", decoded)
+	}
+	if len(decoded.ByModelProfile) != 1 || decoded.ByModelProfile[0].Group != "opencode-zai-glm-5-1" || decoded.ByModelProfile[0].TotalRuns != 1 || decoded.ByModelProfile[0].Failed != 1 || decoded.ByModelProfile[0].LegacyRuns != 0 {
+		t.Fatalf("by_model_profile = %#v, want one opencode profile group", decoded.ByModelProfile)
+	}
+}
+
 func TestParseArtifactPruneOptions(t *testing.T) {
 	opts, err := parseArtifactPruneOptions([]string{"--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--older-than", "30d", "--dry-run"})
 	if err != nil {
@@ -3689,6 +3762,69 @@ func writeCLIWorkersConfig(t *testing.T, content string) string {
 		t.Fatalf("write workers config file: %v", err)
 	}
 	return path
+}
+
+func saveCLIRunsReportTask(t *testing.T, ctx context.Context, db storepkg.Store) {
+	t.Helper()
+	task := &tasks.Task{
+		ID:     "task-runs-report-001",
+		Title:  "Runs report task",
+		Domain: "general",
+		Worker: "opencode",
+		Goal:   "Do not execute",
+		Mode:   "read_only",
+		Workspace: tasks.WorkspaceSpec{
+			Strategy: "local_repo",
+			Path:     ".",
+		},
+		Memory: tasks.MemorySpec{
+			Scope: "none",
+		},
+		ExpectedOutputs:  []string{"artifacts/summary.md"},
+		DefinitionOfDone: []string{"runs report works"},
+	}
+	if err := db.SaveTask(ctx, task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+}
+
+func saveCLIRunsReportRun(t *testing.T, ctx context.Context, db storepkg.Store, id string, status runs.RunStatus, worker string, createdAt time.Time) {
+	t.Helper()
+	runRecord := &runs.Run{
+		ID:            id,
+		TaskID:        "task-runs-report-001",
+		Status:        status,
+		Worker:        worker,
+		WorkspacePath: "workspace",
+		CreatedAt:     createdAt,
+		UpdatedAt:     createdAt,
+	}
+	if err := db.SaveRun(ctx, runRecord); err != nil {
+		t.Fatalf("SaveRun(%q) error = %v", id, err)
+	}
+}
+
+func saveCLIRunsReportTrace(t *testing.T, ctx context.Context, db storepkg.Store, root string, runID string, traceJSON string) {
+	t.Helper()
+	tracePath := filepath.Join(root, "artifacts", runID, "execution-trace.json")
+	if err := os.MkdirAll(filepath.Dir(tracePath), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(tracePath, []byte(traceJSON), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	artifact := &artifacts.Artifact{
+		ID:        runID + "-trace",
+		RunID:     runID,
+		Path:      tracePath,
+		Kind:      artifacts.KindOther,
+		SizeBytes: int64(len(traceJSON)),
+		SHA256:    strings.Repeat("a", 64),
+		CreatedAt: time.Date(2026, 6, 2, 12, 0, 0, 0, time.UTC),
+	}
+	if err := db.SaveArtifact(ctx, artifact); err != nil {
+		t.Fatalf("SaveArtifact(%q) error = %v", artifact.ID, err)
+	}
 }
 
 func unsetEnvForTest(t *testing.T, name string) {

@@ -23,6 +23,7 @@ It is a snapshot of the current MVP contract, not a provider roadmap.
 | memory policy | yes | yes | Both accept --memory-policy and lint memory-proposal.json when present. |
 | artifacts | yes | yes | Both persist standard run artifacts and artifact metadata in SQLite. |
 | execution trace | yes | yes | Shared runner writes execution-trace.json with command display, hashes, env requirement states, validation/policy/cleanup, stdout parsing metadata, and timeline. |
+| runs report | yes | yes | deonctl runs report aggregates SQLite runs and execution traces by worker, with optional model_profile grouping. |
 | validation | yes | yes | Shared runner applies task validation commands after successful worker execution. |
 | path policy | yes | yes | Shared runner evaluates changed paths and can mark policy_failed. |
 | cleanup | yes | yes | succeeded removes workspace; failed and policy_failed keep workspace. |
@@ -88,6 +89,7 @@ Codex and OpenCode share:
 - event persistence
 - artifact persistence
 - execution trace artifact generation
+- runs report aggregation from SQLite plus execution traces
 - isolated workspace preparation
 - dirty baseline protection
 - validation command execution

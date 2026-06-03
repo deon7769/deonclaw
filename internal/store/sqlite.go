@@ -338,6 +338,51 @@ func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 	return &run, nil
 }
 
+func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT
+		id, task_id, status, worker, workspace_path, created_at, updated_at, finished_at
+		FROM runs ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	defer rows.Close()
+
+	var result []runs.Run
+	for rows.Next() {
+		var run runs.Run
+		var status string
+		var createdAt, updatedAt string
+		var finishedAt sql.NullString
+		if err := rows.Scan(
+			&run.ID,
+			&run.TaskID,
+			&status,
+			&run.Worker,
+			&run.WorkspacePath,
+			&createdAt,
+			&updatedAt,
+			&finishedAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan run: %w", err)
+		}
+		run.Status = runs.RunStatus(status)
+		if run.CreatedAt, err = parseTime(createdAt); err != nil {
+			return nil, err
+		}
+		if run.UpdatedAt, err = parseTime(updatedAt); err != nil {
+			return nil, err
+		}
+		if run.FinishedAt, err = parseOptionalTime(finishedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, run)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list runs: %w", err)
+	}
+	return result, nil
+}
+
 func (s *SQLiteStore) SaveEvent(ctx context.Context, event *events.Event) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO events (
 		id, run_id, type, timestamp, payload
