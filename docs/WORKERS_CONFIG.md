@@ -111,10 +111,12 @@ opencode run --dir <workspace> --format json "<prompt>"
 
 DeonClaw reports the prompt argument as `<prompt>` in dry-runs, summaries, and artifacts so task text is not echoed in DeonClaw output.
 
-## Kimi Inspiration
+## Future Inspiration
 
 Kimi is `inspiration_only`.
 
-Do not add Kimi to operational `workers.yaml` examples yet. DeonClaw does not provide a Kimi worker adapter, doctor entry, dry-run command, run command, or fallback command.
+Kimi was used as inspiration for UX, MCP, and ACP ideas. It is not a DeonClaw worker.
 
-Kimi can be revisited only through a dedicated future task that defines the worker contract first.
+Kimi does not participate in operational `workers.yaml`, worker doctor, worker smoke, dry-run, run, or fallback command behavior.
+
+Keep Kimi references in this future-inspiration section only. Kimi can be revisited only through a dedicated future task that defines the worker contract first.

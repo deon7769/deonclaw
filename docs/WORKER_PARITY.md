@@ -2,14 +2,14 @@
 
 This document tracks operational parity between the implemented workers.
 
-It is a snapshot of the current MVP contract, not a provider roadmap. Kimi is inspiration only and is not an operational or diagnostic worker yet.
+It is a snapshot of the current MVP contract, not a provider roadmap.
 
 ## Status Legend
 
 - yes: implemented and covered by the shared runner or worker adapter
 - partial: implemented with worker-specific behavior or remaining caveat
 - no: not implemented
-- inspiration_only: future reference only, with no config example, doctor entry, or worker adapter
+- inspiration_only: future reference only, with no operational config example, doctor entry, smoke path, or worker adapter
 
 ## Codex vs OpenCode
 
@@ -57,20 +57,22 @@ Codex is still treated as a JSONL-first worker because the command contract is c
 
 Invalid Codex JSONL can fail parsing. This is intentional for now because Codex has a stricter event contract than OpenCode.
 
-## Kimi Inspiration
+## Future Inspiration
 
-Kimi is not an implemented worker. It is inspiration only until a dedicated implementation task adds an adapter and operational contract.
+Kimi was used as inspiration for UX, MCP, and ACP ideas. It is not an implemented DeonClaw worker and has no operational contract.
 
-Current Kimi status:
+Current status:
 
 - worker adapter: no
 - run command: no
 - dry-run command: no
 - workers.yaml command entry: no example and no operational fallback
-- doctor command check: no
+- doctor command check: no, and no default diagnostic worker entry
+- smoke participation: no
+- workers-config operational entry: no
 - status label: inspiration_only
 
-Kimi must remain out of operational config and doctor output until a dedicated worker adapter is explicitly implemented.
+Future inspiration references must stay in this section only. Kimi must remain out of operational config, doctor output, smoke commands, and worker fallback lists until a dedicated worker adapter is explicitly implemented.
 
 ## Current Shared Runner Guarantees
 
