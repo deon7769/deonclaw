@@ -81,6 +81,8 @@ deonctl workers doctor --worker opencode --workers-config configs/examples/worke
 
 Profile entries include provider, model, model_arg, tags, and env requirement states. Secrets are never printed.
 
+Worker runs that reach artifact writing also record selected profile metadata in `execution-trace.json`: model_profile, provider, model, model_arg, and env requirement states. The trace stores requirement names and states only; it never stores environment values.
+
 ## Z.ai / GLM Example
 
 For OpenCode with Z.ai / GLM, record the provider and model in config:
@@ -181,6 +183,8 @@ opencode run --dir <workspace> --format json --model <model_arg> "<prompt>"
 Dry-runs, summaries, and artifacts keep the prompt masked as `<prompt>`.
 
 Environment requirements are validation metadata only. DeonClaw does not inject env values into worker command arguments.
+
+The execution trace records env requirement state as `set_masked` or `missing`, but never records the actual environment value.
 
 OpenCode runs through the current non-interactive OpenCode CLI contract:
 

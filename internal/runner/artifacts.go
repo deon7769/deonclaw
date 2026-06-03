@@ -17,7 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func writeCodexRunArtifacts(workerName string, runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, memoryProposal memoryProposalCheck, createdAt time.Time) ([]artifacts.Artifact, error) {
+func writeCodexRunArtifacts(workerName string, runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, memoryProposal memoryProposalCheck, trace executionTraceOptions, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -37,7 +37,7 @@ func writeCodexRunArtifacts(workerName string, runDir string, runID string, task
 		createdAt: createdAt,
 		written:   make(map[string]struct{}),
 	}
-	artifactCount := 9 + countWorkerArtifacts(result.Artifacts)
+	artifactCount := 10 + countWorkerArtifacts(result.Artifacts)
 	if len(contextPackMarkdown) > 0 {
 		artifactCount++
 	}
@@ -100,6 +100,13 @@ func writeCodexRunArtifacts(workerName string, runDir string, runID string, task
 		if err := writer.write(fmt.Sprintf("worker-%03d", i+1), name, kind, artifact.Content); err != nil {
 			return nil, err
 		}
+	}
+	traceJSON, err := executionTraceJSON(trace)
+	if err != nil {
+		return nil, err
+	}
+	if err := writer.write("execution-trace", "execution-trace.json", artifacts.KindOther, traceJSON); err != nil {
+		return nil, err
 	}
 	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(workerName, runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, contextPackWarnings, memoryProposal, artifactCount)); err != nil {
 		return nil, err
@@ -193,7 +200,7 @@ func artifactFileName(path string) string {
 
 func isCLIOwnedArtifact(name string) bool {
 	switch name {
-	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "validation.log", "validation.json", "context-pack.md", "memory-proposal-lint.json", "summary.md", "artifact-manifest.json":
+	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "validation.log", "validation.json", "context-pack.md", "memory-proposal-lint.json", "execution-trace.json", "summary.md", "artifact-manifest.json":
 		return true
 	default:
 		return false

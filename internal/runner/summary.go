@@ -35,6 +35,7 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 		fmt.Sprintf("Memory proposal violations: %d", len(memoryProposal.Violations)),
 		fmt.Sprintf("Memory proposal warnings: %d", len(memoryProposal.Warnings)),
 		fmt.Sprintf("Artifacts: %d", artifactCount),
+		"Execution trace: execution-trace.json",
 		fmt.Sprintf("Workspace cleanup: %s", cleanup.Action),
 		fmt.Sprintf("Cleanup reason: %s", cleanup.Reason),
 	}

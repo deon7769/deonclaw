@@ -78,6 +78,7 @@ The shared runner writes the standard run artifact set:
 - changed-files.json
 - validation.log
 - validation.json
+- execution-trace.json
 - artifact-manifest.json
 - context-pack.md, when --domains is used
 - memory-proposal-lint.json, when --memory-policy produces a lint artifact
@@ -85,6 +86,26 @@ The shared runner writes the standard run artifact set:
 Worker artifacts with names owned by the CLI are not duplicated. Additional worker artifacts are preserved with unique names.
 
 SQLite stores artifact metadata only. The filesystem remains the artifact body store.
+
+## Execution Trace
+
+Every worker run that reaches artifact writing includes `execution-trace.json`.
+
+The trace is an audit artifact for the runner lifecycle. It records:
+
+- run_id, task_id, worker, and final status
+- model_profile, provider, model, and model_arg when present
+- command_display with the prompt masked as `<prompt>`
+- prompt_sha256 instead of raw prompt text
+- context_pack_sha256 when `--domains` built a context pack
+- memory_policy_sha256 when `--memory-policy` was configured and readable
+- env_requirements by name, requirement, and state only
+- started_at, finished_at, and duration_ms
+- stdout_format, parsed_events, and parse_warnings
+- validation_status, policy_status, changed_paths_count, cleanup_action, and cleanup_reason
+- timeline entries for task load/validation, profile and env checks, context pack build, workspace preparation, worker start/finish, validation, diff, path policy, artifact writing, and workspace cleanup
+
+The trace must not contain raw prompts or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
 
 ## Stdout And Stderr
 

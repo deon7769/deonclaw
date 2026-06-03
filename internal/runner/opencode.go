@@ -7,6 +7,7 @@ import (
 
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/runtime"
+	"github.com/deon7769/deonclaw/internal/workerconfig"
 	"github.com/deon7769/deonclaw/internal/workers"
 	"github.com/deon7769/deonclaw/internal/workers/opencode"
 )
@@ -17,6 +18,7 @@ type OpenCodeRunOptions struct {
 	ArtifactsDir     string
 	DomainsPath      string
 	MemoryPolicyPath string
+	EnvRequirements  []workerconfig.EnvRequirementCheck
 }
 
 type OpenCodeRunner struct {
@@ -62,6 +64,7 @@ func (r OpenCodeRunner) Run(ctx context.Context, opts OpenCodeRunOptions, stdout
 		ArtifactsDir:     opts.ArtifactsDir,
 		DomainsPath:      opts.DomainsPath,
 		MemoryPolicyPath: opts.MemoryPolicyPath,
+		EnvRequirements:  opts.EnvRequirements,
 	}, stdout, stderr)
 }
 

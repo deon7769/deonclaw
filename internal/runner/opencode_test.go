@@ -108,7 +108,13 @@ func TestOpenCodeRunnerRunUsesCommonHarnessAndPersistsArtifacts(t *testing.T) {
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "OpenCode parsed events: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "OpenCode parse warnings: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: passed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Execution trace: execution-trace.json")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: removed")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "stdout_format", "text")
+	assertTraceString(t, trace, "validation_status", ValidationPassed)
+	assertTraceString(t, trace, "policy_status", "ok")
+	assertTraceString(t, trace, "cleanup_action", "removed")
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {
@@ -214,7 +220,9 @@ func TestOpenCodeRunnerRunWithGeneralContextPack(t *testing.T) {
 	assertFileContains(t, contextPath, "domain: general")
 	assertFileNotContains(t, contextPath, "Escalasoft isolated bridge content")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker: opencode")
-	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 10")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 11")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceNonEmptyString(t, trace, "context_pack_sha256")
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {
@@ -266,6 +274,8 @@ func TestOpenCodeRunnerRunMemoryProposalLintOK(t *testing.T) {
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker: opencode")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal: ok")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Memory proposal id: mem-opencode-ok")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceNonEmptyString(t, trace, "memory_policy_sha256")
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {

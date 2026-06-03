@@ -134,13 +134,26 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertFileContains(t, filepath.Join(runDir, "validation.log"), "Validation: skipped")
 	assertValidationStatus(t, filepath.Join(runDir, "validation.json"), ValidationSkipped, 0)
 	assertArtifactManifestContains(t, filepath.Join(runDir, "artifact-manifest.json"), filepath.Join(runDir, "validation.json"), artifacts.KindOther)
+	assertArtifactManifestContains(t, filepath.Join(runDir, "artifact-manifest.json"), filepath.Join(runDir, "execution-trace.json"), artifacts.KindOther)
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: skipped")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation commands: 0")
-	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 9")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 10")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Execution trace: execution-trace.json")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: removed")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Cleanup reason: succeeded")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "run_id", "run-test-001")
+	assertTraceString(t, trace, "task_id", "worker-mismatch-001")
+	assertTraceString(t, trace, "worker", "codex")
+	assertTraceString(t, trace, "command_display", "codex exec --json --sandbox read-only --cd "+wantWorkspace+" -")
+	assertTraceNonEmptyString(t, trace, "prompt_sha256")
+	assertTraceString(t, trace, "validation_status", ValidationSkipped)
+	assertTraceString(t, trace, "policy_status", "ok")
+	assertTraceString(t, trace, "cleanup_action", "removed")
+	assertTraceTimelineContains(t, trace, requiredExecutionTraceEvents...)
+	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), "Do not execute")
 	if !cleanupCalled {
 		t.Fatal("workspace cleanup was not called for succeeded run")
 	}
@@ -188,6 +201,7 @@ func TestCodexRunnerRun(t *testing.T) {
 		filepath.Join(runDir, "changed-files.json"):     false,
 		filepath.Join(runDir, "validation.log"):         false,
 		filepath.Join(runDir, "validation.json"):        false,
+		filepath.Join(runDir, "execution-trace.json"):   false,
 		filepath.Join(runDir, "summary.md"):             false,
 		filepath.Join(runDir, "artifact-manifest.json"): false,
 	}
@@ -296,7 +310,9 @@ func TestCodexRunnerRunWithGeneralContextPack(t *testing.T) {
 	contextPath := filepath.Join(runDir, "context-pack.md")
 	assertFileContains(t, contextPath, "domain: general")
 	assertFileNotContains(t, contextPath, "Escalasoft isolated bridge content")
-	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 10")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 11")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceNonEmptyString(t, trace, "context_pack_sha256")
 
 	db, err := storepkg.OpenSQLite(storePath)
 	if err != nil {
@@ -1818,6 +1834,62 @@ func assertArtifactManifestContains(t *testing.T, path string, wantPath string, 
 		return
 	}
 	t.Fatalf("artifact %q not found in manifest %q", wantPath, path)
+}
+
+func readExecutionTrace(t *testing.T, path string) map[string]interface{} {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	var trace map[string]interface{}
+	if err := json.Unmarshal(got, &trace); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", path, err)
+	}
+	return trace
+}
+
+func assertTraceString(t *testing.T, trace map[string]interface{}, field string, want string) {
+	t.Helper()
+	got, ok := trace[field].(string)
+	if !ok {
+		t.Fatalf("trace[%q] = %#v, want string %q", field, trace[field], want)
+	}
+	if got != want {
+		t.Fatalf("trace[%q] = %q, want %q", field, got, want)
+	}
+}
+
+func assertTraceNonEmptyString(t *testing.T, trace map[string]interface{}, field string) {
+	t.Helper()
+	got, ok := trace[field].(string)
+	if !ok || got == "" {
+		t.Fatalf("trace[%q] = %#v, want non-empty string", field, trace[field])
+	}
+}
+
+func assertTraceTimelineContains(t *testing.T, trace map[string]interface{}, events ...string) {
+	t.Helper()
+	rawTimeline, ok := trace["timeline"].([]interface{})
+	if !ok {
+		t.Fatalf("trace timeline = %#v, want array", trace["timeline"])
+	}
+	seen := map[string]struct{}{}
+	for _, rawEvent := range rawTimeline {
+		event, ok := rawEvent.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		name, ok := event["event"].(string)
+		if ok {
+			seen[name] = struct{}{}
+		}
+	}
+	for _, event := range events {
+		if _, ok := seen[event]; !ok {
+			t.Fatalf("trace timeline missing %q: %#v", event, rawTimeline)
+		}
+	}
 }
 
 func assertPersistedArtifact(t *testing.T, db *storepkg.SQLiteStore, runID string, wantPath string) {

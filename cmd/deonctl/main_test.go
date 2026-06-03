@@ -2991,6 +2991,31 @@ model_profiles:
 	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Provider: z-ai")
 	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model: glm-5.1")
 	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model arg: z-ai/glm-5.1")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Execution trace: execution-trace.json")
+	assertCLIFileContains(t, filepath.Join(runDir, "artifact-manifest.json"), "execution-trace.json")
+	tracePath := filepath.Join(runDir, "execution-trace.json")
+	traceJSON := string(mustReadCLIFile(t, tracePath))
+	assertCLIFileContains(t, tracePath, `"model_profile": "opencode-zai-glm-5-1"`)
+	assertCLIFileContains(t, tracePath, `"provider": "z-ai"`)
+	assertCLIFileContains(t, tracePath, `"model": "glm-5.1"`)
+	assertCLIFileContains(t, tracePath, `"model_arg": "z-ai/glm-5.1"`)
+	assertCLIFileContains(t, tracePath, `--model z-ai/glm-5.1 <prompt>`)
+	assertCLIFileContains(t, tracePath, `"prompt_sha256": "`)
+	assertCLIFileContains(t, tracePath, `"name": "ZAI_API_KEY"`)
+	assertCLIFileContains(t, tracePath, `"requirement": "required"`)
+	assertCLIFileContains(t, tracePath, `"state": "set_masked"`)
+	assertCLIFileContains(t, tracePath, `"stdout_format": "jsonl"`)
+	assertCLIFileContains(t, tracePath, `"parsed_events": 1`)
+	assertCLIFileContains(t, tracePath, `"parse_warnings": 0`)
+	assertCLIFileContains(t, tracePath, `"validation_status": "skipped"`)
+	assertCLIFileContains(t, tracePath, `"policy_status": "ok"`)
+	assertCLIFileContains(t, tracePath, `"cleanup_action": "removed"`)
+	if strings.Contains(traceJSON, "Do not execute unless validation passes") {
+		t.Fatalf("execution trace leaked raw prompt: %s", traceJSON)
+	}
+	if strings.Contains(traceJSON, "dummy") {
+		t.Fatalf("execution trace leaked env value: %s", traceJSON)
+	}
 	if strings.Contains(stdout.String()+stderr.String(), "dummy") {
 		t.Fatalf("output leaked env value: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}

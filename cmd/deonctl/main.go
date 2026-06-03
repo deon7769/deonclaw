@@ -2057,7 +2057,7 @@ func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Write
 	if opts.dryRun {
 		return runWorkersSmokeOpenCodeDryRun(opts, task, summary, stdout, stderr)
 	}
-	return runWorkersSmokeOpenCodeRun(opts, task, summary, stdout, stderr)
+	return runWorkersSmokeOpenCodeRun(opts, task, summary, envRequirements, stdout, stderr)
 }
 
 func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
@@ -2088,7 +2088,7 @@ func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, s
 	return 0
 }
 
-func runWorkersSmokeOpenCodeRun(opts workersSmokeOptions, task *tasks.Task, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
+func runWorkersSmokeOpenCodeRun(opts workersSmokeOptions, task *tasks.Task, summary workersSmokeSummary, envRequirements []workerconfig.EnvRequirementCheck, stdout io.Writer, stderr io.Writer) int {
 	worker, err := configuredOpenCodeWorkerForTask(opts.workersConfigPath, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -2111,6 +2111,7 @@ func runWorkersSmokeOpenCodeRun(opts workersSmokeOptions, task *tasks.Task, summ
 		ArtifactsDir:     opts.artifactsDir,
 		DomainsPath:      opts.domainsPath,
 		MemoryPolicyPath: opts.memoryPolicyPath,
+		EnvRequirements:  envRequirements,
 	}, &runOutput, stderr)
 	if _, err := stdout.Write(runOutput.Bytes()); err != nil {
 		fmt.Fprintf(stderr, "write run output failed: %v\n", err)
@@ -2404,6 +2405,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		ArtifactsDir:     opts.artifactsDir,
 		DomainsPath:      opts.domainsPath,
 		MemoryPolicyPath: opts.memoryPolicyPath,
+		EnvRequirements:  envRequirements,
 	}, stdout, stderr)
 }
 
@@ -2503,6 +2505,7 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		ArtifactsDir:     opts.artifactsDir,
 		DomainsPath:      opts.domainsPath,
 		MemoryPolicyPath: opts.memoryPolicyPath,
+		EnvRequirements:  envRequirements,
 	}, stdout, stderr)
 }
 

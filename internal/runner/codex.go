@@ -19,6 +19,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/runtime"
 	"github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
+	"github.com/deon7769/deonclaw/internal/workerconfig"
 	"github.com/deon7769/deonclaw/internal/workers"
 	"github.com/deon7769/deonclaw/internal/workers/codex"
 )
@@ -44,6 +45,7 @@ type CodexRunOptions struct {
 	ArtifactsDir     string
 	DomainsPath      string
 	MemoryPolicyPath string
+	EnvRequirements  []workerconfig.EnvRequirementCheck
 }
 
 type CodexRunner struct {
@@ -77,12 +79,15 @@ func NewCodexRunner() CodexRunner {
 func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Writer, stderr io.Writer) int {
 	r = r.withDefaults()
 	workerName := r.WorkerName
+	startedAt := time.Now().UTC()
+	timeline := newExecutionTimeline()
 
 	task, err := tasks.LoadFromFile(opts.TaskPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
+	timeline.Mark("task_loaded")
 	if err := tasks.Validate(task); err != nil {
 		fmt.Fprintf(stderr, "validation failed: %v\n", err)
 		return 1
@@ -91,6 +96,13 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1
 	}
+	timeline.Mark("task_validated")
+	if strings.TrimSpace(task.ModelProfile) != "" {
+		timeline.Mark("model_profile_resolved")
+	} else {
+		timeline.MarkStatus("model_profile_resolved", "skipped")
+	}
+	timeline.Mark("env_required_checked")
 
 	var contextPackMarkdown []byte
 	var contextPackWarnings []string
@@ -107,6 +119,9 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		contextPackMarkdown = pack.Markdown()
 		contextPackWarnings = append(contextPackWarnings, pack.Warnings...)
 		prompt = fmt.Sprintf("# Task Goal\n%s\n\n# Context Pack\n%s", task.Goal, contextPackMarkdown)
+		timeline.Mark("context_pack_built")
+	} else {
+		timeline.MarkStatus("context_pack_built", "skipped")
 	}
 
 	runID := r.RunIDFactory()
@@ -138,6 +153,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		fmt.Fprintf(stderr, "prepare workspace failed: %v\n", err)
 		return 1
 	}
+	timeline.Mark("workspace_prepared")
 	workspace = preparedWorkspace.Path
 
 	runRecord := &runs.Run{
@@ -167,11 +183,17 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	}
 
 	worker := r.WorkerFactory()
+	timeline.Mark("worker_started")
 	result, runErr := worker.Run(ctx, workers.RunSpec{
 		Task:      task,
 		Workspace: workspace,
 		Prompt:    prompt,
 	})
+	if runErr != nil {
+		timeline.MarkStatus("worker_finished", "failed")
+	} else {
+		timeline.Mark("worker_finished")
+	}
 	if result == nil {
 		result = &workers.RunResult{
 			Worker:    workerName,
@@ -192,10 +214,16 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 			runErr = validationErr
 		}
 	}
+	timeline.MarkStatus("validation_completed", validationResult.Status)
 
 	diffPatch, diffErr := r.GitDiffRunner(ctx, workspace)
 	if diffErr != nil && runErr == nil {
 		runErr = fmt.Errorf("capture git diff: %w", diffErr)
+	}
+	if diffErr != nil {
+		timeline.MarkStatus("diff_captured", "failed")
+	} else {
+		timeline.Mark("diff_captured")
 	}
 
 	postRun, snapPostErr := r.GitSnapshotRunner(ctx, workspace)
@@ -221,8 +249,12 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		task.ForbiddenPaths,
 	)
 	policySummary := policyResult.Summary()
+	if policyResult.OK() {
+		timeline.MarkStatus("path_policy_completed", "ok")
+	} else {
+		timeline.MarkStatus("path_policy_completed", "failed")
+	}
 
-	finishedAt := time.Now().UTC()
 	runRecord.Status = runs.StatusSucceeded
 	if runErr != nil {
 		runRecord.Status = runs.StatusFailed
@@ -231,6 +263,8 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		runRecord.Status = runs.StatusPolicyFailed
 	}
 	cleanup := cleanupWorkspace(ctx, workspaceManager, preparedWorkspace, runRecord.Status)
+	timeline.MarkStatus("workspace_cleanup", cleanup.Action)
+	finishedAt := time.Now().UTC()
 	runRecord.UpdatedAt = finishedAt
 	runRecord.FinishedAt = &finishedAt
 
@@ -245,7 +279,26 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		return 1
 	}
 
-	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, memoryProposalCheck, finishedAt)
+	timeline.Mark("artifacts_written")
+	trace := executionTraceOptions{
+		RunID:               runID,
+		WorkerName:          workerName,
+		Task:                task,
+		Result:              result,
+		Status:              runRecord.Status,
+		StartedAt:           startedAt,
+		FinishedAt:          finishedAt,
+		Prompt:              prompt,
+		ContextPackMarkdown: contextPackMarkdown,
+		MemoryPolicyPath:    opts.MemoryPolicyPath,
+		EnvRequirements:     opts.EnvRequirements,
+		Validation:          validationResult,
+		PolicyOK:            policyResult.OK(),
+		ChangedPathCount:    len(changedPaths),
+		Cleanup:             cleanup,
+		Timeline:            timeline.Events(),
+	}
+	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, memoryProposalCheck, trace, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
