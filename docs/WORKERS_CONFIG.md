@@ -85,7 +85,7 @@ Worker runs that reach artifact writing also record selected profile metadata in
 
 ## Model Strategy
 
-Tasks may define an optional `model_strategy` to plan an ordered set of model profiles without selecting or executing fallback behavior yet.
+Tasks may define an optional `model_strategy` to plan an ordered set of model profiles. Dry-run resolves the strategy and selects the first `preferred` profile as `planned_model_profile`. Run execution does not select profiles from a strategy automatically yet.
 
 Example:
 
@@ -117,11 +117,14 @@ Resolver rules:
 
 Current runtime boundary:
 
-- `model_strategy` is planning and validation metadata only.
+- `model_strategy` is planning and validation metadata for run execution.
+- Dry-run selects `preferred[0]` as `planned_model_profile` and prints its provider, model, and model_arg.
+- OpenCode dry-run includes `--model <model_arg>` when the planned profile defines `model_arg`.
+- Dry-run checks required env from the planned profile and prints missing env warnings.
 - DeonClaw does not execute fallback profiles yet.
-- DeonClaw does not choose a preferred profile automatically yet.
-- DeonClaw does not pass `model_arg` from a strategy into OpenCode yet.
-- OpenCode command construction remains unchanged unless the task uses the existing `model_profile` field.
+- DeonClaw does not choose a strategy profile automatically during real run yet.
+- DeonClaw does not switch workers, retry, or run fallback profiles.
+- OpenCode run command construction remains unchanged unless the task uses the existing `model_profile` field.
 
 ## Z.ai / GLM Example
 
@@ -214,7 +217,7 @@ Provider and model are diagnostic config only in the current task. They are not 
 
 Model profiles are diagnostic and validation metadata plus OpenCode model selection. DeonClaw resolves them, checks worker/profile compatibility, validates required env presence, and passes `model_arg` as `--model` only for OpenCode.
 
-Model strategies are earlier-stage planning metadata. DeonClaw resolves them against `model_profiles` and validates profile existence, worker compatibility and required tags, but it does not select a model, pass a strategy `model_arg`, switch workers or run fallbacks.
+Model strategies are planning metadata for execution. DeonClaw resolves them against `model_profiles` and validates profile existence, worker compatibility and required tags. Dry-run selects `preferred[0]` as `planned_model_profile` and may show OpenCode `--model`; real run does not select a strategy model, switch workers or run fallbacks yet.
 
 OpenCode with a selected model profile that defines `model_arg` runs through:
 

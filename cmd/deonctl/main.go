@@ -2302,18 +2302,13 @@ func runOpenCodeDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Wri
 		return 1
 	}
 
-	_, envRequirements, err := configuredWorkerDefinitionForTask(opts.workersConfigPath, task, "opencode")
+	worker, envRequirements, strategyPlan, err := configuredOpenCodeDryRunWorkerForTask(opts.workersConfigPath, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
 	writeMissingEnvWarnings(stderr, "opencode", envRequirements)
 
-	worker, err := configuredOpenCodeWorkerForTask(opts.workersConfigPath, task)
-	if err != nil {
-		fmt.Fprintf(stderr, "error: %v\n", err)
-		return 1
-	}
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{
 		Task:      task,
 		Workspace: task.Workspace.Path,
@@ -2325,6 +2320,13 @@ func runOpenCodeDryRun(opts workerDryRunOptions, stdout io.Writer, stderr io.Wri
 
 	fmt.Fprintf(stdout, "workspace: %s\n", event.Workspace)
 	fmt.Fprintf(stdout, "policy: %s\n", event.Sandbox)
+	if strategyPlan != nil {
+		fmt.Fprintln(stdout, "model_strategy: planned")
+		fmt.Fprintf(stdout, "planned_model_profile: %s\n", strategyPlan.Name)
+		fmt.Fprintf(stdout, "provider: %s\n", strategyPlan.Provider)
+		fmt.Fprintf(stdout, "model: %s\n", strategyPlan.Model)
+		fmt.Fprintf(stdout, "model_arg: %s\n", strategyPlan.ModelArg)
+	}
 	fmt.Fprintf(stdout, "command: %s\n", strings.Join(event.Command, " "))
 	return 0
 }
@@ -2549,6 +2551,60 @@ func configuredOpenCodeWorker(workersConfigPath string) (workers.Worker, error) 
 		return nil, err
 	}
 	return opencode.NewWithCommand(workerConfig.Command), nil
+}
+
+type plannedModelProfile struct {
+	Name     string
+	Provider string
+	Model    string
+	ModelArg string
+}
+
+func configuredOpenCodeDryRunWorkerForTask(workersConfigPath string, task *tasks.Task) (workers.Worker, []workerconfig.EnvRequirementCheck, *plannedModelProfile, error) {
+	cfg, err := configuredWorkersConfig(workersConfigPath)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	workerConfig := cfg.Worker("opencode")
+	opts := opencode.Options{Command: workerConfig.Command}
+	profileName := ""
+	var strategyPlan *plannedModelProfile
+
+	if task != nil && strings.TrimSpace(task.ModelProfile) != "" {
+		profile, err := cfg.ResolveModelProfile("opencode", task.ModelProfile)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		profileName = task.ModelProfile
+		opts.ModelProfile = task.ModelProfile
+		opts.Provider = profile.Provider
+		opts.Model = profile.Model
+		opts.ModelArg = profile.ModelArg
+	}
+	if task != nil && task.ModelStrategy != nil {
+		resolved, err := cfg.ResolveModelStrategy("opencode", task.ModelStrategy)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		planned, ok := resolved.PlannedModelProfile()
+		if !ok {
+			return nil, nil, nil, fmt.Errorf("model_strategy.preferred must not be empty")
+		}
+		profileName = planned.Name
+		opts.ModelArg = planned.Profile.ModelArg
+		strategyPlan = &plannedModelProfile{
+			Name:     planned.Name,
+			Provider: planned.Profile.Provider,
+			Model:    planned.Profile.Model,
+			ModelArg: planned.Profile.ModelArg,
+		}
+	}
+
+	envRequirements, err := cfg.EnvRequirementChecksFor("opencode", profileName)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return opencode.NewWithOptions(opts), envRequirements, strategyPlan, nil
 }
 
 func configuredOpenCodeWorkerForTask(workersConfigPath string, task *tasks.Task) (workers.Worker, error) {

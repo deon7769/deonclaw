@@ -107,7 +107,7 @@ The trace is an audit artifact for the runner lifecycle. It records:
 
 The trace must not contain raw prompts or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
 
-Task `model_strategy` is planning metadata in the current contract. It is resolved before worker planning for validation, but it is not recorded as a selected model profile, does not add `model_arg` to worker commands, does not switch workers, and does not execute fallbacks.
+Task `model_strategy` is planning metadata in the current contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real worker runs do not record it as a selected `model_profile`, do not add strategy `model_arg` to worker commands, do not switch workers, and do not execute fallbacks.
 
 ## Runs Report
 

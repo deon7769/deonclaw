@@ -50,6 +50,13 @@ type ResolvedModelStrategy struct {
 	RequireTags []string               `json:"require_tags,omitempty"`
 }
 
+func (s ResolvedModelStrategy) PlannedModelProfile() (ResolvedModelProfile, bool) {
+	if len(s.Preferred) == 0 {
+		return ResolvedModelProfile{}, false
+	}
+	return s.Preferred[0], true
+}
+
 type EnvRequirementCheck struct {
 	Name        string `json:"name"`
 	Requirement string `json:"requirement"`

@@ -2789,7 +2789,7 @@ model_profiles:
 	}
 }
 
-func TestRunWorkerOpenCodeDryRunWithModelStrategyDoesNotInjectModelArg(t *testing.T) {
+func TestRunWorkerOpenCodeDryRunWithModelStrategyPlansFirstPreferredProfile(t *testing.T) {
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: /usr/local/bin/opencode
@@ -2823,11 +2823,62 @@ model_profiles:
 	if code != 0 {
 		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
 	}
-	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
-		t.Fatalf("stdout = %q, want planned opencode command without --model", stdout.String())
+	if !strings.Contains(stdout.String(), "model_strategy: planned") {
+		t.Fatalf("stdout = %q, want planned model strategy", stdout.String())
 	}
-	if strings.Contains(stdout.String(), "--model") {
-		t.Fatalf("stdout = %q, want model_strategy to avoid execution model selection", stdout.String())
+	if !strings.Contains(stdout.String(), "planned_model_profile: opencode-zai-glm-5-1") {
+		t.Fatalf("stdout = %q, want first preferred profile", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "provider: z-ai") {
+		t.Fatalf("stdout = %q, want planned provider", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "model: glm-5.1") {
+		t.Fatalf("stdout = %q, want planned model", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "model_arg: z-ai/glm-5.1") {
+		t.Fatalf("stdout = %q, want planned model_arg", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want planned opencode command with first preferred --model", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunWarnsWhenPlannedStrategyProfileRequiredEnvMissing(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  require_tags:
+    - coding
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "planned_model_profile: opencode-zai-glm-5-1") {
+		t.Fatalf("stdout = %q, want planned profile", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "--model z-ai/glm-5.1") {
+		t.Fatalf("stdout = %q, want planned --model", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: worker opencode required env ZAI_API_KEY is missing") {
+		t.Fatalf("stderr = %q, want planned profile missing env warning", stderr.String())
 	}
 }
 

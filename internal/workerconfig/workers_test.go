@@ -173,6 +173,10 @@ func TestResolveModelStrategyValidatesProfilesAndTags(t *testing.T) {
 	if len(resolved.RequireTags) != 1 || resolved.RequireTags[0] != "coding" {
 		t.Fatalf("require_tags = %#v, want coding", resolved.RequireTags)
 	}
+	planned, ok := resolved.PlannedModelProfile()
+	if !ok || planned.Name != "opencode-zai-glm-5-1" {
+		t.Fatalf("planned = %#v ok=%t, want first preferred profile", planned, ok)
+	}
 }
 
 func TestResolveModelStrategyRejectsMissingProfile(t *testing.T) {

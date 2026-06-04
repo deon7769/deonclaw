@@ -30,7 +30,7 @@ It is a snapshot of the current MVP contract, not a provider roadmap.
 | event parsing | partial | yes | Codex expects JSONL from codex exec --json. OpenCode accepts jsonl, mixed, text, and empty stdout. |
 | workers-config | yes | yes | Both support --workers-config and fallback commands. |
 | model profiles | partial | yes | Both can resolve task model_profile entries from workers.yaml, validate worker/profile matching, and apply profile env requirements before run. OpenCode also wires model_arg into --model. Codex keeps its command unchanged for now. |
-| model strategies | yes | yes | Both validate task model_strategy syntax and resolve referenced profiles/tags against workers.yaml. Strategy fallback execution, automatic preferred selection, and worker switching are not implemented. |
+| model strategies | yes | yes | Both validate task model_strategy syntax and resolve referenced profiles/tags against workers.yaml. OpenCode dry-run shows planned preferred[0] model selection. Strategy fallback execution, real-run automatic selection, and worker switching are not implemented. |
 | doctor | yes | yes | deonctl workers doctor can check configured commands for both workers. |
 | parity smoke | no | yes | deonctl workers smoke currently supports OpenCode only and runs task validation, worker doctor, env requirement validation, and dry-run/run dispatch. |
 
