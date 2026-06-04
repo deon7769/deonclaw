@@ -3,7 +3,10 @@ package workerconfig
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	"github.com/deon7769/deonclaw/internal/tasks"
 )
 
 func TestLoadWorkersConfigCommands(t *testing.T) {
@@ -136,6 +139,93 @@ func TestResolveModelProfileRejectsMissingAndWorkerMismatch(t *testing.T) {
 	}
 	if _, err := cfg.ResolveModelProfile("opencode", ""); err != nil {
 		t.Fatalf("ResolveModelProfile(empty) error = %v, want nil", err)
+	}
+}
+
+func TestResolveModelStrategyValidatesProfilesAndTags(t *testing.T) {
+	cfg := Config{ModelProfiles: map[string]ModelProfile{
+		"opencode-zai-glm-5-1": {
+			Worker: "opencode",
+			Model:  "glm-5.1",
+			Tags:   []string{"coding", "general"},
+		},
+		"opencode-fast": {
+			Worker: "opencode",
+			Model:  "fast",
+			Tags:   []string{"coding"},
+		},
+	}}
+
+	resolved, err := cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred:   []string{"opencode-zai-glm-5-1"},
+		Fallback:    []string{"opencode-fast"},
+		RequireTags: []string{"coding"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveModelStrategy() error = %v", err)
+	}
+	if len(resolved.Preferred) != 1 || resolved.Preferred[0].Name != "opencode-zai-glm-5-1" {
+		t.Fatalf("preferred = %#v, want resolved opencode-zai-glm-5-1", resolved.Preferred)
+	}
+	if len(resolved.Fallback) != 1 || resolved.Fallback[0].Name != "opencode-fast" {
+		t.Fatalf("fallback = %#v, want resolved opencode-fast", resolved.Fallback)
+	}
+	if len(resolved.RequireTags) != 1 || resolved.RequireTags[0] != "coding" {
+		t.Fatalf("require_tags = %#v, want coding", resolved.RequireTags)
+	}
+}
+
+func TestResolveModelStrategyRejectsMissingProfile(t *testing.T) {
+	cfg := Config{}
+
+	_, err := cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred: []string{"missing-profile"},
+	})
+	if err == nil {
+		t.Fatal("ResolveModelStrategy() error = nil, want missing profile error")
+	}
+	if !strings.Contains(err.Error(), `model_strategy.preferred[0] profile "missing-profile" not found`) {
+		t.Fatalf("error = %v, want missing profile error", err)
+	}
+}
+
+func TestResolveModelStrategyRejectsMissingRequiredTag(t *testing.T) {
+	cfg := Config{ModelProfiles: map[string]ModelProfile{
+		"opencode-zai-glm-5-1": {
+			Worker: "opencode",
+			Tags:   []string{"general"},
+		},
+	}}
+
+	_, err := cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred:   []string{"opencode-zai-glm-5-1"},
+		RequireTags: []string{"coding"},
+	})
+	if err == nil {
+		t.Fatal("ResolveModelStrategy() error = nil, want missing tag error")
+	}
+	if !strings.Contains(err.Error(), `model_strategy.preferred[0] profile "opencode-zai-glm-5-1" missing required tag "coding"`) {
+		t.Fatalf("error = %v, want missing tag error", err)
+	}
+}
+
+func TestResolveModelStrategyRejectsWorkerMismatch(t *testing.T) {
+	cfg := Config{ModelProfiles: map[string]ModelProfile{
+		"codex-default": {
+			Worker: "codex",
+			Tags:   []string{"coding"},
+		},
+	}}
+
+	_, err := cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred:   []string{"codex-default"},
+		RequireTags: []string{"coding"},
+	})
+	if err == nil {
+		t.Fatal("ResolveModelStrategy() error = nil, want worker mismatch error")
+	}
+	if !strings.Contains(err.Error(), `model_strategy.preferred[0] profile "codex-default" worker "codex" does not match task worker "opencode"; automatic worker switching is not implemented`) {
+		t.Fatalf("error = %v, want worker mismatch error", err)
 	}
 }
 

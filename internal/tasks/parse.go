@@ -31,6 +31,11 @@ func normalize(task *Task) {
 	task.Domain = strings.TrimSpace(task.Domain)
 	task.Worker = strings.TrimSpace(task.Worker)
 	task.ModelProfile = strings.TrimSpace(task.ModelProfile)
+	if task.ModelStrategy != nil {
+		task.ModelStrategy.Preferred = normalizeStringList(task.ModelStrategy.Preferred)
+		task.ModelStrategy.Fallback = normalizeStringList(task.ModelStrategy.Fallback)
+		task.ModelStrategy.RequireTags = normalizeStringList(task.ModelStrategy.RequireTags)
+	}
 	task.Goal = strings.TrimSpace(task.Goal)
 	task.Mode = strings.TrimSpace(task.Mode)
 	task.Workspace.Strategy = strings.TrimSpace(task.Workspace.Strategy)
@@ -40,4 +45,22 @@ func normalize(task *Task) {
 		task.Validation.Commands[i].Name = strings.TrimSpace(task.Validation.Commands[i].Name)
 		task.Validation.Commands[i].Command = strings.TrimSpace(task.Validation.Commands[i].Command)
 	}
+}
+
+func normalizeStringList(values []string) []string {
+	if len(values) == 0 {
+		return nil
+	}
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		normalized = append(normalized, value)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }

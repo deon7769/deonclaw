@@ -1,11 +1,13 @@
 package workerconfig
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"sort"
 	"strings"
 
+	"github.com/deon7769/deonclaw/internal/tasks"
 	"gopkg.in/yaml.v3"
 )
 
@@ -35,6 +37,17 @@ type ModelProfile struct {
 	ModelArg string            `yaml:"model_arg,omitempty" json:"model_arg,omitempty"`
 	Env      map[string]string `yaml:"env,omitempty" json:"env,omitempty"`
 	Tags     []string          `yaml:"tags,omitempty" json:"tags,omitempty"`
+}
+
+type ResolvedModelProfile struct {
+	Name    string       `json:"name"`
+	Profile ModelProfile `json:"profile"`
+}
+
+type ResolvedModelStrategy struct {
+	Preferred   []ResolvedModelProfile `json:"preferred"`
+	Fallback    []ResolvedModelProfile `json:"fallback,omitempty"`
+	RequireTags []string               `json:"require_tags,omitempty"`
 }
 
 type EnvRequirementCheck struct {
@@ -175,6 +188,68 @@ func (c Config) ResolveModelProfile(worker string, profileName string) (ModelPro
 		return ModelProfile{}, fmt.Errorf("model profile %q worker %q does not match task worker %q", profileName, profile.Worker, worker)
 	}
 	return profile, nil
+}
+
+func (c Config) ResolveModelStrategy(worker string, strategy *tasks.ModelStrategy) (ResolvedModelStrategy, error) {
+	worker = strings.TrimSpace(worker)
+	if strategy == nil {
+		return ResolvedModelStrategy{}, nil
+	}
+	resolved := ResolvedModelStrategy{
+		RequireTags: normalizeTags(strategy.RequireTags),
+	}
+	preferredNames := normalizeTags(strategy.Preferred)
+	if len(preferredNames) == 0 {
+		return ResolvedModelStrategy{}, errors.New("model_strategy.preferred must not be empty")
+	}
+	preferred, preferredErrs := c.resolveStrategyProfiles(worker, "preferred", preferredNames, resolved.RequireTags)
+	fallback, fallbackErrs := c.resolveStrategyProfiles(worker, "fallback", strategy.Fallback, resolved.RequireTags)
+	resolved.Preferred = preferred
+	resolved.Fallback = fallback
+
+	errs := append(preferredErrs, fallbackErrs...)
+	if len(errs) > 0 {
+		return ResolvedModelStrategy{}, errors.Join(errs...)
+	}
+	return resolved, nil
+}
+
+func (c Config) resolveStrategyProfiles(worker string, section string, names []string, requiredTags []string) ([]ResolvedModelProfile, []error) {
+	names = normalizeTags(names)
+	resolved := make([]ResolvedModelProfile, 0, len(names))
+	var errs []error
+	for i, name := range names {
+		prefix := fmt.Sprintf("model_strategy.%s[%d] profile %q", section, i, name)
+		profile, ok := c.ModelProfiles[name]
+		if !ok {
+			errs = append(errs, fmt.Errorf("%s not found", prefix))
+			continue
+		}
+		if profile.Worker == "" {
+			errs = append(errs, fmt.Errorf("%s worker is required", prefix))
+			continue
+		}
+		if profile.Worker != worker {
+			errs = append(errs, fmt.Errorf("%s worker %q does not match task worker %q; automatic worker switching is not implemented", prefix, profile.Worker, worker))
+			continue
+		}
+		for _, tag := range requiredTags {
+			if !hasTag(profile.Tags, tag) {
+				errs = append(errs, fmt.Errorf("%s missing required tag %q", prefix, tag))
+			}
+		}
+		resolved = append(resolved, ResolvedModelProfile{Name: name, Profile: profile})
+	}
+	return resolved, errs
+}
+
+func hasTag(tags []string, want string) bool {
+	for _, tag := range tags {
+		if tag == want {
+			return true
+		}
+	}
+	return false
 }
 
 func (w Worker) EnvRequirementChecks() []EnvRequirementCheck {

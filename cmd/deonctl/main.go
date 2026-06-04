@@ -2032,7 +2032,7 @@ func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Write
 
 	report, err := doctorpkg.Build(doctorpkg.Options{
 		Worker:            opts.worker,
-		IncludeProfiles:   task.ModelProfile != "",
+		IncludeProfiles:   task.ModelProfile != "" || task.ModelStrategy != nil,
 		WorkersConfigPath: opts.workersConfigPath,
 		StorePath:         opts.storePath,
 		ArtifactsDir:      opts.artifactsDir,
@@ -2552,7 +2552,7 @@ func configuredOpenCodeWorker(workersConfigPath string) (workers.Worker, error) 
 }
 
 func configuredOpenCodeWorkerForTask(workersConfigPath string, task *tasks.Task) (workers.Worker, error) {
-	if strings.TrimSpace(workersConfigPath) == "" && (task == nil || strings.TrimSpace(task.ModelProfile) == "") {
+	if strings.TrimSpace(workersConfigPath) == "" && (task == nil || (strings.TrimSpace(task.ModelProfile) == "" && task.ModelStrategy == nil)) {
 		return opencodeWorkerFactory(), nil
 	}
 	cfg, err := configuredWorkersConfig(workersConfigPath)
@@ -2570,6 +2570,11 @@ func configuredOpenCodeWorkerForTask(workersConfigPath string, task *tasks.Task)
 		opts.Provider = profile.Provider
 		opts.Model = profile.Model
 		opts.ModelArg = profile.ModelArg
+	}
+	if task != nil && task.ModelStrategy != nil {
+		if _, err := cfg.ResolveModelStrategy("opencode", task.ModelStrategy); err != nil {
+			return nil, err
+		}
 	}
 	return opencode.NewWithOptions(opts), nil
 }
@@ -2590,6 +2595,11 @@ func configuredWorkerDefinitionForTask(workersConfigPath string, task *tasks.Tas
 	profileName := ""
 	if task != nil {
 		profileName = task.ModelProfile
+		if task.ModelStrategy != nil {
+			if _, err := cfg.ResolveModelStrategy(worker, task.ModelStrategy); err != nil {
+				return workerconfig.Worker{}, nil, err
+			}
+		}
 	}
 	envRequirements, err := cfg.EnvRequirementChecksFor(worker, profileName)
 	if err != nil {

@@ -2789,6 +2789,131 @@ model_profiles:
 	}
 }
 
+func TestRunWorkerOpenCodeDryRunWithModelStrategyDoesNotInjectModelArg(t *testing.T) {
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    tags:
+      - coding
+  opencode-fast:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1-mini
+    model_arg: z-ai/glm-5.1-mini
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  fallback:
+    - opencode-fast
+  require_tags:
+    - coding
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
+		t.Fatalf("stdout = %q, want planned opencode command without --model", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "--model") {
+		t.Fatalf("stdout = %q, want model_strategy to avoid execution model selection", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunRejectsMissingModelStrategyProfile(t *testing.T) {
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `model_strategy.preferred[0] profile "opencode-zai-glm-5-1" not found`) {
+		t.Fatalf("stderr = %q, want missing model strategy profile error", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "command:") {
+		t.Fatalf("stdout = %q, want no command", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunRejectsModelStrategyMissingRequiredTag(t *testing.T) {
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    tags:
+      - general
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  require_tags:
+    - coding
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `model_strategy.preferred[0] profile "opencode-zai-glm-5-1" missing required tag "coding"`) {
+		t.Fatalf("stderr = %q, want missing required tag error", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "command:") {
+		t.Fatalf("stdout = %q, want no command", stdout.String())
+	}
+}
+
+func TestRunWorkerOpenCodeDryRunRejectsModelStrategyWorkerMismatch(t *testing.T) {
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  codex-default:
+    worker: codex
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - codex-default
+  require_tags:
+    - coding
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "dry-run", taskPath, "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `model_strategy.preferred[0] profile "codex-default" worker "codex" does not match task worker "opencode"; automatic worker switching is not implemented`) {
+		t.Fatalf("stderr = %q, want worker mismatch error", stderr.String())
+	}
+	if strings.Contains(stdout.String(), "command:") {
+		t.Fatalf("stdout = %q, want no command", stdout.String())
+	}
+}
+
 func TestRunWorkerCodexDryRunUsesWorkersConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	configPath := filepath.Join(tempDir, "workers.yaml")
@@ -3018,6 +3143,61 @@ model_profiles:
 	}
 	if strings.Contains(stdout.String()+stderr.String(), "dummy") {
 		t.Fatalf("output leaked env value: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunWorkerOpenCodeRunWithModelStrategyDoesNotExecuteFallbackOrInjectModel(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+
+	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "opencode-args")
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    tags:
+      - coding
+  opencode-fast:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1-mini
+    model_arg: z-ai/glm-5.1-mini
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  fallback:
+    - opencode-fast
+  require_tags:
+    - coding
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", filepath.Join(tempDir, "deonclaw.db"), "--artifacts-dir", filepath.Join(tempDir, "artifacts"), "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	if strings.Contains(string(args), "--model") || strings.Contains(stdout.String(), "--model") {
+		t.Fatalf("model_strategy selected a model unexpectedly: stdout=%q args=%q", stdout.String(), string(args))
+	}
+	if strings.Contains(stdout.String(), "Model profile:") {
+		t.Fatalf("stdout = %q, want no selected model profile summary for strategy planning", stdout.String())
 	}
 }
 
@@ -3787,6 +3967,36 @@ definition_of_done:
   - command validates profile
 `
 	path := filepath.Join(t.TempDir(), "task-with-profile.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write task file: %v", err)
+	}
+	return path
+}
+
+func writeTaskFileWithModelStrategy(t *testing.T, worker string, modelStrategy string) string {
+	t.Helper()
+
+	content := `id: worker-strategy-001
+title: "Worker strategy"
+domain: general
+worker: ` + worker + `
+model_strategy:
+` + modelStrategy + `goal: "Do not execute unless validation passes"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - command validates strategy
+`
+	path := filepath.Join(t.TempDir(), "task-with-strategy.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write task file: %v", err)
 	}

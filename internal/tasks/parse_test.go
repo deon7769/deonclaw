@@ -106,6 +106,54 @@ definition_of_done:
 	}
 }
 
+func TestParseModelStrategy(t *testing.T) {
+	task, err := Parse([]byte(`id: strategy-task-001
+title: Strategy task
+domain: general
+worker: opencode
+model_strategy:
+  preferred:
+    - " opencode-zai-glm-5-1 "
+    - ""
+  fallback:
+    - " opencode-fast "
+  require_tags:
+    - " coding "
+goal: Run with model strategy
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - strategy parsed
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if task.ModelStrategy == nil {
+		t.Fatal("ModelStrategy = nil, want parsed strategy")
+	}
+	if len(task.ModelStrategy.Preferred) != 1 || task.ModelStrategy.Preferred[0] != "opencode-zai-glm-5-1" {
+		t.Fatalf("preferred = %#v, want normalized opencode-zai-glm-5-1", task.ModelStrategy.Preferred)
+	}
+	if len(task.ModelStrategy.Fallback) != 1 || task.ModelStrategy.Fallback[0] != "opencode-fast" {
+		t.Fatalf("fallback = %#v, want normalized opencode-fast", task.ModelStrategy.Fallback)
+	}
+	if len(task.ModelStrategy.RequireTags) != 1 || task.ModelStrategy.RequireTags[0] != "coding" {
+		t.Fatalf("require_tags = %#v, want normalized coding", task.ModelStrategy.RequireTags)
+	}
+	if err := Validate(task); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestLoadCodexSmokeExample(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "examples", "tasks", "codex-smoke.yaml")
 	if _, err := os.Stat(path); err != nil {

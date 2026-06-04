@@ -107,6 +107,8 @@ The trace is an audit artifact for the runner lifecycle. It records:
 
 The trace must not contain raw prompts or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
 
+Task `model_strategy` is planning metadata in the current contract. It is resolved before worker planning for validation, but it is not recorded as a selected model profile, does not add `model_arg` to worker commands, does not switch workers, and does not execute fallbacks.
+
 ## Runs Report
 
 `deonctl runs report --store <path>` reads persisted run rows from SQLite and uses `execution-trace.json` when available to aggregate duration, parsed events, parse warnings, validation status, changed path counts, and model profile.

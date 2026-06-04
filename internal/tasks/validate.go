@@ -49,6 +49,12 @@ func Validate(task *Task) error {
 	if task.Memory.Scope != "" && !config.IsKnownMemoryScope(task.Memory.Scope) {
 		errs = append(errs, fmt.Errorf("memory.scope %q is not supported", task.Memory.Scope))
 	}
+	if task.ModelProfile != "" && task.ModelStrategy != nil {
+		errs = append(errs, errors.New("model_profile and model_strategy are mutually exclusive"))
+	}
+	if task.ModelStrategy != nil && len(task.ModelStrategy.Preferred) == 0 {
+		errs = append(errs, errors.New("model_strategy.preferred must not be empty"))
+	}
 	for i, command := range task.Validation.Commands {
 		prefix := fmt.Sprintf("validation.commands[%d]", i)
 		if strings.TrimSpace(command.Name) == "" {

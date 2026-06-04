@@ -99,6 +99,49 @@ func TestValidateRejectsInvalidValidationCommand(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsModelProfileAndModelStrategy(t *testing.T) {
+	task := validTask()
+	task.ModelProfile = "opencode-zai-glm-5-1"
+	task.ModelStrategy = &ModelStrategy{
+		Preferred: []string{"opencode-zai-glm-5-1"},
+	}
+
+	err := Validate(task)
+	if err == nil {
+		t.Fatal("Validate() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "model_profile and model_strategy are mutually exclusive") {
+		t.Fatalf("error = %v, want mutual exclusion error", err)
+	}
+}
+
+func TestValidateRejectsEmptyModelStrategyPreferred(t *testing.T) {
+	task := validTask()
+	task.ModelStrategy = &ModelStrategy{}
+
+	err := Validate(task)
+	if err == nil {
+		t.Fatal("Validate() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "model_strategy.preferred must not be empty") {
+		t.Fatalf("error = %v, want preferred requirement", err)
+	}
+}
+
+func TestValidateAcceptsModelStrategy(t *testing.T) {
+	task := validTask()
+	task.Worker = "opencode"
+	task.ModelStrategy = &ModelStrategy{
+		Preferred:   []string{"opencode-zai-glm-5-1"},
+		Fallback:    []string{"opencode-fast"},
+		RequireTags: []string{"coding"},
+	}
+
+	if err := Validate(task); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func validTask() *Task {
 	return &Task{
 		ID:     "valid-task-001",

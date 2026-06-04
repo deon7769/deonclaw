@@ -83,6 +83,46 @@ Profile entries include provider, model, model_arg, tags, and env requirement st
 
 Worker runs that reach artifact writing also record selected profile metadata in `execution-trace.json`: model_profile, provider, model, model_arg, and env requirement states. The trace stores requirement names and states only; it never stores environment values.
 
+## Model Strategy
+
+Tasks may define an optional `model_strategy` to plan an ordered set of model profiles without selecting or executing fallback behavior yet.
+
+Example:
+
+~~~yaml
+worker: opencode
+model_strategy:
+  preferred:
+    - opencode-zai-glm-5-1
+    - opencode-fast
+  fallback:
+    - opencode-default
+  require_tags:
+    - coding
+~~~
+
+Task schema rules:
+
+- A task may define `model_profile` or `model_strategy`, but not both.
+- `model_strategy.preferred` is required and must not be empty when `model_strategy` is present.
+- `fallback` is optional and is validation metadata only for now.
+- `require_tags` is optional. When set, every referenced preferred and fallback profile must contain each required tag.
+
+Resolver rules:
+
+- Every profile named in `preferred` and `fallback` must exist in `workers.yaml` under `model_profiles`.
+- Every referenced profile must match the task `worker`.
+- A profile whose worker differs from the task worker fails clearly; DeonClaw does not switch workers automatically yet.
+- Strategy resolution validates profile existence, worker compatibility and required tags before dry-run or run planning.
+
+Current runtime boundary:
+
+- `model_strategy` is planning and validation metadata only.
+- DeonClaw does not execute fallback profiles yet.
+- DeonClaw does not choose a preferred profile automatically yet.
+- DeonClaw does not pass `model_arg` from a strategy into OpenCode yet.
+- OpenCode command construction remains unchanged unless the task uses the existing `model_profile` field.
+
 ## Z.ai / GLM Example
 
 For OpenCode with Z.ai / GLM, record the provider and model in config:
@@ -173,6 +213,8 @@ If a command is missing, DeonClaw keeps the built-in fallback:
 Provider and model are diagnostic config only in the current task. They are not injected into worker command arguments and they do not trigger a real provider call.
 
 Model profiles are diagnostic and validation metadata plus OpenCode model selection. DeonClaw resolves them, checks worker/profile compatibility, validates required env presence, and passes `model_arg` as `--model` only for OpenCode.
+
+Model strategies are earlier-stage planning metadata. DeonClaw resolves them against `model_profiles` and validates profile existence, worker compatibility and required tags, but it does not select a model, pass a strategy `model_arg`, switch workers or run fallbacks.
 
 OpenCode with a selected model profile that defines `model_arg` runs through:
 

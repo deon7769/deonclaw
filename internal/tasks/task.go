@@ -6,6 +6,7 @@ type Task struct {
 	Domain           string         `yaml:"domain" json:"domain"`
 	Worker           string         `yaml:"worker" json:"worker"`
 	ModelProfile     string         `yaml:"model_profile,omitempty" json:"model_profile,omitempty"`
+	ModelStrategy    *ModelStrategy `yaml:"model_strategy,omitempty" json:"model_strategy,omitempty"`
 	Goal             string         `yaml:"goal" json:"goal"`
 	Mode             string         `yaml:"mode" json:"mode"`
 	Workspace        WorkspaceSpec  `yaml:"workspace" json:"workspace"`
@@ -15,6 +16,12 @@ type Task struct {
 	ForbiddenPaths   []string       `yaml:"forbidden_paths" json:"forbidden_paths"`
 	ExpectedOutputs  []string       `yaml:"expected_outputs" json:"expected_outputs"`
 	DefinitionOfDone []string       `yaml:"definition_of_done" json:"definition_of_done"`
+}
+
+type ModelStrategy struct {
+	Preferred   []string `yaml:"preferred" json:"preferred"`
+	Fallback    []string `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	RequireTags []string `yaml:"require_tags,omitempty" json:"require_tags,omitempty"`
 }
 
 type WorkspaceSpec struct {
