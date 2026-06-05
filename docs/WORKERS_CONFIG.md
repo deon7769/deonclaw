@@ -85,7 +85,7 @@ Worker runs that reach artifact writing also record selected profile metadata in
 
 ## Model Strategy
 
-Tasks may define an optional `model_strategy` to plan an ordered set of model profiles. Dry-run resolves the strategy and selects the first `preferred` profile as `planned_model_profile`. Run execution does not select profiles from a strategy automatically yet.
+Tasks may define an optional `model_strategy` to plan an ordered set of model profiles. `deonctl worker opencode dry-run` and `deonctl workers smoke --dry-run` resolve the strategy and select the first `preferred` profile as `planned_model_profile`. Run execution does not select profiles from a strategy automatically yet.
 
 Example:
 
@@ -118,7 +118,7 @@ Resolver rules:
 Current runtime boundary:
 
 - `model_strategy` is planning and validation metadata for run execution.
-- Dry-run selects `preferred[0]` as `planned_model_profile` and prints its provider, model, and model_arg.
+- Worker dry-run and smoke dry-run select `preferred[0]` as `planned_model_profile` and print its provider, model, and model_arg.
 - OpenCode dry-run includes `--model <model_arg>` when the planned profile defines `model_arg`.
 - Dry-run checks required env from the planned profile and prints missing env warnings.
 - DeonClaw does not execute fallback profiles yet.

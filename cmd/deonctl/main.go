@@ -2047,6 +2047,10 @@ func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Write
 		return 1
 	}
 
+	if opts.dryRun {
+		return runWorkersSmokeOpenCodeDryRun(opts, task, workerCheck, stdout, stderr)
+	}
+
 	workerConfig, envRequirements, err := configuredWorkerDefinitionForTask(opts.workersConfigPath, task, opts.worker)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
@@ -2074,18 +2078,25 @@ func runWorkersSmoke(opts workersSmokeOptions, stdout io.Writer, stderr io.Write
 		}
 	}
 
-	if opts.dryRun {
-		return runWorkersSmokeOpenCodeDryRun(opts, task, summary, stdout, stderr)
-	}
 	return runWorkersSmokeOpenCodeRun(opts, task, summary, envRequirements, stdout, stderr)
 }
 
-func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, summary workersSmokeSummary, stdout io.Writer, stderr io.Writer) int {
-	worker, err := configuredOpenCodeWorkerForTask(opts.workersConfigPath, task)
+func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, workerCheck doctorpkg.WorkerCheck, stdout io.Writer, stderr io.Writer) int {
+	worker, envRequirements, strategyPlan, err := configuredOpenCodeDryRunWorkerForTask(opts.workersConfigPath, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
+	missingEnv := workerconfig.MissingRequiredEnv(envRequirements)
+	summary := workersSmokeSummary{
+		worker:        opts.worker,
+		envRequiredOK: len(missingEnv) == 0,
+		command:       workerCheck.ConfiguredCommand,
+	}
+	if len(missingEnv) > 0 {
+		fmt.Fprintf(stderr, "warning: worker %s has missing required env\n", opts.worker)
+	}
+
 	event, err := worker.DryRun(context.Background(), workers.RunSpec{
 		Task:      task,
 		Workspace: task.Workspace.Path,
@@ -2098,6 +2109,13 @@ func runWorkersSmokeOpenCodeDryRun(opts workersSmokeOptions, task *tasks.Task, s
 	command := strings.Join(event.Command, " ")
 	fmt.Fprintf(stdout, "workspace: %s\n", event.Workspace)
 	fmt.Fprintf(stdout, "policy: %s\n", event.Sandbox)
+	if strategyPlan != nil {
+		fmt.Fprintln(stdout, "model_strategy: planned")
+		fmt.Fprintf(stdout, "planned_model_profile: %s\n", strategyPlan.Name)
+		fmt.Fprintf(stdout, "provider: %s\n", strategyPlan.Provider)
+		fmt.Fprintf(stdout, "model: %s\n", strategyPlan.Model)
+		fmt.Fprintf(stdout, "model_arg: %s\n", strategyPlan.ModelArg)
+	}
 	fmt.Fprintf(stdout, "command: %s\n", command)
 	summary.command = command
 	summary.status = "dry_run"

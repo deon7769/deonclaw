@@ -3315,6 +3315,9 @@ func TestRunWorkersSmokeDryRunWithMissingEnvWarnsAndDoesNotFail(t *testing.T) {
 	if !strings.Contains(output, "command: /usr/local/bin/opencode run --dir . --format json <prompt>") {
 		t.Fatalf("stdout = %q, want planned command", output)
 	}
+	if strings.Contains(output, "model_strategy: planned") || strings.Contains(output, "planned_model_profile:") || strings.Contains(output, "--model") {
+		t.Fatalf("stdout = %q, want current smoke dry-run behavior without strategy planning", output)
+	}
 	if !strings.Contains(output, "status: dry_run") {
 		t.Fatalf("stdout = %q, want dry_run status", output)
 	}
@@ -3364,6 +3367,126 @@ model_profiles:
 	}
 	if !strings.Contains(output, "command: /usr/local/bin/opencode run --dir . --format json --model z-ai/glm-5.1 <prompt>") {
 		t.Fatalf("stdout = %q, want smoke command with --model", output)
+	}
+	assertNoSecretReference(t, stdout.String()+stderr.String())
+}
+
+func TestRunWorkersSmokeDryRunWithModelStrategyPlansFirstPreferredProfile(t *testing.T) {
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    tags:
+      - coding
+  opencode-fast:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1-mini
+    model_arg: z-ai/glm-5.1-mini
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  fallback:
+    - opencode-fast
+  require_tags:
+    - coding
+`)
+	tempDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts"),
+		"--workers-config", configPath,
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "model_strategy: planned") {
+		t.Fatalf("stdout = %q, want planned model strategy", output)
+	}
+	if !strings.Contains(output, "planned_model_profile: opencode-zai-glm-5-1") {
+		t.Fatalf("stdout = %q, want planned model profile", output)
+	}
+	if !strings.Contains(output, "provider: z-ai") {
+		t.Fatalf("stdout = %q, want planned provider", output)
+	}
+	if !strings.Contains(output, "model: glm-5.1") {
+		t.Fatalf("stdout = %q, want planned model", output)
+	}
+	if !strings.Contains(output, "model_arg: z-ai/glm-5.1") {
+		t.Fatalf("stdout = %q, want planned model_arg", output)
+	}
+	if !strings.Contains(output, "command: /usr/local/bin/opencode run --dir . --format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want smoke dry-run command with planned --model", output)
+	}
+	if !strings.Contains(output, "env_required_ok: true") || !strings.Contains(output, "status: dry_run") {
+		t.Fatalf("stdout = %q, want successful smoke dry-run summary", output)
+	}
+}
+
+func TestRunWorkersSmokeDryRunWithModelStrategyMissingPlannedProfileEnvWarns(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: /usr/local/bin/opencode
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  require_tags:
+    - coding
+`)
+	tempDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts"),
+		"--workers-config", configPath,
+		"--dry-run",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stderr.String(), "warning: worker opencode has missing required env") {
+		t.Fatalf("stderr = %q, want sanitized planned profile missing env warning", stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "planned_model_profile: opencode-zai-glm-5-1") {
+		t.Fatalf("stdout = %q, want planned model profile", output)
+	}
+	if !strings.Contains(output, "command: /usr/local/bin/opencode run --dir . --format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want smoke dry-run command with planned --model", output)
+	}
+	if !strings.Contains(output, "env_required_ok: false") || !strings.Contains(output, "status: dry_run") {
+		t.Fatalf("stdout = %q, want dry-run env warning summary", output)
 	}
 	assertNoSecretReference(t, stdout.String()+stderr.String())
 }
