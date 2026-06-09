@@ -85,7 +85,7 @@ Worker runs that reach artifact writing also record selected profile metadata in
 
 ## Model Strategy
 
-Tasks may define an optional `model_strategy` to plan an ordered set of model profiles. `deonctl worker opencode dry-run` and `deonctl workers smoke --dry-run` resolve the strategy and select the first `preferred` profile as `planned_model_profile`. Run execution does not select profiles from a strategy automatically yet.
+Tasks may define an optional `model_strategy` to plan an ordered set of model profiles. `deonctl worker opencode dry-run` and `deonctl workers smoke --dry-run` resolve the strategy and select the first `preferred` profile as `planned_model_profile`. `deonctl worker opencode run` and `deonctl workers smoke` select the same first preferred profile as the real run `selected_model_profile`.
 
 Example:
 
@@ -117,14 +117,16 @@ Resolver rules:
 
 Current runtime boundary:
 
-- `model_strategy` is planning and validation metadata for run execution.
+- `model_strategy` is planning, validation, and controlled selection metadata for OpenCode run execution.
 - Worker dry-run and smoke dry-run select `preferred[0]` as `planned_model_profile` and print its provider, model, and model_arg.
 - OpenCode dry-run includes `--model <model_arg>` when the planned profile defines `model_arg`.
 - Dry-run checks required env from the planned profile and prints missing env warnings.
+- OpenCode real run and smoke run select `preferred[0]` as `selected_model_profile`.
+- OpenCode real run and smoke run include `--model <model_arg>` when the selected profile defines `model_arg`.
+- OpenCode real run and smoke run validate required env from the selected profile before worker execution.
 - DeonClaw does not execute fallback profiles yet.
-- DeonClaw does not choose a strategy profile automatically during real run yet.
 - DeonClaw does not switch workers, retry, or run fallback profiles.
-- OpenCode run command construction remains unchanged unless the task uses the existing `model_profile` field.
+- `runs report --by model_profile` groups selected strategy profiles by reusing `model_profile` as the selected profile name while also recording `selected_model_profile`.
 
 ## Z.ai / GLM Example
 
@@ -217,7 +219,7 @@ Provider and model are diagnostic config only in the current task. They are not 
 
 Model profiles are diagnostic and validation metadata plus OpenCode model selection. DeonClaw resolves them, checks worker/profile compatibility, validates required env presence, and passes `model_arg` as `--model` only for OpenCode.
 
-Model strategies are planning metadata for execution. DeonClaw resolves them against `model_profiles` and validates profile existence, worker compatibility and required tags. Dry-run selects `preferred[0]` as `planned_model_profile` and may show OpenCode `--model`; real run does not select a strategy model, switch workers or run fallbacks yet.
+Model strategies are controlled selection metadata for OpenCode execution. DeonClaw resolves them against `model_profiles` and validates profile existence, worker compatibility and required tags. Dry-run selects `preferred[0]` as `planned_model_profile` and may show OpenCode `--model`; real OpenCode run selects `preferred[0]` as `selected_model_profile` and may pass `--model <model_arg>`. Real run does not switch workers, retry, or run fallback profiles yet.
 
 OpenCode with a selected model profile that defines `model_arg` runs through:
 
@@ -229,7 +231,7 @@ Dry-runs, summaries, and artifacts keep the prompt masked as `<prompt>`.
 
 Environment requirements are validation metadata only. DeonClaw does not inject env values into worker command arguments.
 
-The execution trace records env requirement state as `set_masked` or `missing`, but never records the actual environment value.
+The execution trace records `model_strategy: selected`, `selected_model_profile`, provider, model, model_arg, and env requirement state as `set_masked` or `missing`, but never records the actual environment value.
 
 OpenCode runs through the current non-interactive OpenCode CLI contract:
 

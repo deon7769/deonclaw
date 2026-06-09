@@ -14,16 +14,11 @@
 - Task 18.14 - model_strategy schema and validation
 - Task 18.15 - model profile command wiring for OpenCode
 - Task 18.15.1 - model_strategy dry-run planning alignment
+- Task 18.16 - controlled model_strategy execution without fallback
 - execution-trace.json for shared worker runs
 - runs report by worker/status and by model_profile with filters
 
 ## Next milestones
-
-### 18.16 - Controlled model strategy execution
-
-- real run selection from `model_strategy.preferred[0]`
-- explicit execution trace evidence for selected strategy profile
-- no fallback execution in this task
 
 ### 18.17 - Fallback policy/design
 

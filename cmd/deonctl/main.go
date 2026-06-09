@@ -2578,6 +2578,19 @@ type plannedModelProfile struct {
 	ModelArg string
 }
 
+func plannedModelProfileFromResolved(resolved workerconfig.ResolvedModelStrategy) (*plannedModelProfile, error) {
+	planned, ok := resolved.PlannedModelProfile()
+	if !ok {
+		return nil, fmt.Errorf("model_strategy.preferred must not be empty")
+	}
+	return &plannedModelProfile{
+		Name:     planned.Name,
+		Provider: planned.Profile.Provider,
+		Model:    planned.Profile.Model,
+		ModelArg: planned.Profile.ModelArg,
+	}, nil
+}
+
 func configuredOpenCodeDryRunWorkerForTask(workersConfigPath string, task *tasks.Task) (workers.Worker, []workerconfig.EnvRequirementCheck, *plannedModelProfile, error) {
 	cfg, err := configuredWorkersConfig(workersConfigPath)
 	if err != nil {
@@ -2604,18 +2617,12 @@ func configuredOpenCodeDryRunWorkerForTask(workersConfigPath string, task *tasks
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		planned, ok := resolved.PlannedModelProfile()
-		if !ok {
-			return nil, nil, nil, fmt.Errorf("model_strategy.preferred must not be empty")
+		strategyPlan, err = plannedModelProfileFromResolved(resolved)
+		if err != nil {
+			return nil, nil, nil, err
 		}
-		profileName = planned.Name
-		opts.ModelArg = planned.Profile.ModelArg
-		strategyPlan = &plannedModelProfile{
-			Name:     planned.Name,
-			Provider: planned.Profile.Provider,
-			Model:    planned.Profile.Model,
-			ModelArg: planned.Profile.ModelArg,
-		}
+		profileName = strategyPlan.Name
+		opts.ModelArg = strategyPlan.ModelArg
 	}
 
 	envRequirements, err := cfg.EnvRequirementChecksFor("opencode", profileName)
@@ -2646,9 +2653,19 @@ func configuredOpenCodeWorkerForTask(workersConfigPath string, task *tasks.Task)
 		opts.ModelArg = profile.ModelArg
 	}
 	if task != nil && task.ModelStrategy != nil {
-		if _, err := cfg.ResolveModelStrategy("opencode", task.ModelStrategy); err != nil {
+		resolved, err := cfg.ResolveModelStrategy("opencode", task.ModelStrategy)
+		if err != nil {
 			return nil, err
 		}
+		selected, err := plannedModelProfileFromResolved(resolved)
+		if err != nil {
+			return nil, err
+		}
+		opts.ModelStrategy = "selected"
+		opts.SelectedModelProfile = selected.Name
+		opts.Provider = selected.Provider
+		opts.Model = selected.Model
+		opts.ModelArg = selected.ModelArg
 	}
 	return opencode.NewWithOptions(opts), nil
 }
@@ -2670,9 +2687,15 @@ func configuredWorkerDefinitionForTask(workersConfigPath string, task *tasks.Tas
 	if task != nil {
 		profileName = task.ModelProfile
 		if task.ModelStrategy != nil {
-			if _, err := cfg.ResolveModelStrategy(worker, task.ModelStrategy); err != nil {
+			resolved, err := cfg.ResolveModelStrategy(worker, task.ModelStrategy)
+			if err != nil {
 				return workerconfig.Worker{}, nil, err
 			}
+			planned, err := plannedModelProfileFromResolved(resolved)
+			if err != nil {
+				return workerconfig.Worker{}, nil, err
+			}
+			profileName = planned.Name
 		}
 	}
 	envRequirements, err := cfg.EnvRequirementChecksFor(worker, profileName)

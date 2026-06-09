@@ -15,19 +15,23 @@ import (
 )
 
 type Worker struct {
-	command      string
-	modelProfile string
-	provider     string
-	model        string
-	modelArg     string
+	command              string
+	modelProfile         string
+	modelStrategy        string
+	selectedModelProfile string
+	provider             string
+	model                string
+	modelArg             string
 }
 
 type Options struct {
-	Command      string
-	ModelProfile string
-	Provider     string
-	Model        string
-	ModelArg     string
+	Command              string
+	ModelProfile         string
+	ModelStrategy        string
+	SelectedModelProfile string
+	Provider             string
+	Model                string
+	ModelArg             string
 }
 
 const (
@@ -53,11 +57,13 @@ func NewWithOptions(opts Options) *Worker {
 		command = "opencode"
 	}
 	return &Worker{
-		command:      command,
-		modelProfile: strings.TrimSpace(opts.ModelProfile),
-		provider:     strings.TrimSpace(opts.Provider),
-		model:        strings.TrimSpace(opts.Model),
-		modelArg:     strings.TrimSpace(opts.ModelArg),
+		command:              command,
+		modelProfile:         strings.TrimSpace(opts.ModelProfile),
+		modelStrategy:        strings.TrimSpace(opts.ModelStrategy),
+		selectedModelProfile: strings.TrimSpace(opts.SelectedModelProfile),
+		provider:             strings.TrimSpace(opts.Provider),
+		model:                strings.TrimSpace(opts.Model),
+		modelArg:             strings.TrimSpace(opts.ModelArg),
 	}
 }
 
@@ -147,6 +153,15 @@ func (w *Worker) modelMetadata() map[string]string {
 	metadata := map[string]string{}
 	if w.modelProfile != "" {
 		metadata["model_profile"] = w.modelProfile
+	}
+	if w.modelStrategy != "" {
+		metadata["model_strategy"] = w.modelStrategy
+	}
+	if w.selectedModelProfile != "" {
+		metadata["selected_model_profile"] = w.selectedModelProfile
+		if metadata["model_profile"] == "" {
+			metadata["model_profile"] = w.selectedModelProfile
+		}
 	}
 	if w.provider != "" {
 		metadata["provider"] = w.provider

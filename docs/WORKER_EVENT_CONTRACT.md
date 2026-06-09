@@ -95,6 +95,7 @@ The trace is an audit artifact for the runner lifecycle. It records:
 
 - run_id, task_id, worker, and final status
 - model_profile, provider, model, and model_arg when present
+- model_strategy and selected_model_profile when a real OpenCode run selects `model_strategy.preferred[0]`
 - command_display with the prompt masked as `<prompt>`
 - prompt_sha256 instead of raw prompt text
 - context_pack_sha256 when `--domains` built a context pack
@@ -107,7 +108,7 @@ The trace is an audit artifact for the runner lifecycle. It records:
 
 The trace must not contain raw prompts or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
 
-Task `model_strategy` is planning metadata in the current contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real worker runs do not record it as a selected `model_profile`, do not add strategy `model_arg` to worker commands, do not switch workers, and do not execute fallbacks.
+Task `model_strategy` is controlled selection metadata in the current OpenCode contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real OpenCode runs select `preferred[0]` as `selected_model_profile`, record `model_strategy: selected`, reuse `model_profile` for run report grouping, add `--model <model_arg>` when defined, and validate env requirements from the selected profile before worker execution. Real runs do not switch workers, retry, or execute fallbacks.
 
 ## Runs Report
 
@@ -171,6 +172,8 @@ OpenCode adds worker metadata to RunResult.Metadata:
 - opencode.parsed_events
 - opencode.parse_warnings
 - model_profile, when the task selected one
+- model_strategy=selected, when a real run selected from model_strategy
+- selected_model_profile, when a real run selected from model_strategy
 - provider, when the selected profile defines it
 - model, when the selected profile defines it
 - model_arg, when the selected profile defines it
@@ -178,6 +181,8 @@ OpenCode adds worker metadata to RunResult.Metadata:
 The shared summary renders these as:
 
 - Model profile: profile name
+- Model strategy: selected
+- Selected model profile: selected profile name
 - Provider: provider id
 - Model: model id
 - Model arg: OpenCode --model argument

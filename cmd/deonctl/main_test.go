@@ -3197,9 +3197,10 @@ model_profiles:
 	}
 }
 
-func TestRunWorkerOpenCodeRunWithModelStrategyDoesNotExecuteFallbackOrInjectModel(t *testing.T) {
+func TestRunWorkerOpenCodeRunWithModelStrategySelectsFirstPreferredProfile(t *testing.T) {
 	restore := overrideOpenCodeRunConfigDeps(t)
 	defer restore()
+	t.Setenv("ZAI_API_KEY", "strategy-secret")
 
 	tempDir := t.TempDir()
 	argsPath := filepath.Join(tempDir, "opencode-args")
@@ -3216,6 +3217,8 @@ model_profiles:
     provider: z-ai
     model: glm-5.1
     model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
     tags:
       - coding
   opencode-fast:
@@ -3244,11 +3247,127 @@ model_profiles:
 	if err != nil {
 		t.Fatalf("ReadFile(args) error = %v", err)
 	}
-	if strings.Contains(string(args), "--model") || strings.Contains(stdout.String(), "--model") {
-		t.Fatalf("model_strategy selected a model unexpectedly: stdout=%q args=%q", stdout.String(), string(args))
+	if !strings.Contains(string(args), "--model z-ai/glm-5.1") {
+		t.Fatalf("opencode args = %q, want selected preferred --model", args)
 	}
-	if strings.Contains(stdout.String(), "Model profile:") {
-		t.Fatalf("stdout = %q, want no selected model profile summary for strategy planning", stdout.String())
+	if strings.Contains(string(args), "glm-5.1-mini") || strings.Contains(stdout.String(), "glm-5.1-mini") {
+		t.Fatalf("fallback profile was used unexpectedly: stdout=%q args=%q", stdout.String(), string(args))
+	}
+	if !strings.Contains(stdout.String(), "--format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want masked selected strategy command", stdout.String())
+	}
+	runDir := filepath.Join(tempDir, "artifacts", "run-cli-opencode-config-001")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model profile: opencode-zai-glm-5-1")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model strategy: selected")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Selected model profile: opencode-zai-glm-5-1")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Provider: z-ai")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model: glm-5.1")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model arg: z-ai/glm-5.1")
+	tracePath := filepath.Join(runDir, "execution-trace.json")
+	traceJSON := string(mustReadCLIFile(t, tracePath))
+	assertCLIFileContains(t, tracePath, `"model_strategy": "selected"`)
+	assertCLIFileContains(t, tracePath, `"selected_model_profile": "opencode-zai-glm-5-1"`)
+	assertCLIFileContains(t, tracePath, `"model_profile": "opencode-zai-glm-5-1"`)
+	assertCLIFileContains(t, tracePath, `"model_arg": "z-ai/glm-5.1"`)
+	assertCLIFileContains(t, tracePath, `--model z-ai/glm-5.1 <prompt>`)
+	if strings.Contains(traceJSON, "strategy-secret") || strings.Contains(stdout.String()+stderr.String(), "strategy-secret") {
+		t.Fatalf("secret leaked: stdout=%q stderr=%q trace=%s", stdout.String(), stderr.String(), traceJSON)
+	}
+}
+
+func TestRunWorkerOpenCodeRunWithModelStrategyWithoutModelArgKeepsCommandAndRecordsProfile(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+
+	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "opencode-args")
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+model_profiles:
+  opencode-default:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-default
+  require_tags:
+    - coding
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", filepath.Join(tempDir, "deonclaw.db"), "--artifacts-dir", filepath.Join(tempDir, "artifacts"), "--workers-config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	if strings.Contains(string(args), "--model") || strings.Contains(stdout.String(), "--model") {
+		t.Fatalf("command used --model unexpectedly: stdout=%q args=%q", stdout.String(), string(args))
+	}
+	runDir := filepath.Join(tempDir, "artifacts", "run-cli-opencode-config-001")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model strategy: selected")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Selected model profile: opencode-default")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Provider: z-ai")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model: glm-5.1")
+	tracePath := filepath.Join(runDir, "execution-trace.json")
+	assertCLIFileContains(t, tracePath, `"selected_model_profile": "opencode-default"`)
+	assertCLIFileContains(t, tracePath, `"provider": "z-ai"`)
+	assertCLIFileContains(t, tracePath, `"model": "glm-5.1"`)
+}
+
+func TestRunWorkerOpenCodeRunWithModelStrategySelectedProfileMissingEnvFailsBeforeWorker(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+	unsetEnvForTest(t, "ZAI_API_KEY")
+
+	tempDir := t.TempDir()
+	markerPath := filepath.Join(tempDir, "worker-executed")
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  require_tags:
+    - coding
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"worker", "opencode", "run", taskPath, "--store", filepath.Join(tempDir, "deonclaw.db"), "--artifacts-dir", filepath.Join(tempDir, "artifacts"), "--workers-config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "worker opencode missing required env: ZAI_API_KEY") {
+		t.Fatalf("stderr = %q, want selected profile missing env", stderr.String())
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("worker marker exists or stat failed: %v", err)
 	}
 }
 
@@ -3584,6 +3703,84 @@ func TestRunWorkersSmokeRunWithEnvPresentCallsOpenCodeRun(t *testing.T) {
 	assertCLIFileContent(t, filepath.Join(artifactsDir, "run-cli-opencode-config-001", "stdout.jsonl"), "{\"type\":\"done\"}\n")
 	assertNoSecretReference(t, stdout.String()+stderr.String())
 	if strings.Contains(stdout.String()+stderr.String(), "zai-real-secret") {
+		t.Fatalf("output leaked env value: stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+}
+
+func TestRunWorkersSmokeRunWithModelStrategySelectsFirstPreferredProfile(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+	t.Setenv("ZAI_API_KEY", "smoke-strategy-secret")
+
+	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "opencode-args")
+	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
+	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake opencode) error = %v", err)
+	}
+	configPath := writeCLIWorkersConfig(t, `workers:
+  opencode:
+    command: `+fakeOpenCode+`
+model_profiles:
+  opencode-zai-glm-5-1:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1
+    model_arg: z-ai/glm-5.1
+    env:
+      ZAI_API_KEY: required
+    tags:
+      - coding
+  opencode-fast:
+    worker: opencode
+    provider: z-ai
+    model: glm-5.1-mini
+    model_arg: z-ai/glm-5.1-mini
+    tags:
+      - coding
+`)
+	taskPath := writeTaskFileWithModelStrategy(t, "opencode", `  preferred:
+    - opencode-zai-glm-5-1
+  fallback:
+    - opencode-fast
+  require_tags:
+    - coding
+`)
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"workers", "smoke",
+		"--worker", "opencode",
+		"--task", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", artifactsDir,
+		"--workers-config", configPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	args, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	if !strings.Contains(string(args), "--model z-ai/glm-5.1") {
+		t.Fatalf("opencode args = %q, want selected preferred --model", args)
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "command: "+fakeOpenCode+" run --dir ") || !strings.Contains(output, "--format json --model z-ai/glm-5.1 <prompt>") {
+		t.Fatalf("stdout = %q, want smoke run selected strategy command", output)
+	}
+	if strings.Contains(output+string(args), "glm-5.1-mini") {
+		t.Fatalf("fallback profile was used unexpectedly: stdout=%q args=%q", output, string(args))
+	}
+	runDir := filepath.Join(artifactsDir, "run-cli-opencode-config-001")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Model strategy: selected")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Selected model profile: opencode-zai-glm-5-1")
+	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `"model_strategy": "selected"`)
+	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `"selected_model_profile": "opencode-zai-glm-5-1"`)
+	if strings.Contains(stdout.String()+stderr.String(), "smoke-strategy-secret") {
 		t.Fatalf("output leaked env value: stdout=%q stderr=%q", stdout.String(), stderr.String())
 	}
 }

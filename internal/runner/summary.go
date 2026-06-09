@@ -96,6 +96,12 @@ func modelProfileSummaryLines(metadata map[string]string) []string {
 	if value := metadata["model_profile"]; value != "" {
 		lines = append(lines, fmt.Sprintf("Model profile: %s", value))
 	}
+	if value := metadata["model_strategy"]; value != "" {
+		lines = append(lines, fmt.Sprintf("Model strategy: %s", value))
+	}
+	if value := metadata["selected_model_profile"]; value != "" {
+		lines = append(lines, fmt.Sprintf("Selected model profile: %s", value))
+	}
 	if value := metadata["provider"]; value != "" {
 		lines = append(lines, fmt.Sprintf("Provider: %s", value))
 	}
