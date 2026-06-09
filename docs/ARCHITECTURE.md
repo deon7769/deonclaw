@@ -55,7 +55,7 @@ Event model and event storage.
 
 Worker adapters.
 
-Initial adapters:
+Implemented adapters:
 
 - Codex CLI
 - OpenCode
@@ -78,6 +78,18 @@ Later runtime:
 ### `internal/policy`
 
 Path policy, memory policy, worker policy and approval requirements.
+
+### `internal/workerconfig`
+
+Worker config, model profiles, model strategy resolution, and env requirement checks.
+
+### `internal/doctor`
+
+CLI and worker diagnostics, including command availability, profile listing and masked env requirement state.
+
+### `internal/runreport`
+
+Read-only run reporting over SQLite run rows and execution trace artifacts.
 
 ### `internal/memory`
 
@@ -115,17 +127,19 @@ Task
  -> Run
  -> Events
  -> Artifacts
- -> Diff
- -> Summary
- -> ContextPack
- -> Optional MemoryProposal
- -> MemoryProposalLint
+ -> ExecutionTrace
+ -> RunReport
+
+MemoryProposal
+ -> Lint
  -> ApplyPreview
- -> MemoryApproval
- -> ApplyPreflight
+ -> Approval
+ -> Preflight
  -> BackupPlan
  -> BackupResult
- -> Future ApplyResult
+ -> ApplyResult
+ -> RestorePreview
+ -> RestoreResult
 ```
 
 ## Storage model
@@ -150,7 +164,7 @@ Workers receive context packs, not whole memory vaults.
 
 ## Memory safety pipeline
 
-Canonical memory is never modified by workers.
+Canonical memory is never modified directly by workers.
 
 The safe memory workflow is:
 
@@ -162,15 +176,33 @@ The safe memory workflow is:
 6. preflight with content-hash binding
 7. backup plan
 8. backup materialization
-9. real apply, later
+9. real apply
+10. restore dry-run and restore execute when recovery is needed
 
-Real apply is not implemented yet.
+Real apply is implemented for create/append/update/archive. Restore execution is implemented as its own safety path.
 
 ## Worker model
 
 Workers are external tools.
 
 DeonClaw invokes them and captures their output.
+
+Implemented workers:
+
+- Codex CLI dry-run and run
+- OpenCode dry-run and run
+
+`workers.yaml` can define command/provider/model/env metadata. `model_profiles` define reusable worker-bound model metadata and env requirements. Tasks can select a profile with `model_profile`.
+
+For OpenCode, a selected profile with `model_arg` becomes:
+
+```bash
+opencode run --dir <workspace> --format json --model <model_arg> "<prompt>"
+```
+
+Tasks can also define `model_strategy`. Strategy schema and validation are implemented, and dry-run planning selects `preferred[0]` as `planned_model_profile`. Real run automatic selection from `model_strategy`, fallback execution, retry, and worker switching are not implemented yet.
+
+Kimi is `inspiration_only`, not an operational worker.
 
 Workers do not own:
 

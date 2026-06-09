@@ -8,30 +8,55 @@
 - Phase 3 - Workspace/path policy
 - Phase 4 - Domain config and context packs
 - Phase 5A - Memory proposal/lint/dry-run/approval/preflight
-- Phase 5B - Backup/restore plan and materialization
+- Phase 5B - Memory workflow through backup/materialize/apply/restore
+- Phase 6 - OpenCode worker dry-run and run
+- Task 18.13.1 - runs report filters and no-profile split
+- Task 18.14 - model_strategy schema and validation
+- Task 18.15 - model profile command wiring for OpenCode
+- Task 18.15.1 - model_strategy dry-run planning alignment
+- execution-trace.json for shared worker runs
+- runs report by worker/status and by model_profile with filters
 
 ## Next milestones
 
-### Phase 5B - Safe memory apply
+### 18.16 - Controlled model strategy execution
 
-- apply real for create/append/update/archive
-- no automatic git commit initially
+- real run selection from `model_strategy.preferred[0]`
+- explicit execution trace evidence for selected strategy profile
+- no fallback execution in this task
 
-### Phase 6 - OpenCode worker
+### 18.17 - Fallback policy/design
 
-- dry-run worker adapter and CLI are implemented
-- real OpenCode run remains next
-- Z.ai/GLM provider wiring remains later
-- event/log/artifact capture
-- same workspace and policy rules as Codex
+- policy for retry/fallback behavior
+- clear failure boundaries
+- no hidden worker switching
 
-### Phase 7 - Docker runtime
+### 20 - Docker runtime
 
-- containerized worker runs
 - read-only memory mounts
 - artifact volumes
 - restricted secrets
+- runtime cleanup
 
+### 21 - MCP manager
+
+- manage MCP server definitions
+- inspect configured tools
+- keep secrets outside project files
+
+### 22 - Memory index/LanceDB
+
+- derived retrieval/index adapter
+- rebuildable index state
+- source citation metadata
+
+### Later - UI/dashboard
+
+- task list
+- run details
+- event logs
+- artifacts
+- approvals
 ## Historical roadmap
 
 The sections below are the original roadmap and are kept for context.

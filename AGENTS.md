@@ -30,6 +30,8 @@ Implemented:
 - SQLite store
 - Codex worker dry-run and run
 - OpenCode worker dry-run
+- OpenCode worker run
+- OpenCode real smoke validated on the VPS
 - isolated Git worktree workspace
 - dirty baseline protection
 - workspace cleanup
@@ -52,11 +54,22 @@ Implemented:
 - real memory apply for create/append/update/archive
 - restore dry-run
 - restore execute
+- workers config command/provider/model/env diagnostics
+- model profiles
+- task model_profile
+- OpenCode --model through model_profile
+- model_strategy schema and validation
+- model_strategy dry-run planning
+- workers smoke --dry-run model_strategy planning
+- execution trace artifact
+- runs report by worker/status and by model_profile with filters
 
 Not implemented yet:
 
-- OpenCode worker run
+- controlled model_strategy selection in real runs
+- real fallback policy/execution
 - Docker runtime
+- MCP manager
 - memory index/LanceDB
 - UI/dashboard
 
@@ -79,6 +92,7 @@ Not implemented yet:
 - First worker: Codex CLI through `codex exec --json`.
 - Second worker: OpenCode, especially for provider-agnostic execution and Z.ai/GLM usage.
 - Later workers: Claude Code, OpenClaw adapter, Hermes-inspired memory adapter.
+- Kimi status: inspiration_only. Kimi can inform future UX/MCP/ACP ideas, but it is not an operational worker.
 - Memory base: `mysecondbrain` mounted read-only by default.
 - Escalasoft memory: isolated domain, not part of general recall.
 - Auth strategy: harness-managed in MVP.
@@ -133,6 +147,8 @@ Initial workers:
 - Claude Code, later
 - OpenClaw adapter, later
 
+Kimi is `inspiration_only`. Keep it out of operational worker config, doctor output, smoke runs, fallback lists, and run dispatch until a dedicated future task defines a worker contract.
+
 Workers must not own memory policy.
 
 Workers must not write to canonical memory directly.
@@ -185,7 +201,7 @@ Memory index:
 
 ## Memory apply rules
 
-Do not implement real memory writes unless the task explicitly says so.
+Real memory apply is implemented for create/append/update/archive. Do not change the apply or restore chain unless the task explicitly targets memory workflow behavior.
 
 For real memory apply, the required chain is:
 
@@ -203,7 +219,7 @@ proposal
 
 Never skip approval, preflight or backup.
 
-Restore execution is a separate safety path and requires a backup plan, backup result, restore dry-run preview and explicit restore confirmation.
+Restore execution is implemented as a separate safety path and requires a backup plan, backup result, restore dry-run preview and explicit restore confirmation.
 
 ## Memory lifecycle
 
@@ -273,10 +289,12 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence:
 
-1. OpenCode worker run
-2. Docker runtime
-3. memory index/LanceDB
-4. UI/dashboard
+1. controlled model_strategy execution
+2. fallback design
+3. Docker runtime
+4. MCP manager
+5. memory index/LanceDB
+6. UI/dashboard
 
 ## Coding style
 

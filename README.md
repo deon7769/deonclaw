@@ -28,12 +28,13 @@ The first MVP focuses on:
 
 - Go CLI/core
 - structured tasks
-- Codex CLI worker
-- JSONL event capture
+- Codex CLI and OpenCode workers
+- JSONL, mixed, text and empty stdout capture
 - isolated workspaces
 - memory/domain policy
 - path validation
-- memory proposal workflow
+- memory proposal/apply/restore workflow
+- run observability through execution traces and reports
 
 ## Memory direction
 
@@ -52,41 +53,53 @@ Markdown + Git remain canonical.
 3. Claude Code, later
 4. OpenClaw adapter, later
 
+Kimi is `inspiration_only`. It is not an operational worker and must not appear in `workers.yaml`, doctor output, smoke runs, or fallback lists.
+
 ## Status
 
 Functional MVP in active development.
 
 Implemented:
 
-- Codex CLI worker execution
-- OpenCode worker dry-run/run
+- Codex CLI worker dry-run and run
+- OpenCode worker dry-run and run
+- OpenCode real smoke validated on the VPS
 - isolated Git worktree runs
 - path policy and diff artifacts
 - validation commands
 - artifact metadata/list/prune
 - domain config
 - context packs
-- memory proposal/lint/dry-run/approval/preflight
-- safe memory apply for create/append/update/archive with backup/restore chain
+- `workers.yaml` command/provider/model/env metadata
+- `model_profiles`
+- `task.model_profile`
+- OpenCode `--model` through selected `model_profile`
+- `model_strategy` schema and validation
+- `model_strategy` dry-run planning
+- `workers smoke --dry-run` with `model_strategy` planning
+- `execution-trace.json`
+- `runs report`
+- `runs report --by model_profile` and filters
+- memory proposal/lint/dry-run/approval/preflight/backup/materialize/apply/restore workflow
+- real memory apply for create/append/update/archive
+- real restore execution
 
 Not implemented yet:
 
+- real run automatic selection from `model_strategy.preferred[0]`
+- real fallback execution
 - Docker runtime
-- memory index
-- UI
+- MCP manager
+- memory index/LanceDB
+- UI/dashboard
 
 ## Quick command map
 
 ```bash
 deonctl doctor
-deonctl workers doctor --output-format json
-deonctl config env
-deonctl task validate examples/tasks/codex-smoke.yaml
-deonctl domains validate --config configs/examples/domains.yaml
-deonctl context build --task examples/tasks/codex-smoke.yaml --domains configs/examples/domains.yaml --output /tmp/context-pack.md
-deonctl worker codex dry-run examples/tasks/codex-smoke.yaml
-deonctl worker opencode dry-run <opencode-task.yaml>
-deonctl worker opencode run <opencode-task.yaml> --store deonclaw.db --artifacts-dir artifacts --domains configs/examples/domains.yaml --memory-policy configs/examples/memory-policy.yaml
-deonctl artifacts list --store deonclaw.db
-deonctl memory proposal lint --proposal memory-proposal.json --policy configs/examples/memory-policy.yaml
+deonctl workers doctor --worker opencode --workers-config configs/examples/workers.yaml --profiles
+deonctl workers smoke --worker opencode --task examples/tasks/opencode-smoke.yaml --store deonclaw.db --artifacts-dir artifacts --workers-config configs/examples/workers.yaml --dry-run
+deonctl runs report --store deonclaw.db --by model_profile
+deonctl worker opencode run examples/tasks/opencode-smoke.yaml --store deonclaw.db --artifacts-dir artifacts --workers-config configs/examples/workers.yaml
+deonctl worker opencode run examples/tasks/opencode-smoke.yaml --store deonclaw.db --artifacts-dir artifacts --workers-config configs/examples/workers.yaml --domains configs/examples/domains.yaml --memory-policy configs/examples/memory-policy.yaml
 ```

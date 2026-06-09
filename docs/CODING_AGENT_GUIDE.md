@@ -13,11 +13,11 @@ Before changing code, read:
 
 ## Current rule
 
-Do not implement real memory apply unless explicitly asked.
-
 For current sequencing, follow AGENTS.md Next implementation order first.
 
-Do not implement apply/OpenCode out of order.
+Do not implement controlled model_strategy execution, fallback, Docker runtime, MCP manager, memory index, or UI out of order.
+
+Memory apply and restore already exist. Do not alter their behavior unless a task explicitly targets the memory workflow.
 
 The current safe apply chain is:
 
@@ -32,6 +32,7 @@ backup plan -> backup materialization -> restore dry-run -> restore execute
 - cmd/deonctl: CLI parsing and output only
 - internal/runner: run orchestration
 - internal/workers: external worker adapters
+- internal/workerconfig: workers.yaml, model_profiles, model_strategy resolution and env requirement metadata
 - internal/runtime: workspace lifecycle
 - internal/policy: path policy
 - internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/restore-execute/apply-execute
@@ -39,8 +40,29 @@ backup plan -> backup materialization -> restore dry-run -> restore execute
 - internal/domains: domain config
 - internal/store: persistence
 - internal/artifacts: artifact retention/prune
+- internal/doctor: local diagnostics for workers, env requirements and profiles
+- internal/runreport: read-only reporting over persisted runs and execution traces
 
 Do not move business logic back into cmd/deonctl.
+
+## Task sizing
+
+Small Codex task:
+
+- one package or one documentation surface
+- no cross-cutting behavior change
+- validation can be `gofmt`, `git diff --check`, and targeted or full `go test ./...`
+
+Medium Codex task:
+
+- touches CLI plus one internal package
+- adds or changes tests
+- needs artifact or trace review when runner behavior changes
+
+Larger Codex task:
+
+- changes worker execution, memory apply/restore, fallback policy, Docker runtime, MCP manager, or persistence contracts
+- requires a narrow implementation plan, contract review, full tests, and explicit non-goals before coding
 
 ## Test expectations
 
@@ -60,8 +82,9 @@ deonctl workers doctor --worker opencode
 Run:
 
 ~~~bash
-go test ./...
 gofmt -w .
+git diff --check
+go test ./...
 ~~~
 
 Add tests for every new safety rule.
