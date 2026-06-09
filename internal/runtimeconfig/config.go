@@ -112,6 +112,8 @@ func Validate(cfg Config) (ValidationResult, error) {
 		}
 		if mount.Target == "" {
 			errs = append(errs, fmt.Errorf("%s.target is required", prefix))
+		} else if reason := invalidMountTargetReason(mount.Target); reason != "" {
+			errs = append(errs, fmt.Errorf("%s.target %q is not allowed: %s", prefix, mount.Target, reason))
 		}
 		switch mount.Mode {
 		case MountModeReadOnly, MountModeReadWrite:
@@ -181,23 +183,22 @@ func normalize(cfg *Config) {
 }
 
 func dangerousMountSourceReason(source string) string {
-	source = strings.TrimSpace(source)
-	expanded := source
-	if strings.HasPrefix(expanded, "~/") {
-		home, err := os.UserHomeDir()
-		if err == nil && home != "" {
-			expanded = filepath.Join(home, strings.TrimPrefix(expanded, "~/"))
-		}
-	}
-	cleaned := filepath.Clean(expanded)
-	slashed := filepath.ToSlash(cleaned)
-	lower := strings.ToLower(slashed)
+	lower := normalizedPath(source)
 
 	switch lower {
-	case "/", "/home", ".env":
+	case "/", "~", "/home", "/root", "/var/run/docker.sock", ".env":
 		return "dangerous host path"
 	}
-	if lower == "~/.ssh" || strings.HasSuffix(lower, "/.ssh") {
+	if strings.HasPrefix(lower, "~/") {
+		return "home directory mounts are not allowed"
+	}
+	if isPathOrDescendant(lower, "/home") {
+		return "home directory mounts are not allowed"
+	}
+	if isPathOrDescendant(lower, "/root") {
+		return "root home mounts are not allowed"
+	}
+	if lower == "~/.ssh" || strings.HasSuffix(lower, "/.ssh") || strings.Contains(lower, "/.ssh/") {
 		return "ssh material must not be mounted"
 	}
 	for _, part := range strings.Split(lower, "/") {
@@ -209,4 +210,29 @@ func dangerousMountSourceReason(source string) string {
 		}
 	}
 	return ""
+}
+
+func invalidMountTargetReason(target string) string {
+	lower := normalizedPath(target)
+	if !strings.HasPrefix(lower, "/") {
+		return "container target must be absolute"
+	}
+	switch lower {
+	case "/", "/root", "/etc", "/var/run/docker.sock":
+		return "dangerous container target"
+	}
+	if isPathOrDescendant(lower, "/root") || isPathOrDescendant(lower, "/etc") {
+		return "dangerous container target"
+	}
+	return ""
+}
+
+func normalizedPath(path string) string {
+	path = strings.TrimSpace(path)
+	cleaned := filepath.Clean(path)
+	return strings.ToLower(filepath.ToSlash(cleaned))
+}
+
+func isPathOrDescendant(path string, parent string) bool {
+	return path == parent || strings.HasPrefix(path, parent+"/")
 }

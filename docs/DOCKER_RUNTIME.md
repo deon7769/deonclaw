@@ -69,14 +69,26 @@ Allowed pattern:
 - code workspace mounted `rw` into `/workspace`
 - memory sources such as `mysecondbrain` mounted `ro`
 - isolated domain sources such as `escalasoft_brain` mounted `ro`
+- secrets are never passed through raw mounts
 
 Blocked sources:
 
 - `/`
-- `/home`
+- `/home` and anything under `/home`
+- `/root` and anything under `/root`
+- `~` and anything under `~`
 - `~/.ssh`
 - `.env` files
 - any path component named `secrets`
+- `/var/run/docker.sock`
+
+Blocked targets:
+
+- relative paths
+- `/`
+- `/root` and anything under `/root`
+- `/etc` and anything under `/etc`
+- `/var/run/docker.sock`
 
 Secrets should come from a future controlled secret injection layer, not from raw host mounts. Task 20.0 deliberately does not mount secrets by default.
 

@@ -56,7 +56,21 @@ func TestValidateRejectsInvalidMode(t *testing.T) {
 }
 
 func TestValidateRejectsDangerousMountSources(t *testing.T) {
-	cases := []string{"/", "/home", "~/.ssh", ".env", "config/.env", "secrets", "config/secrets"}
+	cases := []string{
+		"/",
+		"/home",
+		"/home/davi",
+		"/root",
+		"/root/.config",
+		"~",
+		"~/workspace",
+		"~/.ssh",
+		".env",
+		"config/.env",
+		"secrets",
+		"config/secrets",
+		"/var/run/docker.sock",
+	}
 	for _, source := range cases {
 		t.Run(source, func(t *testing.T) {
 			cfg := validDockerConfig()
@@ -68,6 +82,32 @@ func TestValidateRejectsDangerousMountSources(t *testing.T) {
 			}
 			if !strings.Contains(err.Error(), "is not allowed") {
 				t.Fatalf("error = %v, want not allowed", err)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsDangerousMountTargets(t *testing.T) {
+	cases := []string{
+		"workspace",
+		"/",
+		"/root",
+		"/root/.config",
+		"/etc",
+		"/etc/deonclaw",
+		"/var/run/docker.sock",
+	}
+	for _, target := range cases {
+		t.Run(target, func(t *testing.T) {
+			cfg := validDockerConfig()
+			cfg.Runtime.Docker.Mounts = []MountSpec{{Source: ".", Target: target, Mode: "ro"}}
+
+			_, err := Validate(cfg)
+			if err == nil {
+				t.Fatalf("Validate() error = nil, want rejection for target %q", target)
+			}
+			if !strings.Contains(err.Error(), "target") || !strings.Contains(err.Error(), "is not allowed") {
+				t.Fatalf("error = %v, want target not allowed", err)
 			}
 		})
 	}
