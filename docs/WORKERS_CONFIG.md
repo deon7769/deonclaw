@@ -4,6 +4,8 @@ DeonClaw loads worker command settings from `workers.yaml` when commands receive
 
 The current config is command-first. Provider metadata can be recorded for diagnostics and future routing. When an OpenCode task selects a model profile with `model_arg`, DeonClaw passes that value as `--model <model_arg>` to OpenCode.
 
+Worker config is separate from runtime config. Docker runtime settings live in `runtime.yaml` and are documented in `docs/DOCKER_RUNTIME.md`. Task 20.0 only validates runtime config and produces a Docker command plan; workers still execute locally.
+
 ## Fields
 
 Each entry under `workers` may define:

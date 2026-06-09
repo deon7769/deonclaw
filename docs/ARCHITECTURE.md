@@ -75,6 +75,12 @@ Later runtime:
 
 - Docker containers
 
+### `internal/runtimeconfig`
+
+Runtime configuration, Docker runtime validation, mount policy checks and Docker command planning.
+
+Task 20.0 implements Docker config validation and `docker-plan` only. Workers still execute through the local runtime until a later task wires Docker execution into the shared runner.
+
 ### `internal/policy`
 
 Path policy, memory policy, worker policy and approval requirements.
@@ -214,6 +220,7 @@ Workers do not own:
 ## Security model
 
 - workers run in scoped workspaces
+- Docker runtime config blocks dangerous host mounts and keeps memory mounts read-only by default
 - memory mounts are read-only by default
 - secrets are never committed
 - auth is harness-managed in MVP

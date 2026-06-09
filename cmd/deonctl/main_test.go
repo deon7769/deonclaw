@@ -328,6 +328,105 @@ func TestRunDomainsList(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeValidate(t *testing.T) {
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime config valid: mode=docker") {
+		t.Fatalf("stdout = %q, want runtime valid", stdout.String())
+	}
+}
+
+func TestRunRuntimeValidateRejectsDangerousMount(t *testing.T) {
+	configPath := writeCLIRuntimeConfig(t, `runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    mounts:
+      - source: /
+        target: /host
+        mode: ro
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `runtime.docker.mounts[0].source "/" is not allowed`) {
+		t.Fatalf("stderr = %q, want dangerous mount rejection", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestRunRuntimeDockerPlanText(t *testing.T) {
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-plan", "--config", configPath, "--workspace", "."}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"runtime: docker",
+		"docker run --rm --network none",
+		"--memory 2g",
+		"--cpus 2",
+		"--read-only",
+		"-v .:/workspace:rw",
+		"-v mysecondbrain:/memory/mysecondbrain:ro",
+		"--label deonclaw.workspace=.",
+		"deonclaw-runner:latest",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestRunRuntimeDockerPlanJSON(t *testing.T) {
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-plan", "--config", configPath, "--workspace", ".", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !json.Valid(stdout.Bytes()) {
+		t.Fatalf("stdout is not valid JSON: %s", stdout.String())
+	}
+	var decoded struct {
+		Command []string `json:"command"`
+		Display string   `json:"display"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if len(decoded.Command) == 0 || decoded.Command[0] != "docker" {
+		t.Fatalf("command = %#v, want docker command", decoded.Command)
+	}
+	if strings.Contains(decoded.Display, "<prompt>") {
+		t.Fatalf("display unexpectedly contains worker prompt marker: %q", decoded.Display)
+	}
+	if !strings.Contains(decoded.Display, "docker run --rm --network none") {
+		t.Fatalf("display = %q, want docker plan", decoded.Display)
+	}
+}
+
 func TestRunContextBuild(t *testing.T) {
 	taskPath := writeTaskFile(t, "codex")
 	domainsPath := writeDomainsConfigFile(t)
@@ -5130,6 +5229,38 @@ func loadCLIExamplePolicy(t *testing.T) *memory.MemoryPolicy {
 		t.Fatalf("LoadPolicyFromFile() error = %v", err)
 	}
 	return policy
+}
+
+func writeCLIRuntimeConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "runtime.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write runtime config: %v", err)
+	}
+	return path
+}
+
+func validRuntimeConfigYAML() string {
+	return `runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    memory_limit: 2g
+    cpus: "2"
+    mounts:
+      - source: .
+        target: /workspace
+        mode: rw
+      - source: mysecondbrain
+        target: /memory/mysecondbrain
+        mode: ro
+      - source: escalasoft_brain
+        target: /memory/escalasoft_brain
+        mode: ro
+`
 }
 
 func buildCLIMemoryApproval(t *testing.T, proposal memory.MemoryProposal, policy *memory.MemoryPolicy, decision memory.ApprovalDecision) memory.MemoryApproval {

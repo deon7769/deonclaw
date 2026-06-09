@@ -62,6 +62,7 @@ Implemented:
 - model_strategy dry-run planning
 - controlled model_strategy execution for OpenCode real runs
 - fallback_policy schema and validation for model_strategy
+- Docker runtime config validation and docker-plan dry-run
 - workers smoke --dry-run model_strategy planning
 - execution trace artifact
 - runs report by worker/status and by model_profile with filters
@@ -69,7 +70,7 @@ Implemented:
 Not implemented yet:
 
 - real fallback execution/retry
-- Docker runtime
+- Docker worker execution
 - MCP manager
 - memory index/LanceDB
 - UI/dashboard
@@ -290,10 +291,9 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence:
 
-1. Docker runtime
-2. MCP manager
-3. memory index/LanceDB
-4. UI/dashboard
+1. MCP manager
+2. memory index/LanceDB
+3. UI/dashboard
 
 ## Coding style
 

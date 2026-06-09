@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -25,6 +26,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/runreport"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
+	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workerconfig"
@@ -45,6 +47,8 @@ Usage:
   deonctl domains validate --config <path>
   deonctl domains list --config <path>
   deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
+  deonctl runtime validate --config <runtime.yaml>
+  deonctl runtime docker-plan --config <runtime.yaml> --workspace <path> [--output-format text|json]
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -200,6 +204,32 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runContextBuild(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "runtime":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			opts, err := parseRuntimeValidateOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runRuntimeValidate(opts, stdout, stderr)
+		case "docker-plan":
+			opts, err := parseRuntimeDockerPlanOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runRuntimeDockerPlan(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -468,6 +498,120 @@ func runContextBuild(opts contextBuildOptions, stdout io.Writer, stderr io.Write
 	if len(pack.Warnings) > 0 {
 		fmt.Fprintf(stdout, "warnings: %d\n", len(pack.Warnings))
 	}
+	return 0
+}
+
+type runtimeValidateOptions struct {
+	configPath string
+}
+
+func parseRuntimeValidateOptions(args []string) (runtimeValidateOptions, error) {
+	var opts runtimeValidateOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return runtimeValidateOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		default:
+			return runtimeValidateOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return runtimeValidateOptions{}, fmt.Errorf("missing --config")
+	}
+	return opts, nil
+}
+
+func runRuntimeValidate(opts runtimeValidateOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := runtimeconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime validate failed: %v\n", err)
+		return 1
+	}
+	result, err := runtimeconfig.Validate(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime validate failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "runtime config valid: mode=%s\n", cfg.Runtime.Mode)
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
+	}
+	return 0
+}
+
+type runtimeDockerPlanOptions struct {
+	configPath   string
+	workspace    string
+	outputFormat string
+}
+
+func parseRuntimeDockerPlanOptions(args []string) (runtimeDockerPlanOptions, error) {
+	opts := runtimeDockerPlanOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return runtimeDockerPlanOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--workspace":
+			if i+1 >= len(args) {
+				return runtimeDockerPlanOptions{}, fmt.Errorf("missing value for --workspace")
+			}
+			opts.workspace = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return runtimeDockerPlanOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return runtimeDockerPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return runtimeDockerPlanOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.workspace == "" {
+		return runtimeDockerPlanOptions{}, fmt.Errorf("missing --workspace")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return runtimeDockerPlanOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRuntimeDockerPlan(opts runtimeDockerPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := runtimeconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime docker-plan failed: %v\n", err)
+		return 1
+	}
+	plan, err := runtimeconfig.PlanDocker(cfg, opts.workspace)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime docker-plan failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat == "json" {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(plan); err != nil {
+			fmt.Fprintf(stderr, "runtime docker-plan output failed: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintln(stdout, "runtime: docker")
+	for _, warning := range plan.Warnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
+	}
+	fmt.Fprintf(stdout, "command: %s\n", plan.Display)
 	return 0
 }
 

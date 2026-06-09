@@ -15,7 +15,7 @@ Before changing code, read:
 
 For current sequencing, follow AGENTS.md Next implementation order first.
 
-Do not implement fallback execution, Docker runtime, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only.
+Do not implement fallback execution, Docker worker execution, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only, and the current Docker surface is config validation plus dry-run planning only.
 
 Memory apply and restore already exist. Do not alter their behavior unless a task explicitly targets the memory workflow.
 
@@ -34,6 +34,7 @@ backup plan -> backup materialization -> restore dry-run -> restore execute
 - internal/workers: external worker adapters
 - internal/workerconfig: workers.yaml, model_profiles, model_strategy resolution, fallback policy schema validation, and env requirement metadata
 - internal/runtime: workspace lifecycle
+- internal/runtimeconfig: runtime.yaml loading, validation, Docker mount policy, and docker-plan generation
 - internal/policy: path policy
 - internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/restore-execute/apply-execute
 - internal/contextpack: scoped context generation

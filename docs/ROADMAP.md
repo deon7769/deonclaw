@@ -16,17 +16,11 @@
 - Task 18.15.1 - model_strategy dry-run planning alignment
 - Task 18.16 - controlled model_strategy execution without fallback
 - Task 18.17 - fallback policy design/schema without execution
+- Task 20.0 - Docker runtime config validation and docker-plan foundation
 - execution-trace.json for shared worker runs
 - runs report by worker/status and by model_profile with filters
 
 ## Next milestones
-
-### 20 - Docker runtime
-
-- read-only memory mounts
-- artifact volumes
-- restricted secrets
-- runtime cleanup
 
 ### 21 - MCP manager
 
