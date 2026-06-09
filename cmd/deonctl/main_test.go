@@ -427,6 +427,136 @@ func TestRunRuntimeDockerPlanJSON(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeDockerExecWithFakeDockerCapturesArgs(t *testing.T) {
+	argsPath := installFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+printf 'docker stdout\n'
+printf 'docker stderr\n' >&2
+exit 0
+`)
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-exec", "--config", configPath, "--workspace", ".", "--", "echo", "hello"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "docker stdout") {
+		t.Fatalf("stdout = %q, want fake docker stdout", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "docker stderr") {
+		t.Fatalf("stderr = %q, want fake docker stderr", stderr.String())
+	}
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	for _, want := range []string{"run", "--rm", "--network", "none", "--read-only", "deonclaw-runner:latest", "echo", "hello"} {
+		if !stringSliceContains(args, want) {
+			t.Fatalf("docker args = %#v, want %q", args, want)
+		}
+	}
+	joined := strings.Join(args, " ")
+	if strings.Contains(joined, "sh -c") {
+		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+	if args[len(args)-2] != "echo" || args[len(args)-1] != "hello" {
+		t.Fatalf("docker args tail = %#v, want command appended after image", args)
+	}
+}
+
+func TestRunRuntimeDockerExecRejectsEmptyCommand(t *testing.T) {
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-exec", "--config", configPath, "--workspace", ".", "--"}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing command after --") {
+		t.Fatalf("stderr = %q, want empty command rejection", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestRunRuntimeDockerExecInvalidConfigFailsBeforeDocker(t *testing.T) {
+	argsPath := installFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	configPath := writeCLIRuntimeConfig(t, `runtime:
+  mode: podman
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-exec", "--config", configPath, "--workspace", ".", "--", "echo", "hello"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `runtime.mode "podman" is not supported`) {
+		t.Fatalf("stderr = %q, want invalid config", stderr.String())
+	}
+	assertFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunRuntimeDockerExecDangerousMountFailsBeforeDocker(t *testing.T) {
+	argsPath := installFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	configPath := writeCLIRuntimeConfig(t, `runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    mounts:
+      - source: /
+        target: /workspace
+        mode: ro
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-exec", "--config", configPath, "--workspace", ".", "--", "echo", "hello"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `runtime.docker.mounts[0].source "/" is not allowed`) {
+		t.Fatalf("stderr = %q, want dangerous mount rejection", stderr.String())
+	}
+	assertFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunRuntimeDockerExecPropagatesNonZeroExitCode(t *testing.T) {
+	installFakeDocker(t, `#!/bin/sh
+printf 'docker stdout\n'
+printf 'docker stderr\n' >&2
+exit 17
+`)
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-exec", "--config", configPath, "--workspace", ".", "--", "false"}, &stdout, &stderr)
+	if code != 17 {
+		t.Fatalf("run() exit code = %d, want 17", code)
+	}
+	if !strings.Contains(stdout.String(), "docker stdout") {
+		t.Fatalf("stdout = %q, want fake docker stdout", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "docker stderr") {
+		t.Fatalf("stderr = %q, want fake docker stderr", stderr.String())
+	}
+}
+
 func TestRunContextBuild(t *testing.T) {
 	taskPath := writeTaskFile(t, "codex")
 	domainsPath := writeDomainsConfigFile(t)
@@ -5229,6 +5359,42 @@ func loadCLIExamplePolicy(t *testing.T) *memory.MemoryPolicy {
 		t.Fatalf("LoadPolicyFromFile() error = %v", err)
 	}
 	return policy
+}
+
+func installFakeDocker(t *testing.T, script string) string {
+	t.Helper()
+	tempDir := t.TempDir()
+	fakeDocker := filepath.Join(tempDir, "docker")
+	argsPath := filepath.Join(tempDir, "docker.args")
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake docker) error = %v", err)
+	}
+	t.Setenv("DEONCLAW_FAKE_DOCKER_ARGS", argsPath)
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsPath
+}
+
+func assertFileEmptyOrMissing(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("%s = %q, want empty or missing", path, string(data))
+	}
+}
+
+func stringSliceContains(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func writeCLIRuntimeConfig(t *testing.T, content string) string {

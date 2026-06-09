@@ -1,8 +1,8 @@
 # Docker Runtime
 
-Task 20.0 adds the Docker runtime foundation only.
+Task 20.0 adds the Docker runtime foundation.
 
-DeonClaw can now load and validate `runtime.yaml` and produce a dry-run Docker command plan. Codex and OpenCode still run through the existing local runtime in this task. No worker is executed inside Docker yet.
+DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, and execute a simple explicit command inside Docker. Codex and OpenCode still run through the existing local runtime. No worker is executed inside Docker yet.
 
 ## Commands
 
@@ -20,6 +20,22 @@ deonctl runtime docker-plan --config configs/examples/runtime.yaml --workspace .
 ~~~
 
 `docker-plan` prints a `docker run ...` command shape only. It does not start a container and it does not dispatch workers.
+
+Execute a simple command inside the configured Docker runtime:
+
+~~~bash
+deonctl runtime docker-exec --config configs/examples/runtime.yaml --workspace . -- echo hello
+~~~
+
+`docker-exec` runs `docker run` with the validated runtime plan and appends the command after the image. It captures and streams stdout/stderr directly and returns the container exit code.
+
+`docker-exec` is intentionally narrow:
+
+- the command must appear after `--`
+- empty commands are rejected
+- there is no implicit shell
+- DeonClaw does not add `sh -c`
+- workers are not dispatched through this command
 
 ## Config Shape
 
@@ -101,9 +117,10 @@ Current state:
 - runtime schema implemented
 - runtime validation implemented
 - Docker command planning implemented
+- simple Docker command execution implemented
 - worker execution remains local
 
-Not implemented in Task 20.0:
+Not implemented yet:
 
 - running Codex or OpenCode inside Docker
 - automatic fallback execution

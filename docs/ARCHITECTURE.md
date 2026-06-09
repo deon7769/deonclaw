@@ -77,9 +77,9 @@ Later runtime:
 
 ### `internal/runtimeconfig`
 
-Runtime configuration, Docker runtime validation, mount policy checks and Docker command planning.
+Runtime configuration, Docker runtime validation, mount policy checks, Docker command planning and simple Docker command execution planning.
 
-Task 20.0 implements Docker config validation and `docker-plan` only. Workers still execute through the local runtime until a later task wires Docker execution into the shared runner.
+Task 20.1 implements `runtime docker-exec` for explicit simple commands. Workers still execute through the local runtime until a later task wires Docker execution into the shared runner.
 
 ### `internal/policy`
 

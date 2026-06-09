@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -49,6 +50,7 @@ Usage:
   deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
   deonctl runtime validate --config <runtime.yaml>
   deonctl runtime docker-plan --config <runtime.yaml> --workspace <path> [--output-format text|json]
+  deonctl runtime docker-exec --config <runtime.yaml> --workspace <path> -- <command> [args...]
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -230,6 +232,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runRuntimeDockerPlan(opts, stdout, stderr)
+		case "docker-exec":
+			opts, err := parseRuntimeDockerExecOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runRuntimeDockerExec(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -612,6 +622,77 @@ func runRuntimeDockerPlan(opts runtimeDockerPlanOptions, stdout io.Writer, stder
 		fmt.Fprintf(stdout, "warning: %s\n", warning)
 	}
 	fmt.Fprintf(stdout, "command: %s\n", plan.Display)
+	return 0
+}
+
+type runtimeDockerExecOptions struct {
+	configPath string
+	workspace  string
+	command    []string
+}
+
+func parseRuntimeDockerExecOptions(args []string) (runtimeDockerExecOptions, error) {
+	var opts runtimeDockerExecOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return runtimeDockerExecOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--workspace":
+			if i+1 >= len(args) {
+				return runtimeDockerExecOptions{}, fmt.Errorf("missing value for --workspace")
+			}
+			opts.workspace = args[i+1]
+			i++
+		case "--":
+			opts.command = append([]string(nil), args[i+1:]...)
+			i = len(args)
+		default:
+			return runtimeDockerExecOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return runtimeDockerExecOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.workspace == "" {
+		return runtimeDockerExecOptions{}, fmt.Errorf("missing --workspace")
+	}
+	if len(opts.command) == 0 || strings.TrimSpace(opts.command[0]) == "" {
+		return runtimeDockerExecOptions{}, fmt.Errorf("missing command after --")
+	}
+	return opts, nil
+}
+
+func runRuntimeDockerExec(opts runtimeDockerExecOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := runtimeconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime docker-exec failed: %v\n", err)
+		return 1
+	}
+	plan, err := runtimeconfig.PlanDockerExec(cfg, opts.workspace, opts.command)
+	if err != nil {
+		fmt.Fprintf(stderr, "runtime docker-exec failed: %v\n", err)
+		return 1
+	}
+	if len(plan.Command) == 0 {
+		fmt.Fprintln(stderr, "runtime docker-exec failed: empty docker command")
+		return 1
+	}
+
+	cmd := exec.CommandContext(context.Background(), plan.Command[0], plan.Command[1:]...)
+	cmd.Stdout = stdout
+	cmd.Stderr = stderr
+	if err := cmd.Run(); err != nil {
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			return exitErr.ExitCode()
+		}
+		fmt.Fprintf(stderr, "runtime docker-exec failed: %v\n", err)
+		return 1
+	}
 	return 0
 }
 

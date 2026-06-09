@@ -173,6 +173,45 @@ func TestPlanDockerBuildsCommand(t *testing.T) {
 	}
 }
 
+func TestPlanDockerExecAppendsCommandAfterImage(t *testing.T) {
+	plan, err := PlanDockerExec(validDockerConfig(), "/tmp/workspace", []string{"echo", "hello"})
+	if err != nil {
+		t.Fatalf("PlanDockerExec() error = %v", err)
+	}
+
+	if len(plan.Command) < 3 {
+		t.Fatalf("command = %#v, want docker plan plus exec command", plan.Command)
+	}
+	imageIndex := -1
+	for i, part := range plan.Command {
+		if part == "deonclaw-runner:latest" {
+			imageIndex = i
+			break
+		}
+	}
+	if imageIndex < 0 {
+		t.Fatalf("command = %#v, want image", plan.Command)
+	}
+	gotTail := plan.Command[imageIndex+1:]
+	wantTail := []string{"echo", "hello"}
+	if strings.Join(gotTail, "\x00") != strings.Join(wantTail, "\x00") {
+		t.Fatalf("command tail = %#v, want %#v", gotTail, wantTail)
+	}
+	if strings.Contains(plan.Display, "sh -c") {
+		t.Fatalf("display = %q, must not use implicit shell", plan.Display)
+	}
+}
+
+func TestPlanDockerExecRejectsEmptyCommand(t *testing.T) {
+	_, err := PlanDockerExec(validDockerConfig(), "/tmp/workspace", nil)
+	if err == nil {
+		t.Fatal("PlanDockerExec() error = nil, want empty command rejection")
+	}
+	if !strings.Contains(err.Error(), "command must not be empty") {
+		t.Fatalf("error = %v, want empty command rejection", err)
+	}
+}
+
 func TestPlanDockerRejectsLocalRuntime(t *testing.T) {
 	cfg := validDockerConfig()
 	cfg.Runtime.Mode = "local"

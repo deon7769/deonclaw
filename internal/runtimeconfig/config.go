@@ -168,6 +168,20 @@ func PlanDocker(cfg Config, workspace string) (DockerPlan, error) {
 	}, nil
 }
 
+func PlanDockerExec(cfg Config, workspace string, execCommand []string) (DockerPlan, error) {
+	if len(execCommand) == 0 || strings.TrimSpace(execCommand[0]) == "" {
+		return DockerPlan{}, errors.New("docker exec command must not be empty")
+	}
+
+	plan, err := PlanDocker(cfg, workspace)
+	if err != nil {
+		return DockerPlan{}, err
+	}
+	plan.Command = append(plan.Command, execCommand...)
+	plan.Display = strings.Join(plan.Command, " ")
+	return plan, nil
+}
+
 func normalize(cfg *Config) {
 	cfg.Runtime.Mode = strings.TrimSpace(cfg.Runtime.Mode)
 	cfg.Runtime.Docker.Image = strings.TrimSpace(cfg.Runtime.Docker.Image)
