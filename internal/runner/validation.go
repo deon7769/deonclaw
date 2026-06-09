@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	"github.com/deon7769/deonclaw/internal/tasks"
 )
 
@@ -36,6 +37,7 @@ type ValidationResult struct {
 
 type ValidationCommandResult struct {
 	Name                string   `json:"name"`
+	Runtime             string   `json:"runtime,omitempty"`
 	Command             string   `json:"command"`
 	Args                []string `json:"args,omitempty"`
 	TimeoutSeconds      int      `json:"timeout_seconds"`
@@ -52,6 +54,35 @@ type ValidationCommandResult struct {
 }
 
 func RunValidationCommands(ctx context.Context, workspace string, commands []tasks.ValidationCommand) ValidationResult {
+	return runValidationCommands(ctx, workspace, commands, tasks.ValidationRuntimeLocal, runLocalValidationCommand)
+}
+
+func NewDockerValidationRunner(cfg runtimeconfig.Config) ValidationRunner {
+	return func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) ValidationResult {
+		return RunDockerValidationCommands(ctx, workspace, commands, cfg)
+	}
+}
+
+func RunDockerValidationCommands(ctx context.Context, workspace string, commands []tasks.ValidationCommand, cfg runtimeconfig.Config) ValidationResult {
+	if len(commands) == 0 {
+		return skippedValidation(commands, "no validation commands configured")
+	}
+	if _, err := runtimeconfig.PlanDocker(cfg, workspace); err != nil {
+		return ValidationResult{
+			Status:       ValidationFailed,
+			CommandCount: len(commands),
+			Commands:     []ValidationCommandResult{},
+			Error:        fmt.Sprintf("docker validation runtime config invalid: %v", err),
+		}
+	}
+	return runValidationCommands(ctx, workspace, commands, tasks.ValidationRuntimeDocker, func(ctx context.Context, workspace string, command tasks.ValidationCommand) ValidationCommandResult {
+		return runDockerValidationCommand(ctx, workspace, command, cfg)
+	})
+}
+
+type validationCommandRunner func(context.Context, string, tasks.ValidationCommand) ValidationCommandResult
+
+func runValidationCommands(ctx context.Context, workspace string, commands []tasks.ValidationCommand, runtime string, runCommand validationCommandRunner) ValidationResult {
 	if len(commands) == 0 {
 		return skippedValidation(commands, "no validation commands configured")
 	}
@@ -62,7 +93,8 @@ func RunValidationCommands(ctx context.Context, workspace string, commands []tas
 		Commands:     make([]ValidationCommandResult, 0, len(commands)),
 	}
 	for _, command := range commands {
-		commandResult := runValidationCommand(ctx, workspace, command)
+		commandResult := runCommand(ctx, workspace, command)
+		commandResult.Runtime = runtime
 		result.Commands = append(result.Commands, commandResult)
 		if commandResult.Status != ValidationPassed {
 			result.Status = ValidationFailed
@@ -82,7 +114,7 @@ func skippedValidation(commands []tasks.ValidationCommand, reason string) Valida
 	}
 }
 
-func runValidationCommand(ctx context.Context, workspace string, command tasks.ValidationCommand) ValidationCommandResult {
+func runLocalValidationCommand(ctx context.Context, workspace string, command tasks.ValidationCommand) ValidationCommandResult {
 	timeoutSeconds := command.TimeoutSeconds
 	if timeoutSeconds == 0 {
 		timeoutSeconds = defaultValidationTimeoutSeconds
@@ -114,6 +146,71 @@ func runValidationCommand(ctx context.Context, workspace string, command tasks.V
 		Stdout:         stdout.String(),
 		Stderr:         stderr.String(),
 	}
+	if stdout.Truncated() {
+		commandResult.StdoutTruncated = true
+		commandResult.StdoutOriginalBytes = stdout.OriginalBytes()
+	}
+	if stderr.Truncated() {
+		commandResult.StderrTruncated = true
+		commandResult.StderrOriginalBytes = stderr.OriginalBytes()
+	}
+	if err == nil {
+		return commandResult
+	}
+
+	commandResult.Status = ValidationFailed
+	commandResult.ExitCode = commandExitCode(err)
+	commandResult.Error = err.Error()
+	if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
+		commandResult.Status = validationTimedOut
+		commandResult.ExitCode = -1
+		commandResult.Error = fmt.Sprintf("validation command timed out after %d seconds", timeoutSeconds)
+	}
+	return commandResult
+}
+
+func runDockerValidationCommand(ctx context.Context, workspace string, command tasks.ValidationCommand, cfg runtimeconfig.Config) ValidationCommandResult {
+	timeoutSeconds := command.TimeoutSeconds
+	if timeoutSeconds == 0 {
+		timeoutSeconds = defaultValidationTimeoutSeconds
+	}
+
+	commandResult := ValidationCommandResult{
+		Name:           command.Name,
+		Command:        command.Command,
+		Args:           append([]string(nil), command.Args...),
+		TimeoutSeconds: timeoutSeconds,
+		ExitCode:       0,
+		Status:         ValidationPassed,
+	}
+
+	execCommand := append([]string{command.Command}, command.Args...)
+	plan, err := runtimeconfig.PlanDockerExec(cfg, workspace, execCommand)
+	if err != nil {
+		commandResult.Status = ValidationFailed
+		commandResult.ExitCode = -1
+		commandResult.Error = err.Error()
+		return commandResult
+	}
+
+	commandCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(commandCtx, plan.Command[0], plan.Command[1:]...)
+	cmd.Dir = workspace
+
+	stdout := newLimitedOutput(defaultValidationOutputLimitBytes)
+	stderr := newLimitedOutput(defaultValidationOutputLimitBytes)
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	start := time.Now()
+	err = cmd.Run()
+	duration := time.Since(start)
+
+	commandResult.DurationMS = duration.Milliseconds()
+	commandResult.Stdout = stdout.String()
+	commandResult.Stderr = stderr.String()
 	if stdout.Truncated() {
 		commandResult.StdoutTruncated = true
 		commandResult.StdoutOriginalBytes = stdout.OriginalBytes()
@@ -193,6 +290,11 @@ func validationLog(result ValidationResult) []byte {
 		output.WriteString("Command: ")
 		output.WriteString(command.Name)
 		output.WriteByte('\n')
+		if command.Runtime != "" {
+			output.WriteString("Runtime: ")
+			output.WriteString(command.Runtime)
+			output.WriteByte('\n')
+		}
 		output.WriteString("Exec: ")
 		output.WriteString(displayCommand(command.Command, command.Args))
 		output.WriteByte('\n')

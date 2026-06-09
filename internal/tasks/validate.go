@@ -15,6 +15,9 @@ const (
 	FallbackNeverRetryPolicyFailed  = "policy_failed"
 	FallbackNeverRetryMemoryPolicy  = "memory_policy_failed"
 	DefaultFallbackPolicyMaxAttempt = 1
+
+	ValidationRuntimeLocal  = "local"
+	ValidationRuntimeDocker = "docker"
 )
 
 var allowedFallbackRetryOn = []string{
@@ -76,6 +79,9 @@ func Validate(task *Task) error {
 	}
 	if task.ModelStrategy != nil {
 		errs = append(errs, validateFallbackPolicy(task.ModelStrategy.FallbackPolicy)...)
+	}
+	if task.Validation.Runtime != "" && task.Validation.Runtime != ValidationRuntimeLocal && task.Validation.Runtime != ValidationRuntimeDocker {
+		errs = append(errs, fmt.Errorf("validation.runtime %q is not supported", task.Validation.Runtime))
 	}
 	for i, command := range task.Validation.Commands {
 		prefix := fmt.Sprintf("validation.commands[%d]", i)

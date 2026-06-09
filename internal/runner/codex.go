@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -17,6 +18,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
+	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	"github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workerconfig"
@@ -40,12 +42,14 @@ type WorkspacePreparer interface {
 type WorkspaceManagerFactory func() WorkspacePreparer
 
 type CodexRunOptions struct {
-	TaskPath         string
-	StorePath        string
-	ArtifactsDir     string
-	DomainsPath      string
-	MemoryPolicyPath string
-	EnvRequirements  []workerconfig.EnvRequirementCheck
+	TaskPath          string
+	StorePath         string
+	ArtifactsDir      string
+	DomainsPath       string
+	MemoryPolicyPath  string
+	EnvRequirements   []workerconfig.EnvRequirementCheck
+	ValidationRuntime string
+	RuntimeConfig     *runtimeconfig.Config
 }
 
 type CodexRunner struct {
@@ -132,6 +136,11 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	if workspace == "" {
 		workspace = "."
 	}
+	validationRunner, err := resolveValidationRunner(r.ValidationRunner, opts.ValidationRuntime, task.Validation.Runtime, opts.RuntimeConfig, workspace)
+	if err != nil {
+		fmt.Fprintf(stderr, "validation runtime failed: %v\n", err)
+		return 1
+	}
 
 	baseline, snapErr := r.GitSnapshotRunner(ctx, workspace)
 	if snapErr != nil {
@@ -208,7 +217,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	validationResult := skippedValidation(task.Validation.Commands, "worker failed")
 	var validationErr error
 	if runErr == nil {
-		validationResult = r.ValidationRunner(ctx, workspace, task.Validation.Commands)
+		validationResult = validationRunner(ctx, workspace, task.Validation.Commands)
 		validationErr = validationFailureError(validationResult)
 		if validationErr != nil {
 			runErr = validationErr
@@ -339,6 +348,27 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	fmt.Fprintf(stdout, "events: %d\n", len(result.Events))
 	fmt.Fprintf(stdout, "artifacts_dir: %s\n", runDir)
 	return 0
+}
+
+func resolveValidationRunner(defaultRunner ValidationRunner, overrideRuntime string, taskRuntime string, runtimeConfig *runtimeconfig.Config, workspace string) (ValidationRunner, error) {
+	runtimeName := strings.TrimSpace(overrideRuntime)
+	if runtimeName == "" {
+		runtimeName = strings.TrimSpace(taskRuntime)
+	}
+	switch runtimeName {
+	case "", tasks.ValidationRuntimeLocal:
+		return defaultRunner, nil
+	case tasks.ValidationRuntimeDocker:
+		if runtimeConfig == nil {
+			return nil, errors.New("validation.runtime docker requires --runtime-config")
+		}
+		if _, err := runtimeconfig.PlanDocker(*runtimeConfig, workspace); err != nil {
+			return nil, err
+		}
+		return NewDockerValidationRunner(*runtimeConfig), nil
+	default:
+		return nil, fmt.Errorf("validation.runtime %q is not supported", runtimeName)
+	}
 }
 
 func (r CodexRunner) withDefaults() CodexRunner {

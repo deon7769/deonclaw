@@ -4136,7 +4136,7 @@ func TestRunWorkerCodexRunRejectsBadArguments(t *testing.T) {
 }
 
 func TestParseCodexRunOptions(t *testing.T) {
-	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml"})
+	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml", "--runtime-config", "runtime.yaml", "--validation-runtime", "docker"})
 	if err != nil {
 		t.Fatalf("parseCodexRunOptions() error = %v", err)
 	}
@@ -4158,10 +4158,16 @@ func TestParseCodexRunOptions(t *testing.T) {
 	if opts.workersConfigPath != "workers.yaml" {
 		t.Fatalf("workersConfigPath = %q, want workers.yaml", opts.workersConfigPath)
 	}
+	if opts.runtimeConfigPath != "runtime.yaml" {
+		t.Fatalf("runtimeConfigPath = %q, want runtime.yaml", opts.runtimeConfigPath)
+	}
+	if opts.validationRuntime != "docker" {
+		t.Fatalf("validationRuntime = %q, want docker", opts.validationRuntime)
+	}
 }
 
 func TestParseOpenCodeRunOptions(t *testing.T) {
-	opts, err := parseOpenCodeRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml"})
+	opts, err := parseOpenCodeRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml", "--runtime-config", "runtime.yaml", "--validation-runtime", "docker"})
 	if err != nil {
 		t.Fatalf("parseOpenCodeRunOptions() error = %v", err)
 	}
@@ -4182,6 +4188,12 @@ func TestParseOpenCodeRunOptions(t *testing.T) {
 	}
 	if opts.workersConfigPath != "workers.yaml" {
 		t.Fatalf("workersConfigPath = %q, want workers.yaml", opts.workersConfigPath)
+	}
+	if opts.runtimeConfigPath != "runtime.yaml" {
+		t.Fatalf("runtimeConfigPath = %q, want runtime.yaml", opts.runtimeConfigPath)
+	}
+	if opts.validationRuntime != "docker" {
+		t.Fatalf("validationRuntime = %q, want docker", opts.validationRuntime)
 	}
 }
 

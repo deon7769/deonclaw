@@ -9,7 +9,9 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	"github.com/deon7769/deonclaw/internal/tasks"
 )
 
@@ -99,6 +101,147 @@ func TestRunValidationCommandsTruncatesLargeOutput(t *testing.T) {
 	}
 }
 
+func TestRunDockerValidationCommandsUsesFakeDockerAndCapturesOutput(t *testing.T) {
+	workspace := t.TempDir()
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+printf 'docker validation stdout\n'
+printf 'docker validation stderr\n' >&2
+exit 0
+`)
+
+	result := RunDockerValidationCommands(context.Background(), workspace, []tasks.ValidationCommand{
+		{
+			Name:    "go-test",
+			Command: "go",
+			Args:    []string{"test", "./..."},
+		},
+	}, validDockerValidationConfig())
+
+	if result.Status != ValidationPassed {
+		t.Fatalf("validation status = %q, want %q: %#v", result.Status, ValidationPassed, result)
+	}
+	command := result.Commands[0]
+	if command.Runtime != tasks.ValidationRuntimeDocker {
+		t.Fatalf("runtime = %q, want docker", command.Runtime)
+	}
+	if !strings.Contains(command.Stdout, "docker validation stdout") {
+		t.Fatalf("stdout = %q, want fake docker stdout", command.Stdout)
+	}
+	if !strings.Contains(command.Stderr, "docker validation stderr") {
+		t.Fatalf("stderr = %q, want fake docker stderr", command.Stderr)
+	}
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	for _, want := range []string{"run", "--rm", "--network", "none", "--read-only", "deonclaw-runner:latest", "go", "test", "./..."} {
+		if !containsString(args, want) {
+			t.Fatalf("docker args = %#v, want %q", args, want)
+		}
+	}
+	if strings.Contains(strings.Join(args, " "), "sh -c") {
+		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+	if args[len(args)-3] != "go" || args[len(args)-2] != "test" || args[len(args)-1] != "./..." {
+		t.Fatalf("docker args tail = %#v, want validation command appended after image", args)
+	}
+}
+
+func TestRunDockerValidationCommandsRespectsTimeout(t *testing.T) {
+	installRunnerFakeDocker(t, `#!/bin/sh
+sleep 2
+exit 0
+`)
+
+	start := time.Now()
+	result := RunDockerValidationCommands(context.Background(), t.TempDir(), []tasks.ValidationCommand{
+		{
+			Name:           "slow",
+			Command:        "go",
+			Args:           []string{"test"},
+			TimeoutSeconds: 1,
+		},
+	}, validDockerValidationConfig())
+	elapsed := time.Since(start)
+
+	if result.Status != ValidationFailed {
+		t.Fatalf("validation status = %q, want failed: %#v", result.Status, result)
+	}
+	if len(result.Commands) != 1 || result.Commands[0].Status != validationTimedOut {
+		t.Fatalf("commands = %#v, want timed out command", result.Commands)
+	}
+	if elapsed > 3*time.Second {
+		t.Fatalf("elapsed = %s, want timeout near 1s", elapsed)
+	}
+}
+
+func TestRunDockerValidationCommandsRecordsNonZeroExit(t *testing.T) {
+	installRunnerFakeDocker(t, `#!/bin/sh
+printf 'bad stdout\n'
+printf 'bad stderr\n' >&2
+exit 23
+`)
+
+	result := RunDockerValidationCommands(context.Background(), t.TempDir(), []tasks.ValidationCommand{
+		{Name: "failing", Command: "go", Args: []string{"test"}},
+	}, validDockerValidationConfig())
+
+	if result.Status != ValidationFailed {
+		t.Fatalf("validation status = %q, want failed: %#v", result.Status, result)
+	}
+	command := result.Commands[0]
+	if command.ExitCode != 23 {
+		t.Fatalf("exit code = %d, want 23", command.ExitCode)
+	}
+	if !strings.Contains(command.Stdout, "bad stdout") || !strings.Contains(command.Stderr, "bad stderr") {
+		t.Fatalf("command = %#v, want stdout/stderr captured", command)
+	}
+}
+
+func TestRunDockerValidationCommandsInvalidConfigFailsBeforeDocker(t *testing.T) {
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	cfg := validDockerValidationConfig()
+	cfg.Runtime.Mode = "podman"
+
+	result := RunDockerValidationCommands(context.Background(), t.TempDir(), []tasks.ValidationCommand{
+		{Name: "go-test", Command: "go", Args: []string{"test"}},
+	}, cfg)
+
+	if result.Status != ValidationFailed {
+		t.Fatalf("validation status = %q, want failed: %#v", result.Status, result)
+	}
+	if !strings.Contains(result.Error, `runtime.mode "podman" is not supported`) {
+		t.Fatalf("error = %q, want invalid config", result.Error)
+	}
+	assertRunnerFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunDockerValidationCommandsDangerousMountFailsBeforeDocker(t *testing.T) {
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	cfg := validDockerValidationConfig()
+	cfg.Runtime.Docker.Mounts = []runtimeconfig.MountSpec{{Source: "/", Target: "/workspace", Mode: "ro"}}
+
+	result := RunDockerValidationCommands(context.Background(), t.TempDir(), []tasks.ValidationCommand{
+		{Name: "go-test", Command: "go", Args: []string{"test"}},
+	}, cfg)
+
+	if result.Status != ValidationFailed {
+		t.Fatalf("validation status = %q, want failed: %#v", result.Status, result)
+	}
+	if !strings.Contains(result.Error, `runtime.docker.mounts[0].source "/" is not allowed`) {
+		t.Fatalf("error = %q, want dangerous mount", result.Error)
+	}
+	assertRunnerFileEmptyOrMissing(t, argsPath)
+}
+
 func TestLimitedOutputReturnsOriginalWriteLengthWhenTruncating(t *testing.T) {
 	output := newLimitedOutput(3)
 
@@ -115,6 +258,61 @@ func TestLimitedOutputReturnsOriginalWriteLengthWhenTruncating(t *testing.T) {
 	if !output.Truncated() || output.OriginalBytes() != 6 {
 		t.Fatalf("truncation metadata = truncated:%t original:%d, want true/6", output.Truncated(), output.OriginalBytes())
 	}
+}
+
+func installRunnerFakeDocker(t *testing.T, script string) string {
+	t.Helper()
+	tempDir := t.TempDir()
+	fakeDocker := filepath.Join(tempDir, "docker")
+	argsPath := filepath.Join(tempDir, "docker.args")
+	if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake docker) error = %v", err)
+	}
+	t.Setenv("DEONCLAW_FAKE_DOCKER_ARGS", argsPath)
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsPath
+}
+
+func validDockerValidationConfig() runtimeconfig.Config {
+	return runtimeconfig.Config{
+		Runtime: runtimeconfig.Runtime{
+			Mode: runtimeconfig.ModeDocker,
+			Docker: runtimeconfig.DockerConfig{
+				Image:        "deonclaw-runner:latest",
+				Workdir:      "/workspace",
+				Network:      "none",
+				ReadOnlyRoot: true,
+				MemoryLimit:  "2g",
+				CPUs:         "2",
+				Mounts: []runtimeconfig.MountSpec{
+					{Source: ".", Target: "/workspace", Mode: "rw"},
+				},
+			},
+		},
+	}
+}
+
+func assertRunnerFileEmptyOrMissing(t *testing.T, path string) {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return
+	}
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	if len(data) != 0 {
+		t.Fatalf("%s = %q, want empty or missing", path, string(data))
+	}
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestValidationCommandHelperProcess(t *testing.T) {

@@ -7,18 +7,21 @@ import (
 
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/runtime"
+	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	"github.com/deon7769/deonclaw/internal/workerconfig"
 	"github.com/deon7769/deonclaw/internal/workers"
 	"github.com/deon7769/deonclaw/internal/workers/opencode"
 )
 
 type OpenCodeRunOptions struct {
-	TaskPath         string
-	StorePath        string
-	ArtifactsDir     string
-	DomainsPath      string
-	MemoryPolicyPath string
-	EnvRequirements  []workerconfig.EnvRequirementCheck
+	TaskPath          string
+	StorePath         string
+	ArtifactsDir      string
+	DomainsPath       string
+	MemoryPolicyPath  string
+	EnvRequirements   []workerconfig.EnvRequirementCheck
+	ValidationRuntime string
+	RuntimeConfig     *runtimeconfig.Config
 }
 
 type OpenCodeRunner struct {
@@ -59,12 +62,14 @@ func (r OpenCodeRunner) Run(ctx context.Context, opts OpenCodeRunOptions, stdout
 		WorkspaceManagerFactory: r.WorkspaceManagerFactory,
 	}
 	return codexRunner.Run(ctx, CodexRunOptions{
-		TaskPath:         opts.TaskPath,
-		StorePath:        opts.StorePath,
-		ArtifactsDir:     opts.ArtifactsDir,
-		DomainsPath:      opts.DomainsPath,
-		MemoryPolicyPath: opts.MemoryPolicyPath,
-		EnvRequirements:  opts.EnvRequirements,
+		TaskPath:          opts.TaskPath,
+		StorePath:         opts.StorePath,
+		ArtifactsDir:      opts.ArtifactsDir,
+		DomainsPath:       opts.DomainsPath,
+		MemoryPolicyPath:  opts.MemoryPolicyPath,
+		EnvRequirements:   opts.EnvRequirements,
+		ValidationRuntime: opts.ValidationRuntime,
+		RuntimeConfig:     opts.RuntimeConfig,
 	}, stdout, stderr)
 }
 

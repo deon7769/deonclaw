@@ -41,6 +41,7 @@ workspace:
 memory:
   scope: none
 validation:
+  runtime: docker
   commands:
     - name: go-test
       command: go
@@ -61,6 +62,9 @@ definition_of_done:
 	}
 	if len(task.Validation.Commands) != 1 {
 		t.Fatalf("len(validation.commands) = %d, want 1", len(task.Validation.Commands))
+	}
+	if task.Validation.Runtime != "docker" {
+		t.Fatalf("validation.runtime = %q, want docker", task.Validation.Runtime)
 	}
 	command := task.Validation.Commands[0]
 	if command.Name != "go-test" || command.Command != "go" || command.TimeoutSeconds != 300 {

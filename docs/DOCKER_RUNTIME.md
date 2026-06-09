@@ -37,6 +37,39 @@ deonctl runtime docker-exec --config configs/examples/runtime.yaml --workspace .
 - DeonClaw does not add `sh -c`
 - workers are not dispatched through this command
 
+Run task validation commands inside Docker while keeping the worker local:
+
+~~~bash
+deonctl worker opencode run examples/tasks/opencode.yaml \
+  --store deonclaw.db \
+  --artifacts-dir artifacts \
+  --runtime-config configs/examples/runtime.yaml \
+  --validation-runtime docker
+~~~
+
+Task YAML can also opt into Docker validation:
+
+~~~yaml
+validation:
+  runtime: docker
+  commands:
+    - name: go-test
+      command: go
+      args:
+        - test
+        - ./...
+      timeout_seconds: 300
+~~~
+
+When `validation.runtime` is `docker`, DeonClaw uses the same validated Docker runtime plan as `docker-exec`, appends each validation command after the image, captures stdout/stderr/exit code into the existing validation artifacts, and respects each command's `timeout_seconds`.
+
+Validation Docker execution has the same boundaries as `docker-exec`:
+
+- local validation remains the default
+- commands are executed directly, without implicit shell and without `sh -c`
+- invalid runtime config or dangerous mounts fail before Docker is executed
+- Codex and OpenCode workers still execute locally
+
 ## Config Shape
 
 ~~~yaml
@@ -118,6 +151,7 @@ Current state:
 - runtime validation implemented
 - Docker command planning implemented
 - simple Docker command execution implemented
+- Docker validation command execution implemented
 - worker execution remains local
 
 Not implemented yet:

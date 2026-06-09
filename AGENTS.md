@@ -64,6 +64,7 @@ Implemented:
 - fallback_policy schema and validation for model_strategy
 - Docker runtime config validation and docker-plan dry-run
 - Docker runtime simple command execution
+- Docker runtime validation command execution
 - workers smoke --dry-run model_strategy planning
 - execution trace artifact
 - runs report by worker/status and by model_profile with filters

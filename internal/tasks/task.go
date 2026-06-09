@@ -42,6 +42,7 @@ type MemorySpec struct {
 }
 
 type ValidationSpec struct {
+	Runtime  string              `yaml:"runtime,omitempty" json:"runtime,omitempty"`
 	Commands []ValidationCommand `yaml:"commands" json:"commands"`
 }
 

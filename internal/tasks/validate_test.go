@@ -99,6 +99,19 @@ func TestValidateRejectsInvalidValidationCommand(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsInvalidValidationRuntime(t *testing.T) {
+	task := validTask()
+	task.Validation.Runtime = "podman"
+
+	err := Validate(task)
+	if err == nil {
+		t.Fatal("Validate() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), `validation.runtime "podman" is not supported`) {
+		t.Fatalf("error = %v, want validation runtime error", err)
+	}
+}
+
 func TestValidateRejectsModelProfileAndModelStrategy(t *testing.T) {
 	task := validTask()
 	task.ModelProfile = "opencode-zai-glm-5-1"

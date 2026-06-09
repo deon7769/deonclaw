@@ -4,7 +4,7 @@ This document records the current worker contract used by DeonClaw runners.
 
 Workers are external command adapters. They do not own task policy, memory policy, workspace lifecycle, persistence, or approvals. A worker receives a scoped RunSpec, invokes its external tool, and returns a RunResult with events, artifacts, stderr, and optional metadata.
 
-Task 20.0 does not change worker execution. Docker runtime support is config validation and `docker-plan` only; Codex and OpenCode still run through the local worker adapters in this contract.
+Task 20.2 does not change worker execution. Docker runtime support covers config validation, `docker-plan`, `runtime docker-exec`, and optional Docker-backed validation commands; Codex and OpenCode still run through the local worker adapters in this contract.
 
 ## Core Types
 
