@@ -160,6 +160,12 @@ func TestResolveModelStrategyValidatesProfilesAndTags(t *testing.T) {
 		Preferred:   []string{"opencode-zai-glm-5-1"},
 		Fallback:    []string{"opencode-fast"},
 		RequireTags: []string{"coding"},
+		FallbackPolicy: &tasks.FallbackPolicy{
+			Enabled:      false,
+			MaxAttempts:  1,
+			RetryOn:      []string{"worker_failed", "validation_failed"},
+			NeverRetryOn: []string{"policy_failed", "memory_policy_failed"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("ResolveModelStrategy() error = %v", err)
@@ -173,9 +179,70 @@ func TestResolveModelStrategyValidatesProfilesAndTags(t *testing.T) {
 	if len(resolved.RequireTags) != 1 || resolved.RequireTags[0] != "coding" {
 		t.Fatalf("require_tags = %#v, want coding", resolved.RequireTags)
 	}
+	if resolved.FallbackPolicy.Enabled || resolved.FallbackPolicy.MaxAttempts != 1 {
+		t.Fatalf("fallback_policy = %#v, want disabled max_attempts 1", resolved.FallbackPolicy)
+	}
 	planned, ok := resolved.PlannedModelProfile()
 	if !ok || planned.Name != "opencode-zai-glm-5-1" {
 		t.Fatalf("planned = %#v ok=%t, want first preferred profile", planned, ok)
+	}
+}
+
+func TestResolveModelStrategyDefaultFallbackPolicyDisabled(t *testing.T) {
+	cfg := Config{ModelProfiles: map[string]ModelProfile{
+		"opencode-zai-glm-5-1": {Worker: "opencode"},
+	}}
+
+	resolved, err := cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred: []string{"opencode-zai-glm-5-1"},
+	})
+	if err != nil {
+		t.Fatalf("ResolveModelStrategy() error = %v", err)
+	}
+	if resolved.FallbackPolicy.Enabled {
+		t.Fatalf("fallback_policy.enabled = true, want default disabled")
+	}
+	if resolved.FallbackPolicy.MaxAttempts != 1 {
+		t.Fatalf("fallback_policy.max_attempts = %d, want default 1", resolved.FallbackPolicy.MaxAttempts)
+	}
+	if len(resolved.FallbackPolicy.RetryOn) != 2 || resolved.FallbackPolicy.RetryOn[0] != "worker_failed" || resolved.FallbackPolicy.RetryOn[1] != "validation_failed" {
+		t.Fatalf("fallback_policy.retry_on = %#v, want default worker_failed/validation_failed", resolved.FallbackPolicy.RetryOn)
+	}
+	if len(resolved.FallbackPolicy.NeverRetryOn) != 2 || resolved.FallbackPolicy.NeverRetryOn[0] != "policy_failed" || resolved.FallbackPolicy.NeverRetryOn[1] != "memory_policy_failed" {
+		t.Fatalf("fallback_policy.never_retry_on = %#v, want default policy blocks", resolved.FallbackPolicy.NeverRetryOn)
+	}
+}
+
+func TestResolveModelStrategyRejectsInvalidFallbackPolicy(t *testing.T) {
+	cfg := Config{ModelProfiles: map[string]ModelProfile{
+		"opencode-zai-glm-5-1": {Worker: "opencode"},
+	}}
+
+	_, err := cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred: []string{"opencode-zai-glm-5-1"},
+		FallbackPolicy: &tasks.FallbackPolicy{
+			Enabled:     true,
+			MaxAttempts: 0,
+		},
+	})
+	if err == nil {
+		t.Fatal("ResolveModelStrategy() error = nil, want max_attempts error")
+	}
+	if !strings.Contains(err.Error(), "model_strategy.fallback_policy.max_attempts must be greater than zero") {
+		t.Fatalf("error = %v, want max_attempts error", err)
+	}
+
+	_, err = cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred: []string{"opencode-zai-glm-5-1"},
+		FallbackPolicy: &tasks.FallbackPolicy{
+			RetryOn: []string{"policy_failed"},
+		},
+	})
+	if err == nil {
+		t.Fatal("ResolveModelStrategy() error = nil, want policy_failed retry_on error")
+	}
+	if !strings.Contains(err.Error(), `model_strategy.fallback_policy.retry_on[0] "policy_failed" is not supported`) {
+		t.Fatalf("error = %v, want policy_failed retry_on error", err)
 	}
 }
 
@@ -230,6 +297,61 @@ func TestResolveModelStrategyRejectsWorkerMismatch(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), `model_strategy.preferred[0] profile "codex-default" worker "codex" does not match task worker "opencode"; automatic worker switching is not implemented`) {
 		t.Fatalf("error = %v, want worker mismatch error", err)
+	}
+}
+
+func TestResolveModelStrategyRejectsFallbackWorkerMismatch(t *testing.T) {
+	cfg := Config{ModelProfiles: map[string]ModelProfile{
+		"opencode-zai-glm-5-1": {Worker: "opencode"},
+		"codex-default":        {Worker: "codex"},
+	}}
+
+	_, err := cfg.ResolveModelStrategy("opencode", &tasks.ModelStrategy{
+		Preferred: []string{"opencode-zai-glm-5-1"},
+		Fallback:  []string{"codex-default"},
+	})
+	if err == nil {
+		t.Fatal("ResolveModelStrategy() error = nil, want fallback worker mismatch error")
+	}
+	if !strings.Contains(err.Error(), `model_strategy.fallback[0] profile "codex-default" worker "codex" does not match task worker "opencode"; automatic worker switching is not implemented`) {
+		t.Fatalf("error = %v, want fallback worker mismatch error", err)
+	}
+}
+
+func TestFallbackEnvRequirementChecksForReportsMissingFallbackEnv(t *testing.T) {
+	unsetEnvForTest(t, "FALLBACK_API_KEY")
+	unsetEnvForTest(t, "OPENCODE_API_KEY")
+	cfg := Config{
+		Workers: map[string]Worker{
+			"opencode": {Env: map[string]string{"OPENCODE_API_KEY": "required"}},
+		},
+		ModelProfiles: map[string]ModelProfile{
+			"opencode-zai-glm-5-1": {
+				Worker: "opencode",
+			},
+			"opencode-fallback": {
+				Worker: "opencode",
+				Env:    map[string]string{"FALLBACK_API_KEY": "required"},
+			},
+		},
+	}
+
+	checks, err := cfg.FallbackEnvRequirementChecksFor("opencode", &tasks.ModelStrategy{
+		Preferred: []string{"opencode-zai-glm-5-1"},
+		Fallback:  []string{"opencode-fallback"},
+		FallbackPolicy: &tasks.FallbackPolicy{
+			Enabled:     false,
+			MaxAttempts: 1,
+		},
+	})
+	if err != nil {
+		t.Fatalf("FallbackEnvRequirementChecksFor() error = %v", err)
+	}
+	if len(checks) != 2 {
+		t.Fatalf("checks = %#v, want worker and fallback env requirements", checks)
+	}
+	if checks[0].Name != "FALLBACK_API_KEY" || checks[0].State != EnvStateMissing || checks[1].Name != "OPENCODE_API_KEY" || checks[1].State != EnvStateMissing {
+		t.Fatalf("checks = %#v, want sorted missing worker and fallback env requirements", checks)
 	}
 }
 

@@ -35,6 +35,10 @@ func normalize(task *Task) {
 		task.ModelStrategy.Preferred = normalizeStringList(task.ModelStrategy.Preferred)
 		task.ModelStrategy.Fallback = normalizeStringList(task.ModelStrategy.Fallback)
 		task.ModelStrategy.RequireTags = normalizeStringList(task.ModelStrategy.RequireTags)
+		if task.ModelStrategy.FallbackPolicy != nil {
+			task.ModelStrategy.FallbackPolicy.RetryOn = normalizeStringList(task.ModelStrategy.FallbackPolicy.RetryOn)
+			task.ModelStrategy.FallbackPolicy.NeverRetryOn = normalizeStringList(task.ModelStrategy.FallbackPolicy.NeverRetryOn)
+		}
 	}
 	task.Goal = strings.TrimSpace(task.Goal)
 	task.Mode = strings.TrimSpace(task.Mode)

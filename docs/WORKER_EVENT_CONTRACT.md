@@ -108,7 +108,9 @@ The trace is an audit artifact for the runner lifecycle. It records:
 
 The trace must not contain raw prompts or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
 
-Task `model_strategy` is controlled selection metadata in the current OpenCode contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real OpenCode runs select `preferred[0]` as `selected_model_profile`, record `model_strategy: selected`, reuse `model_profile` for run report grouping, add `--model <model_arg>` when defined, and validate env requirements from the selected profile before worker execution. Real runs do not switch workers, retry, or execute fallbacks.
+Task `model_strategy` is controlled selection metadata in the current OpenCode contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real OpenCode runs select `preferred[0]` as `selected_model_profile`, record `model_strategy: selected`, reuse `model_profile` for run report grouping, add `--model <model_arg>` when defined, and validate env requirements from the selected profile before worker execution.
+
+`model_strategy.fallback_policy` is schema and policy metadata only. It defines whether future fallback is enabled, the allowed attempt count, allowed retry reasons, and reasons that must never retry. The default is disabled. `policy_failed` and `memory_policy_failed` never trigger automatic fallback. Fallback profiles must resolve to the same worker, and fallback profile env requirements can be checked before any future fallback attempt. Current real runs do not switch workers, retry, or execute fallbacks, so no fallback attempt event is emitted yet.
 
 ## Runs Report
 
@@ -177,6 +179,8 @@ OpenCode adds worker metadata to RunResult.Metadata:
 - provider, when the selected profile defines it
 - model, when the selected profile defines it
 - model_arg, when the selected profile defines it
+
+OpenCode does not emit fallback metadata today because Task 18.17 is schema/policy only. When fallback execution is added later, any attempt metadata must preserve the current guarantees: no raw prompt text, no environment values, no automatic worker switching, and no retry for policy failures.
 
 The shared summary renders these as:
 

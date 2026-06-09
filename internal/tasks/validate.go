@@ -3,10 +3,29 @@ package tasks
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/deon7769/deonclaw/internal/config"
 )
+
+const (
+	FallbackRetryWorkerFailed       = "worker_failed"
+	FallbackRetryValidationFailed   = "validation_failed"
+	FallbackNeverRetryPolicyFailed  = "policy_failed"
+	FallbackNeverRetryMemoryPolicy  = "memory_policy_failed"
+	DefaultFallbackPolicyMaxAttempt = 1
+)
+
+var allowedFallbackRetryOn = []string{
+	FallbackRetryWorkerFailed,
+	FallbackRetryValidationFailed,
+}
+
+var allowedFallbackNeverRetryOn = []string{
+	FallbackNeverRetryPolicyFailed,
+	FallbackNeverRetryMemoryPolicy,
+}
 
 func Validate(task *Task) error {
 	if task == nil {
@@ -55,6 +74,9 @@ func Validate(task *Task) error {
 	if task.ModelStrategy != nil && len(task.ModelStrategy.Preferred) == 0 {
 		errs = append(errs, errors.New("model_strategy.preferred must not be empty"))
 	}
+	if task.ModelStrategy != nil {
+		errs = append(errs, validateFallbackPolicy(task.ModelStrategy.FallbackPolicy)...)
+	}
 	for i, command := range task.Validation.Commands {
 		prefix := fmt.Sprintf("validation.commands[%d]", i)
 		if strings.TrimSpace(command.Name) == "" {
@@ -78,4 +100,52 @@ func Validate(task *Task) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func ValidateFallbackPolicy(policy *FallbackPolicy) error {
+	return errors.Join(validateFallbackPolicy(policy)...)
+}
+
+func EffectiveFallbackPolicy(policy *FallbackPolicy) FallbackPolicy {
+	effective := FallbackPolicy{
+		Enabled:      false,
+		MaxAttempts:  DefaultFallbackPolicyMaxAttempt,
+		RetryOn:      append([]string(nil), allowedFallbackRetryOn...),
+		NeverRetryOn: append([]string(nil), allowedFallbackNeverRetryOn...),
+	}
+	if policy == nil {
+		return effective
+	}
+	effective.Enabled = policy.Enabled
+	if policy.MaxAttempts != 0 {
+		effective.MaxAttempts = policy.MaxAttempts
+	}
+	if len(policy.RetryOn) > 0 {
+		effective.RetryOn = append([]string(nil), policy.RetryOn...)
+	}
+	if len(policy.NeverRetryOn) > 0 {
+		effective.NeverRetryOn = append([]string(nil), policy.NeverRetryOn...)
+	}
+	return effective
+}
+
+func validateFallbackPolicy(policy *FallbackPolicy) []error {
+	if policy == nil {
+		return nil
+	}
+	var errs []error
+	if policy.Enabled && policy.MaxAttempts <= 0 {
+		errs = append(errs, errors.New("model_strategy.fallback_policy.max_attempts must be greater than zero when fallback_policy.enabled is true"))
+	}
+	for i, reason := range policy.RetryOn {
+		if !slices.Contains(allowedFallbackRetryOn, reason) {
+			errs = append(errs, fmt.Errorf("model_strategy.fallback_policy.retry_on[%d] %q is not supported", i, reason))
+		}
+	}
+	for i, reason := range policy.NeverRetryOn {
+		if !slices.Contains(allowedFallbackNeverRetryOn, reason) {
+			errs = append(errs, fmt.Errorf("model_strategy.fallback_policy.never_retry_on[%d] %q is not supported", i, reason))
+		}
+	}
+	return errs
 }

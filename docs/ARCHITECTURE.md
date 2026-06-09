@@ -200,7 +200,7 @@ For OpenCode, a selected profile with `model_arg` becomes:
 opencode run --dir <workspace> --format json --model <model_arg> "<prompt>"
 ```
 
-Tasks can also define `model_strategy`. Strategy schema and validation are implemented, and dry-run planning selects `preferred[0]` as `planned_model_profile`. Real OpenCode run selection from `model_strategy.preferred[0]` is implemented without fallback. Fallback execution, retry, and worker switching are not implemented yet.
+Tasks can also define `model_strategy`. Strategy schema and validation are implemented, and dry-run planning selects `preferred[0]` as `planned_model_profile`. Real OpenCode run selection from `model_strategy.preferred[0]` is implemented without fallback. `fallback_policy` schema and validation are implemented with fallback disabled by default, policy failures blocked from retry, and same-worker fallback profile validation. Fallback execution, retry, and worker switching are not implemented yet.
 
 Kimi is `inspiration_only`, not an operational worker.
 

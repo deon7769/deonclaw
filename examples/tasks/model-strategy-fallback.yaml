@@ -1,0 +1,52 @@
+id: opencode-model-strategy-fallback-001
+title: "OpenCode model strategy with fallback policy"
+domain: general
+worker: opencode
+
+model_strategy:
+  preferred:
+    - opencode-zai-glm-5-1
+  fallback:
+    - opencode-zai-glm-5-1-mini
+  require_tags:
+    - coding
+  fallback_policy:
+    enabled: false
+    max_attempts: 1
+    retry_on:
+      - worker_failed
+      - validation_failed
+    never_retry_on:
+      - policy_failed
+      - memory_policy_failed
+
+goal: >
+  Demonstrate model_strategy fallback policy schema only.
+  Do not edit files.
+
+mode: read_only
+
+workspace:
+  strategy: local_repo
+  path: .
+
+memory:
+  scope: none
+
+allowed_paths: []
+
+forbidden_paths:
+  - mysecondbrain/**
+  - escalasoft_brain/**
+  - .env
+  - secrets/**
+  - ~/.opencode/**
+  - ~/.config/**
+
+expected_outputs:
+  - artifacts/summary.md
+  - artifacts/execution-trace.json
+
+definition_of_done:
+  - model_strategy fallback_policy schema validates
+  - no fallback execution, retry, or worker switching occurs

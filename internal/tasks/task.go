@@ -19,9 +19,17 @@ type Task struct {
 }
 
 type ModelStrategy struct {
-	Preferred   []string `yaml:"preferred" json:"preferred"`
-	Fallback    []string `yaml:"fallback,omitempty" json:"fallback,omitempty"`
-	RequireTags []string `yaml:"require_tags,omitempty" json:"require_tags,omitempty"`
+	Preferred      []string        `yaml:"preferred" json:"preferred"`
+	Fallback       []string        `yaml:"fallback,omitempty" json:"fallback,omitempty"`
+	RequireTags    []string        `yaml:"require_tags,omitempty" json:"require_tags,omitempty"`
+	FallbackPolicy *FallbackPolicy `yaml:"fallback_policy,omitempty" json:"fallback_policy,omitempty"`
+}
+
+type FallbackPolicy struct {
+	Enabled      bool     `yaml:"enabled" json:"enabled"`
+	MaxAttempts  int      `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty"`
+	RetryOn      []string `yaml:"retry_on,omitempty" json:"retry_on,omitempty"`
+	NeverRetryOn []string `yaml:"never_retry_on,omitempty" json:"never_retry_on,omitempty"`
 }
 
 type WorkspaceSpec struct {

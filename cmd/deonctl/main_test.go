@@ -3201,6 +3201,7 @@ func TestRunWorkerOpenCodeRunWithModelStrategySelectsFirstPreferredProfile(t *te
 	restore := overrideOpenCodeRunConfigDeps(t)
 	defer restore()
 	t.Setenv("ZAI_API_KEY", "strategy-secret")
+	unsetEnvForTest(t, "FALLBACK_API_KEY")
 
 	tempDir := t.TempDir()
 	argsPath := filepath.Join(tempDir, "opencode-args")
@@ -3226,6 +3227,8 @@ model_profiles:
     provider: z-ai
     model: glm-5.1-mini
     model_arg: z-ai/glm-5.1-mini
+    env:
+      FALLBACK_API_KEY: required
     tags:
       - coding
 `)
@@ -3235,6 +3238,15 @@ model_profiles:
     - opencode-fast
   require_tags:
     - coding
+  fallback_policy:
+    enabled: false
+    max_attempts: 1
+    retry_on:
+      - worker_failed
+      - validation_failed
+    never_retry_on:
+      - policy_failed
+      - memory_policy_failed
 `)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer

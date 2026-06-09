@@ -99,6 +99,15 @@ model_strategy:
     - opencode-default
   require_tags:
     - coding
+  fallback_policy:
+    enabled: false
+    max_attempts: 1
+    retry_on:
+      - worker_failed
+      - validation_failed
+    never_retry_on:
+      - policy_failed
+      - memory_policy_failed
 ~~~
 
 Task schema rules:
@@ -107,6 +116,12 @@ Task schema rules:
 - `model_strategy.preferred` is required and must not be empty when `model_strategy` is present.
 - `fallback` is optional and is validation metadata only for now.
 - `require_tags` is optional. When set, every referenced preferred and fallback profile must contain each required tag.
+- `fallback_policy` is optional. When omitted, fallback defaults to disabled.
+- `fallback_policy.enabled` defaults to false.
+- `fallback_policy.max_attempts` must be greater than zero when `enabled` is true.
+- `fallback_policy.retry_on` currently allows `worker_failed` and `validation_failed` only.
+- `fallback_policy.never_retry_on` currently allows `policy_failed` and `memory_policy_failed` only.
+- `policy_failed` and `memory_policy_failed` must not appear in `retry_on`; policy failures never trigger automatic fallback.
 
 Resolver rules:
 
@@ -114,6 +129,9 @@ Resolver rules:
 - Every referenced profile must match the task `worker`.
 - A profile whose worker differs from the task worker fails clearly; DeonClaw does not switch workers automatically yet.
 - Strategy resolution validates profile existence, worker compatibility and required tags before dry-run or run planning.
+- Strategy resolution validates `fallback_policy` schema before dry-run or run planning.
+- Fallback profiles are resolved only against the same task worker. Worker switching remains prohibited by default.
+- Required env for fallback profiles can be checked before any future fallback attempt. Missing fallback env is reportable without starting or retrying a worker.
 
 Current runtime boundary:
 
@@ -124,6 +142,7 @@ Current runtime boundary:
 - OpenCode real run and smoke run select `preferred[0]` as `selected_model_profile`.
 - OpenCode real run and smoke run include `--model <model_arg>` when the selected profile defines `model_arg`.
 - OpenCode real run and smoke run validate required env from the selected profile before worker execution.
+- `fallback_policy` is schema and policy metadata only in the current task.
 - DeonClaw does not execute fallback profiles yet.
 - DeonClaw does not switch workers, retry, or run fallback profiles.
 - `runs report --by model_profile` groups selected strategy profiles by reusing `model_profile` as the selected profile name while also recording `selected_model_profile`.
@@ -219,7 +238,7 @@ Provider and model are diagnostic config only in the current task. They are not 
 
 Model profiles are diagnostic and validation metadata plus OpenCode model selection. DeonClaw resolves them, checks worker/profile compatibility, validates required env presence, and passes `model_arg` as `--model` only for OpenCode.
 
-Model strategies are controlled selection metadata for OpenCode execution. DeonClaw resolves them against `model_profiles` and validates profile existence, worker compatibility and required tags. Dry-run selects `preferred[0]` as `planned_model_profile` and may show OpenCode `--model`; real OpenCode run selects `preferred[0]` as `selected_model_profile` and may pass `--model <model_arg>`. Real run does not switch workers, retry, or run fallback profiles yet.
+Model strategies are controlled selection metadata for OpenCode execution. DeonClaw resolves them against `model_profiles` and validates profile existence, worker compatibility, required tags, and fallback policy schema. Dry-run selects `preferred[0]` as `planned_model_profile` and may show OpenCode `--model`; real OpenCode run selects `preferred[0]` as `selected_model_profile` and may pass `--model <model_arg>`. Fallback policy is design/schema only: real run does not switch workers, retry, or run fallback profiles yet.
 
 OpenCode with a selected model profile that defines `model_arg` runs through:
 

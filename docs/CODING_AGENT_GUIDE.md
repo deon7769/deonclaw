@@ -15,7 +15,7 @@ Before changing code, read:
 
 For current sequencing, follow AGENTS.md Next implementation order first.
 
-Do not implement controlled model_strategy execution, fallback, Docker runtime, MCP manager, memory index, or UI out of order.
+Do not implement fallback execution, Docker runtime, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only.
 
 Memory apply and restore already exist. Do not alter their behavior unless a task explicitly targets the memory workflow.
 
@@ -32,7 +32,7 @@ backup plan -> backup materialization -> restore dry-run -> restore execute
 - cmd/deonctl: CLI parsing and output only
 - internal/runner: run orchestration
 - internal/workers: external worker adapters
-- internal/workerconfig: workers.yaml, model_profiles, model_strategy resolution and env requirement metadata
+- internal/workerconfig: workers.yaml, model_profiles, model_strategy resolution, fallback policy schema validation, and env requirement metadata
 - internal/runtime: workspace lifecycle
 - internal/policy: path policy
 - internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/restore-execute/apply-execute

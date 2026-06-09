@@ -119,6 +119,16 @@ model_strategy:
     - " opencode-fast "
   require_tags:
     - " coding "
+  fallback_policy:
+    enabled: false
+    max_attempts: 1
+    retry_on:
+      - " worker_failed "
+      - ""
+      - " validation_failed "
+    never_retry_on:
+      - " policy_failed "
+      - " memory_policy_failed "
 goal: Run with model strategy
 mode: read_only
 workspace:
@@ -148,6 +158,21 @@ definition_of_done:
 	}
 	if len(task.ModelStrategy.RequireTags) != 1 || task.ModelStrategy.RequireTags[0] != "coding" {
 		t.Fatalf("require_tags = %#v, want normalized coding", task.ModelStrategy.RequireTags)
+	}
+	if task.ModelStrategy.FallbackPolicy == nil {
+		t.Fatal("fallback_policy = nil, want parsed policy")
+	}
+	if task.ModelStrategy.FallbackPolicy.Enabled {
+		t.Fatalf("fallback_policy.enabled = true, want false")
+	}
+	if task.ModelStrategy.FallbackPolicy.MaxAttempts != 1 {
+		t.Fatalf("fallback_policy.max_attempts = %d, want 1", task.ModelStrategy.FallbackPolicy.MaxAttempts)
+	}
+	if len(task.ModelStrategy.FallbackPolicy.RetryOn) != 2 || task.ModelStrategy.FallbackPolicy.RetryOn[0] != "worker_failed" || task.ModelStrategy.FallbackPolicy.RetryOn[1] != "validation_failed" {
+		t.Fatalf("fallback_policy.retry_on = %#v, want normalized worker_failed/validation_failed", task.ModelStrategy.FallbackPolicy.RetryOn)
+	}
+	if len(task.ModelStrategy.FallbackPolicy.NeverRetryOn) != 2 || task.ModelStrategy.FallbackPolicy.NeverRetryOn[0] != "policy_failed" || task.ModelStrategy.FallbackPolicy.NeverRetryOn[1] != "memory_policy_failed" {
+		t.Fatalf("fallback_policy.never_retry_on = %#v, want normalized never retry reasons", task.ModelStrategy.FallbackPolicy.NeverRetryOn)
 	}
 	if err := Validate(task); err != nil {
 		t.Fatalf("Validate() error = %v", err)

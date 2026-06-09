@@ -45,9 +45,10 @@ type ResolvedModelProfile struct {
 }
 
 type ResolvedModelStrategy struct {
-	Preferred   []ResolvedModelProfile `json:"preferred"`
-	Fallback    []ResolvedModelProfile `json:"fallback,omitempty"`
-	RequireTags []string               `json:"require_tags,omitempty"`
+	Preferred      []ResolvedModelProfile `json:"preferred"`
+	Fallback       []ResolvedModelProfile `json:"fallback,omitempty"`
+	RequireTags    []string               `json:"require_tags,omitempty"`
+	FallbackPolicy tasks.FallbackPolicy   `json:"fallback_policy"`
 }
 
 func (s ResolvedModelStrategy) PlannedModelProfile() (ResolvedModelProfile, bool) {
@@ -139,6 +140,27 @@ func (c Config) EnvRequirementChecksFor(worker string, profileName string) ([]En
 	return envRequirementChecks(merged), nil
 }
 
+func (c Config) FallbackEnvRequirementChecksFor(worker string, strategy *tasks.ModelStrategy) ([]EnvRequirementCheck, error) {
+	resolved, err := c.ResolveModelStrategy(worker, strategy)
+	if err != nil {
+		return nil, err
+	}
+	if len(resolved.Fallback) == 0 {
+		return nil, nil
+	}
+
+	merged := map[string]string{}
+	for name, requirement := range c.Worker(worker).Env {
+		merged[name] = requirement
+	}
+	for _, profile := range resolved.Fallback {
+		for name, requirement := range profile.Profile.Env {
+			merged[name] = requirement
+		}
+	}
+	return envRequirementChecks(merged), nil
+}
+
 func (c Config) MissingRequiredEnv(worker string) []EnvRequirementCheck {
 	return MissingRequiredEnv(c.EnvRequirementChecks(worker))
 }
@@ -203,7 +225,11 @@ func (c Config) ResolveModelStrategy(worker string, strategy *tasks.ModelStrateg
 		return ResolvedModelStrategy{}, nil
 	}
 	resolved := ResolvedModelStrategy{
-		RequireTags: normalizeTags(strategy.RequireTags),
+		RequireTags:    normalizeTags(strategy.RequireTags),
+		FallbackPolicy: tasks.EffectiveFallbackPolicy(strategy.FallbackPolicy),
+	}
+	if err := tasks.ValidateFallbackPolicy(strategy.FallbackPolicy); err != nil {
+		return ResolvedModelStrategy{}, err
 	}
 	preferredNames := normalizeTags(strategy.Preferred)
 	if len(preferredNames) == 0 {
