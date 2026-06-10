@@ -4210,7 +4210,7 @@ func TestRunWorkerCodexRunRejectsBadArguments(t *testing.T) {
 }
 
 func TestParseCodexRunOptions(t *testing.T) {
-	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml", "--runtime-config", "runtime.yaml", "--validation-runtime", "docker"})
+	opts, err := parseCodexRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml", "--runtime-config", "runtime.yaml", "--validation-runtime", "docker", "--worker-runtime", "local"})
 	if err != nil {
 		t.Fatalf("parseCodexRunOptions() error = %v", err)
 	}
@@ -4238,10 +4238,13 @@ func TestParseCodexRunOptions(t *testing.T) {
 	if opts.validationRuntime != "docker" {
 		t.Fatalf("validationRuntime = %q, want docker", opts.validationRuntime)
 	}
+	if opts.workerRuntime != "local" {
+		t.Fatalf("workerRuntime = %q, want local", opts.workerRuntime)
+	}
 }
 
 func TestParseOpenCodeRunOptions(t *testing.T) {
-	opts, err := parseOpenCodeRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml", "--runtime-config", "runtime.yaml", "--validation-runtime", "docker"})
+	opts, err := parseOpenCodeRunOptions([]string{"task.yaml", "--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--domains", "domains.yaml", "--memory-policy", "memory-policy.yaml", "--workers-config", "workers.yaml", "--runtime-config", "runtime.yaml", "--validation-runtime", "docker", "--worker-runtime", "local"})
 	if err != nil {
 		t.Fatalf("parseOpenCodeRunOptions() error = %v", err)
 	}
@@ -4268,6 +4271,9 @@ func TestParseOpenCodeRunOptions(t *testing.T) {
 	}
 	if opts.validationRuntime != "docker" {
 		t.Fatalf("validationRuntime = %q, want docker", opts.validationRuntime)
+	}
+	if opts.workerRuntime != "local" {
+		t.Fatalf("workerRuntime = %q, want local", opts.workerRuntime)
 	}
 }
 

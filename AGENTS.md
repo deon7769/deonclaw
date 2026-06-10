@@ -66,6 +66,7 @@ Implemented:
 - Docker runtime simple command execution
 - Docker runtime validation command execution
 - Docker runtime env passthrough by explicit allowlist
+- Docker worker execution scaffold for fake/test workers
 - workers smoke --dry-run model_strategy planning
 - execution trace artifact
 - runs report by worker/status and by model_profile with filters
@@ -73,7 +74,7 @@ Implemented:
 Not implemented yet:
 
 - real fallback execution/retry
-- Docker worker execution
+- real Codex/OpenCode Docker worker execution
 - MCP manager
 - memory index/LanceDB
 - UI/dashboard

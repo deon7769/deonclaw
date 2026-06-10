@@ -63,9 +63,9 @@ Usage:
   deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
-  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker]
+  deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
-  deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker]
+  deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl artifacts list --store <path> [--run <run-id>] [--status <status>]
   deonctl artifacts prune --store <path> --artifacts-dir <path> --older-than <duration> [--dry-run]
 `
@@ -2583,6 +2583,7 @@ type codexRunOptions struct {
 	workersConfigPath string
 	runtimeConfigPath string
 	validationRuntime string
+	workerRuntime     string
 }
 
 func parseCodexRunOptions(args []string) (codexRunOptions, error) {
@@ -2635,6 +2636,12 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 			}
 			opts.validationRuntime = args[i+1]
 			i++
+		case "--worker-runtime":
+			if i+1 >= len(args) {
+				return codexRunOptions{}, fmt.Errorf("missing value for --worker-runtime")
+			}
+			opts.workerRuntime = args[i+1]
+			i++
 		default:
 			return codexRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
@@ -2647,6 +2654,9 @@ func parseCodexRunOptions(args []string) (codexRunOptions, error) {
 	}
 	if opts.validationRuntime != "" && opts.validationRuntime != tasks.ValidationRuntimeLocal && opts.validationRuntime != tasks.ValidationRuntimeDocker {
 		return codexRunOptions{}, fmt.Errorf("unsupported validation runtime %q", opts.validationRuntime)
+	}
+	if opts.workerRuntime != "" && opts.workerRuntime != runner.WorkerRuntimeLocal && opts.workerRuntime != runner.WorkerRuntimeDocker {
+		return codexRunOptions{}, fmt.Errorf("unsupported worker runtime %q", opts.workerRuntime)
 	}
 	return opts, nil
 }
@@ -2666,7 +2676,11 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	runtimeCfg, err := loadValidationRuntimeConfig(opts.runtimeConfigPath, opts.validationRuntime, task)
+	if opts.workerRuntime == runner.WorkerRuntimeDocker {
+		fmt.Fprintln(stderr, "error: worker runtime docker is scaffold-only and not enabled for codex")
+		return 1
+	}
+	runtimeCfg, err := loadRunRuntimeConfig(opts.runtimeConfigPath, opts.validationRuntime, opts.workerRuntime, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -2693,6 +2707,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		DomainsPath:       opts.domainsPath,
 		MemoryPolicyPath:  opts.memoryPolicyPath,
 		EnvRequirements:   envRequirements,
+		WorkerRuntime:     opts.workerRuntime,
 		ValidationRuntime: opts.validationRuntime,
 		RuntimeConfig:     runtimeCfg,
 		RuntimeConfigPath: opts.runtimeConfigPath,
@@ -2708,6 +2723,7 @@ type openCodeRunOptions struct {
 	workersConfigPath string
 	runtimeConfigPath string
 	validationRuntime string
+	workerRuntime     string
 }
 
 func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
@@ -2760,6 +2776,12 @@ func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
 			}
 			opts.validationRuntime = args[i+1]
 			i++
+		case "--worker-runtime":
+			if i+1 >= len(args) {
+				return openCodeRunOptions{}, fmt.Errorf("missing value for --worker-runtime")
+			}
+			opts.workerRuntime = args[i+1]
+			i++
 		default:
 			return openCodeRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
@@ -2772,6 +2794,9 @@ func parseOpenCodeRunOptions(args []string) (openCodeRunOptions, error) {
 	}
 	if opts.validationRuntime != "" && opts.validationRuntime != tasks.ValidationRuntimeLocal && opts.validationRuntime != tasks.ValidationRuntimeDocker {
 		return openCodeRunOptions{}, fmt.Errorf("unsupported validation runtime %q", opts.validationRuntime)
+	}
+	if opts.workerRuntime != "" && opts.workerRuntime != runner.WorkerRuntimeLocal && opts.workerRuntime != runner.WorkerRuntimeDocker {
+		return openCodeRunOptions{}, fmt.Errorf("unsupported worker runtime %q", opts.workerRuntime)
 	}
 	return opts, nil
 }
@@ -2791,7 +2816,11 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	runtimeCfg, err := loadValidationRuntimeConfig(opts.runtimeConfigPath, opts.validationRuntime, task)
+	if opts.workerRuntime == runner.WorkerRuntimeDocker {
+		fmt.Fprintln(stderr, "error: worker runtime docker is scaffold-only and not enabled for opencode")
+		return 1
+	}
+	runtimeCfg, err := loadRunRuntimeConfig(opts.runtimeConfigPath, opts.validationRuntime, opts.workerRuntime, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
@@ -2818,21 +2847,26 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		DomainsPath:       opts.domainsPath,
 		MemoryPolicyPath:  opts.memoryPolicyPath,
 		EnvRequirements:   envRequirements,
+		WorkerRuntime:     opts.workerRuntime,
 		ValidationRuntime: opts.validationRuntime,
 		RuntimeConfig:     runtimeCfg,
 		RuntimeConfigPath: opts.runtimeConfigPath,
 	}, stdout, stderr)
 }
 
-func loadValidationRuntimeConfig(runtimeConfigPath string, overrideRuntime string, task *tasks.Task) (*runtimeconfig.Config, error) {
-	runtimeName := strings.TrimSpace(overrideRuntime)
-	if runtimeName == "" && task != nil {
-		runtimeName = strings.TrimSpace(task.Validation.Runtime)
+func loadRunRuntimeConfig(runtimeConfigPath string, validationRuntime string, workerRuntime string, task *tasks.Task) (*runtimeconfig.Config, error) {
+	validationRuntimeName := strings.TrimSpace(validationRuntime)
+	if validationRuntimeName == "" && task != nil {
+		validationRuntimeName = strings.TrimSpace(task.Validation.Runtime)
 	}
-	if runtimeName != tasks.ValidationRuntimeDocker {
+	workerRuntimeName := strings.TrimSpace(workerRuntime)
+	if validationRuntimeName != tasks.ValidationRuntimeDocker && workerRuntimeName != runner.WorkerRuntimeDocker {
 		return nil, nil
 	}
 	if strings.TrimSpace(runtimeConfigPath) == "" {
+		if workerRuntimeName == runner.WorkerRuntimeDocker {
+			return nil, fmt.Errorf("worker runtime docker requires --runtime-config")
+		}
 		return nil, fmt.Errorf("validation runtime docker requires --runtime-config")
 	}
 	cfg, err := runtimeconfig.Load(runtimeConfigPath)

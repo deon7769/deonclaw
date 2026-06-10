@@ -20,6 +20,7 @@ type OpenCodeRunOptions struct {
 	DomainsPath       string
 	MemoryPolicyPath  string
 	EnvRequirements   []workerconfig.EnvRequirementCheck
+	WorkerRuntime     string
 	ValidationRuntime string
 	RuntimeConfig     *runtimeconfig.Config
 	RuntimeConfigPath string
@@ -69,6 +70,7 @@ func (r OpenCodeRunner) Run(ctx context.Context, opts OpenCodeRunOptions, stdout
 		DomainsPath:       opts.DomainsPath,
 		MemoryPolicyPath:  opts.MemoryPolicyPath,
 		EnvRequirements:   opts.EnvRequirements,
+		WorkerRuntime:     opts.WorkerRuntime,
 		ValidationRuntime: opts.ValidationRuntime,
 		RuntimeConfig:     opts.RuntimeConfig,
 		RuntimeConfigPath: opts.RuntimeConfigPath,

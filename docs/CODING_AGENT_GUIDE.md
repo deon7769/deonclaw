@@ -15,7 +15,7 @@ Before changing code, read:
 
 For current sequencing, follow AGENTS.md Next implementation order first.
 
-Do not implement fallback execution, Docker worker execution, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, and allowlisted env passthrough only; workers still run locally.
+Do not implement fallback execution, real Codex/OpenCode Docker worker execution, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, allowlisted env passthrough, and fake/test worker runtime scaffold only; real workers still run locally.
 
 Memory apply and restore already exist. Do not alter their behavior unless a task explicitly targets the memory workflow.
 
@@ -34,7 +34,7 @@ backup plan -> backup materialization -> restore dry-run -> restore execute
 - internal/workers: external worker adapters
 - internal/workerconfig: workers.yaml, model_profiles, model_strategy resolution, fallback policy schema validation, and env requirement metadata
 - internal/runtime: workspace lifecycle
-- internal/runtimeconfig: runtime.yaml loading, validation, Docker mount/env passthrough policy, docker-plan generation, simple docker-exec planning, and validation command Docker planning
+- internal/runtimeconfig: runtime.yaml loading, validation, Docker mount/env passthrough policy, docker-plan generation, simple docker-exec planning, validation command Docker planning, and fake/test worker Docker planning
 - internal/policy: path policy
 - internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/restore-execute/apply-execute
 - internal/contextpack: scoped context generation

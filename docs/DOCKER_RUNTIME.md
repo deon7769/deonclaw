@@ -2,7 +2,7 @@
 
 Task 20.0 adds the Docker runtime foundation.
 
-DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, and execute a simple explicit command inside Docker. Codex and OpenCode still run through the existing local runtime. No worker is executed inside Docker yet.
+DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, and run Docker-backed validation commands. Codex and OpenCode still run through the existing local worker runtime.
 
 ## Commands
 
@@ -78,6 +78,24 @@ Validation audit fields:
 - `execution-trace.json` records `runtime_config_sha256` when `--runtime-config` is used
 - the raw `runtime.yaml` content is not copied into trace or summary
 - `validation.log` and `validation.json` keep per-command runtime fields
+
+Worker runtime scaffold:
+
+~~~bash
+deonctl worker codex run task.yaml \
+  --store deonclaw.db \
+  --artifacts-dir artifacts \
+  --worker-runtime local \
+  --runtime-config configs/examples/runtime.yaml
+~~~
+
+`--worker-runtime local|docker` is part of the execution contract, but `docker` is scaffold-only in Task 20.4. The runner package can execute a fake/test worker command through Docker using `runtimeconfig.PlanDockerExec`; the CLI still rejects Docker worker runtime for real Codex/OpenCode runs. This keeps Docker worker execution testable without moving real agent adapters into Docker yet.
+
+Worker runtime audit fields:
+
+- `summary.md` records `Worker runtime: local|docker`
+- `execution-trace.json` records `worker_runtime`
+- `execution-trace.json` records `runtime_config_sha256` when Docker worker runtime uses `--runtime-config`
 
 ## Config Shape
 
@@ -196,7 +214,8 @@ Current state:
 - simple Docker command execution implemented
 - Docker validation command execution implemented
 - controlled env passthrough by allowlisted name implemented
-- worker execution remains local
+- Docker worker execution scaffold implemented for fake/test workers
+- real Codex/OpenCode worker execution remains local
 
 Not implemented yet:
 

@@ -108,7 +108,7 @@ func writeCodexRunArtifacts(workerName string, runDir string, runID string, task
 	if err := writer.write("execution-trace", "execution-trace.json", artifacts.KindOther, traceJSON); err != nil {
 		return nil, err
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(workerName, runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, contextPackWarnings, memoryProposal, artifactCount)); err != nil {
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(workerName, runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, trace.WorkerRuntime, contextPackWarnings, memoryProposal, artifactCount)); err != nil {
 		return nil, err
 	}
 	manifest, err := artifactManifestJSON(writer.artifacts)

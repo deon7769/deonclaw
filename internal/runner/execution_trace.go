@@ -45,6 +45,7 @@ type executionTraceOptions struct {
 	MemoryPolicyPath    string
 	RuntimeConfigPath   string
 	EnvRequirements     []workerconfig.EnvRequirementCheck
+	WorkerRuntime       string
 	Validation          ValidationResult
 	ValidationRuntime   string
 	PolicyOK            bool
@@ -69,6 +70,7 @@ type executionTrace struct {
 	MemoryPolicySHA256   string                             `json:"memory_policy_sha256,omitempty"`
 	RuntimeConfigSHA256  string                             `json:"runtime_config_sha256,omitempty"`
 	EnvRequirements      []workerconfig.EnvRequirementCheck `json:"env_requirements"`
+	WorkerRuntime        string                             `json:"worker_runtime"`
 	StartedAt            string                             `json:"started_at"`
 	FinishedAt           string                             `json:"finished_at"`
 	DurationMS           int64                              `json:"duration_ms"`
@@ -170,6 +172,7 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 		CommandDisplay:       strings.Join(result.Command, " "),
 		PromptSHA256:         sha256Hex([]byte(prompt)),
 		EnvRequirements:      append([]workerconfig.EnvRequirementCheck(nil), opts.EnvRequirements...),
+		WorkerRuntime:        workerRuntimeForTrace(opts),
 		StartedAt:            opts.StartedAt.Format(time.RFC3339Nano),
 		FinishedAt:           opts.FinishedAt.Format(time.RFC3339Nano),
 		DurationMS:           durationMillis(opts.StartedAt, opts.FinishedAt),
@@ -206,6 +209,13 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
+}
+
+func workerRuntimeForTrace(opts executionTraceOptions) string {
+	if runtime := strings.TrimSpace(opts.WorkerRuntime); runtime != "" {
+		return runtime
+	}
+	return WorkerRuntimeLocal
 }
 
 func validationRuntimeForTrace(opts executionTraceOptions) string {

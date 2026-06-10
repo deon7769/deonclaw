@@ -4,7 +4,7 @@ This document records the current worker contract used by DeonClaw runners.
 
 Workers are external command adapters. They do not own task policy, memory policy, workspace lifecycle, persistence, or approvals. A worker receives a scoped RunSpec, invokes its external tool, and returns a RunResult with events, artifacts, stderr, and optional metadata.
 
-Task 20.x Docker runtime work does not change worker execution. Docker runtime support covers config validation, `docker-plan`, `runtime docker-exec`, optional Docker-backed validation commands, and allowlisted env passthrough by name; Codex and OpenCode still run through the local worker adapters in this contract.
+Task 20.x Docker runtime work does not move real agent adapters into Docker yet. Docker runtime support covers config validation, `docker-plan`, `runtime docker-exec`, optional Docker-backed validation commands, allowlisted env passthrough by name, and a Docker worker execution scaffold for fake/test workers. Codex and OpenCode still run through the local worker adapters in this contract.
 
 ## Core Types
 
@@ -102,6 +102,7 @@ The trace is an audit artifact for the runner lifecycle. It records:
 - prompt_sha256 instead of raw prompt text
 - context_pack_sha256 when `--domains` built a context pack
 - memory_policy_sha256 when `--memory-policy` was configured and readable
+- worker_runtime as `local` or `docker`
 - validation_runtime as `local` or `docker`
 - runtime_config_sha256 when `--runtime-config` was configured and readable
 - env_requirements by name, requirement, and state only

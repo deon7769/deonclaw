@@ -48,6 +48,7 @@ type CodexRunOptions struct {
 	DomainsPath       string
 	MemoryPolicyPath  string
 	EnvRequirements   []workerconfig.EnvRequirementCheck
+	WorkerRuntime     string
 	ValidationRuntime string
 	RuntimeConfig     *runtimeconfig.Config
 	RuntimeConfigPath string
@@ -142,6 +143,21 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		fmt.Fprintf(stderr, "validation runtime failed: %v\n", err)
 		return 1
 	}
+	workerRuntime, err := normalizeWorkerRuntime(opts.WorkerRuntime)
+	if err != nil {
+		fmt.Fprintf(stderr, "worker runtime failed: %v\n", err)
+		return 1
+	}
+	if workerRuntime == WorkerRuntimeDocker {
+		if opts.RuntimeConfig == nil {
+			fmt.Fprintln(stderr, "worker runtime failed: worker runtime docker requires --runtime-config")
+			return 1
+		}
+		if _, err := runtimeconfig.PlanDocker(*opts.RuntimeConfig, workspace); err != nil {
+			fmt.Fprintf(stderr, "worker runtime failed: %v\n", err)
+			return 1
+		}
+	}
 
 	baseline, snapErr := r.GitSnapshotRunner(ctx, workspace)
 	if snapErr != nil {
@@ -194,11 +210,11 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 
 	worker := r.WorkerFactory()
 	timeline.Mark("worker_started")
-	result, runErr := worker.Run(ctx, workers.RunSpec{
+	result, runErr := runWorkerWithRuntime(ctx, worker, workers.RunSpec{
 		Task:      task,
 		Workspace: workspace,
 		Prompt:    prompt,
-	})
+	}, workerRuntime, opts.RuntimeConfig)
 	if runErr != nil {
 		timeline.MarkStatus("worker_finished", "failed")
 	} else {
@@ -304,6 +320,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		MemoryPolicyPath:    opts.MemoryPolicyPath,
 		RuntimeConfigPath:   opts.RuntimeConfigPath,
 		EnvRequirements:     opts.EnvRequirements,
+		WorkerRuntime:       workerRuntime,
 		Validation:          validationResult,
 		ValidationRuntime:   validationRuntime,
 		PolicyOK:            policyResult.OK(),

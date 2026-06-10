@@ -137,6 +137,7 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertArtifactManifestContains(t, filepath.Join(runDir, "artifact-manifest.json"), filepath.Join(runDir, "validation.json"), artifacts.KindOther)
 	assertArtifactManifestContains(t, filepath.Join(runDir, "artifact-manifest.json"), filepath.Join(runDir, "execution-trace.json"), artifacts.KindOther)
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker runtime: local")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: skipped")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation runtime: local")
@@ -149,6 +150,7 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertTraceString(t, trace, "run_id", "run-test-001")
 	assertTraceString(t, trace, "task_id", "worker-mismatch-001")
 	assertTraceString(t, trace, "worker", "codex")
+	assertTraceString(t, trace, "worker_runtime", "local")
 	assertTraceString(t, trace, "command_display", "codex exec --json --sandbox read-only --cd "+wantWorkspace+" -")
 	assertTraceNonEmptyString(t, trace, "prompt_sha256")
 	assertTraceString(t, trace, "validation_status", ValidationSkipped)
@@ -711,6 +713,189 @@ exit 0
 	assertTraceString(t, trace, "runtime_config_sha256", sha256Hex(runtimeConfigContent))
 	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), "deonclaw-runner:latest")
 	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), "/workspace")
+}
+
+func TestCodexRunnerRunDockerWorkerRuntimeWithFakeDocker(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+printf '{"type":"message","text":"docker worker ok"}\n'
+printf 'docker worker stderr\n' >&2
+exit 0
+`)
+	runtimeConfigContent := []byte(`runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    mounts:
+      - source: .
+        target: /workspace
+        mode: rw
+`)
+	runtimeConfigPath := filepath.Join(tempDir, "runtime.yaml")
+	if err := os.WriteFile(runtimeConfigPath, runtimeConfigContent, 0o600); err != nil {
+		t.Fatalf("WriteFile(runtime config) error = %v", err)
+	}
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-docker-worker-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				dryRunEvent: &workers.WorkerEvent{
+					Type:      workers.EventDryRunPlanned,
+					Worker:    "codex",
+					Command:   []string{"fake-worker", "--json", "-"},
+					Workspace: ".",
+					Sandbox:   "read-only",
+				},
+				runFunc: func(context.Context, workers.RunSpec) (*workers.RunResult, error) {
+					t.Fatal("local fake worker Run must not be called for docker worker runtime")
+					return nil, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:          writeTaskFile(t, "codex"),
+		StorePath:         storePath,
+		ArtifactsDir:      artifactsDir,
+		WorkerRuntime:     WorkerRuntimeDocker,
+		RuntimeConfig:     validDockerWorkerRuntimeConfig(),
+		RuntimeConfigPath: runtimeConfigPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	for _, want := range []string{"run", "--rm", "--network", "none", "--read-only", "deonclaw-runner:latest", "fake-worker", "--json", "-"} {
+		if !containsString(args, want) {
+			t.Fatalf("docker args = %#v, want %q", args, want)
+		}
+	}
+	if strings.Contains(strings.Join(args, " "), "sh -c") {
+		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-docker-worker-001")
+	assertFileContent(t, filepath.Join(runDir, "stdout.jsonl"), `{"type":"message","text":"docker worker ok"}`+"\n")
+	assertFileContent(t, filepath.Join(runDir, "events.jsonl"), `{"type":"message","text":"docker worker ok"}`+"\n")
+	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "docker worker stderr\n")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker runtime: docker")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "worker_runtime", "docker")
+	assertTraceString(t, trace, "runtime_config_sha256", sha256Hex(runtimeConfigContent))
+	assertTraceString(t, trace, "command_display", strings.Join([]string{
+		"docker", "run", "--rm", "--network", "none", "--read-only", "-w", "/workspace",
+		"-v", ".:/workspace:rw", "--label", "deonclaw.workspace=" + filepath.Join(artifactsDir, "run-docker-worker-001", "workspace"),
+		"deonclaw-runner:latest", "fake-worker", "--json", "-",
+	}, " "))
+}
+
+func TestCodexRunnerRunDockerWorkerRuntimeNonZeroFailsRun(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	installRunnerFakeDocker(t, `#!/bin/sh
+printf 'bad stdout\n'
+printf 'bad stderr\n' >&2
+exit 19
+`)
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-docker-worker-failed-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				dryRunEvent: &workers.WorkerEvent{
+					Worker:  "codex",
+					Command: []string{"fake-worker"},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:      writeTaskFile(t, "codex"),
+		StorePath:     storePath,
+		ArtifactsDir:  artifactsDir,
+		WorkerRuntime: WorkerRuntimeDocker,
+		RuntimeConfig: validDockerWorkerRuntimeConfig(),
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run() exit code = %d, want 1", code)
+	}
+	runDir := filepath.Join(artifactsDir, "run-docker-worker-failed-001")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: failed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker runtime: docker")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Error: docker worker command failed with exit code 19")
+	assertFileContent(t, filepath.Join(runDir, "stderr.log"), "bad stderr\n")
+}
+
+func TestCodexRunnerRunDockerWorkerRuntimeMissingEnvFailsBeforeDocker(t *testing.T) {
+	unsetRunnerEnvForTest(t, "ZAI_API_KEY")
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	cfg := *validDockerWorkerRuntimeConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY"}
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-docker-worker-missing-env-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				dryRunEvent: &workers.WorkerEvent{
+					Worker:  "codex",
+					Command: []string{"fake-worker"},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:      writeTaskFile(t, "codex"),
+		StorePath:     storePath,
+		ArtifactsDir:  artifactsDir,
+		WorkerRuntime: WorkerRuntimeDocker,
+		RuntimeConfig: &cfg,
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("Run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "ZAI_API_KEY") {
+		t.Fatalf("stderr = %q, want missing env", stderr.String())
+	}
+	assertRunnerFileEmptyOrMissing(t, argsPath)
+	runDir := filepath.Join(artifactsDir, "run-docker-worker-missing-env-001")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker runtime: docker")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: failed")
+	assertFileContains(t, filepath.Join(runDir, "execution-trace.json"), `"worker_runtime": "docker"`)
 }
 
 func TestCodexRunnerRunValidationCommandFailure(t *testing.T) {
@@ -1514,6 +1699,23 @@ func testCodexRunner(t *testing.T, opts testCodexRunnerOptions) CodexRunner {
 		ValidationRunner:  opts.ValidationRunner,
 		WorkspaceManagerFactory: func() WorkspacePreparer {
 			return workspaceManager
+		},
+	}
+}
+
+func validDockerWorkerRuntimeConfig() *runtimeconfig.Config {
+	return &runtimeconfig.Config{
+		Runtime: runtimeconfig.Runtime{
+			Mode: runtimeconfig.ModeDocker,
+			Docker: runtimeconfig.DockerConfig{
+				Image:        "deonclaw-runner:latest",
+				Workdir:      "/workspace",
+				Network:      "none",
+				ReadOnlyRoot: true,
+				Mounts: []runtimeconfig.MountSpec{
+					{Source: ".", Target: "/workspace", Mode: "rw"},
+				},
+			},
 		},
 	}
 }
