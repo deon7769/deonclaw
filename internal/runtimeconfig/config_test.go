@@ -149,6 +149,62 @@ func TestValidateNetworkDefaultWarns(t *testing.T) {
 	}
 }
 
+func TestValidateEnvPassthrough(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "secret")
+	cfg := validDockerConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY", "OPENAI_API_KEY"}
+
+	result, err := Validate(cfg)
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "OPENAI_API_KEY") {
+		t.Fatalf("warnings = %#v, want missing OPENAI_API_KEY warning", result.Warnings)
+	}
+	if strings.Contains(strings.Join(result.Warnings, "\n"), "secret") {
+		t.Fatalf("warnings leaked secret: %#v", result.Warnings)
+	}
+}
+
+func TestValidateRejectsInvalidEnvPassthroughNames(t *testing.T) {
+	cases := []string{
+		"",
+		"OPENAI API",
+		"OPENAI_API_KEY=value",
+		"OPENAI-API",
+		"OPENAI/API",
+		"OPENAI.API",
+		"openai_api_key",
+	}
+	for _, name := range cases {
+		t.Run(name, func(t *testing.T) {
+			cfg := validDockerConfig()
+			cfg.Runtime.Docker.Env.Passthrough = []string{name}
+
+			_, err := Validate(cfg)
+			if err == nil {
+				t.Fatalf("Validate() error = nil, want invalid env name for %q", name)
+			}
+			if !strings.Contains(err.Error(), "runtime.docker.env.passthrough[0]") {
+				t.Fatalf("error = %v, want env passthrough field", err)
+			}
+		})
+	}
+}
+
+func TestValidateInvalidEnvPassthroughDoesNotEchoInlineValue(t *testing.T) {
+	cfg := validDockerConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY=super-secret-value"}
+
+	_, err := Validate(cfg)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want invalid env name")
+	}
+	if strings.Contains(err.Error(), "super-secret-value") {
+		t.Fatalf("error leaked inline value: %v", err)
+	}
+}
+
 func TestPlanDockerBuildsCommand(t *testing.T) {
 	plan, err := PlanDocker(validDockerConfig(), "/tmp/workspace")
 	if err != nil {
@@ -170,6 +226,27 @@ func TestPlanDockerBuildsCommand(t *testing.T) {
 		if !strings.Contains(plan.Display, want) {
 			t.Fatalf("display = %q, want %q", plan.Display, want)
 		}
+	}
+}
+
+func TestPlanDockerIncludesEnvPassthroughNamesOnly(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "super-secret-value")
+	cfg := validDockerConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY"}
+
+	plan, err := PlanDocker(cfg, "/tmp/workspace")
+	if err != nil {
+		t.Fatalf("PlanDocker() error = %v", err)
+	}
+
+	wantParts := []string{"-e ZAI_API_KEY", "deonclaw-runner:latest"}
+	for _, want := range wantParts {
+		if !strings.Contains(plan.Display, want) {
+			t.Fatalf("display = %q, want %q", plan.Display, want)
+		}
+	}
+	if strings.Contains(plan.Display, "super-secret-value") {
+		t.Fatalf("display leaked secret: %q", plan.Display)
 	}
 }
 
@@ -199,6 +276,37 @@ func TestPlanDockerExecAppendsCommandAfterImage(t *testing.T) {
 	}
 	if strings.Contains(plan.Display, "sh -c") {
 		t.Fatalf("display = %q, must not use implicit shell", plan.Display)
+	}
+}
+
+func TestPlanDockerExecRejectsMissingEnvPassthrough(t *testing.T) {
+	unsetEnvForRuntimeConfigTest(t, "ZAI_API_KEY")
+	cfg := validDockerConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY"}
+
+	_, err := PlanDockerExec(cfg, "/tmp/workspace", []string{"echo", "hello"})
+	if err == nil {
+		t.Fatal("PlanDockerExec() error = nil, want missing env rejection")
+	}
+	if !strings.Contains(err.Error(), "ZAI_API_KEY") {
+		t.Fatalf("error = %v, want missing env name", err)
+	}
+}
+
+func TestPlanDockerExecAcceptsSetEnvPassthrough(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "super-secret-value")
+	cfg := validDockerConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY"}
+
+	plan, err := PlanDockerExec(cfg, "/tmp/workspace", []string{"echo", "hello"})
+	if err != nil {
+		t.Fatalf("PlanDockerExec() error = %v", err)
+	}
+	if !strings.Contains(plan.Display, "-e ZAI_API_KEY") {
+		t.Fatalf("display = %q, want env passthrough flag", plan.Display)
+	}
+	if strings.Contains(plan.Display, "super-secret-value") {
+		t.Fatalf("display leaked secret: %q", plan.Display)
 	}
 }
 
@@ -252,4 +360,19 @@ func writeRuntimeConfig(t *testing.T, content string) string {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	return path
+}
+
+func unsetEnvForRuntimeConfigTest(t *testing.T, name string) {
+	t.Helper()
+	oldValue, hadOldValue := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("Unsetenv(%s) error = %v", name, err)
+	}
+	t.Cleanup(func() {
+		if hadOldValue {
+			_ = os.Setenv(name, oldValue)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
 }

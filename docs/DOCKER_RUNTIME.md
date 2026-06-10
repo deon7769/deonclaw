@@ -68,6 +68,7 @@ Validation Docker execution has the same boundaries as `docker-exec`:
 - local validation remains the default
 - commands are executed directly, without implicit shell and without `sh -c`
 - invalid runtime config or dangerous mounts fail before Docker is executed
+- missing configured passthrough env fails before Docker is executed
 - Codex and OpenCode workers still execute locally
 
 Validation audit fields:
@@ -90,6 +91,10 @@ runtime:
     read_only_root: true
     memory_limit: 2g
     cpus: "2"
+    env:
+      passthrough:
+        - ZAI_API_KEY
+        - OPENAI_API_KEY
     mounts:
       - source: .
         target: /workspace
@@ -116,6 +121,36 @@ Supported mount modes:
 
 - `rw`: read-write, intended for the isolated code workspace only.
 - `ro`: read-only, intended for memory/domain mounts by default.
+
+## Env Passthrough Policy
+
+Docker runtime env passthrough is an explicit allowlist by variable name.
+
+Example:
+
+~~~yaml
+runtime:
+  mode: docker
+  docker:
+    env:
+      passthrough:
+        - ZAI_API_KEY
+        - OPENAI_API_KEY
+~~~
+
+Rules:
+
+- only env names are configured and recorded
+- values come from the DeonClaw process environment or its secret manager
+- `docker-plan`, `docker-exec`, and Docker validation pass env as `-e NAME`
+- inline values such as `NAME=value` are rejected
+- names must contain only `A-Z`, `0-9`, and `_`
+- empty names, names with spaces, `=`, `-`, `/`, or `.` are rejected
+- `runtime validate` warns when an allowlisted env is missing
+- `docker-exec` and Docker validation fail before Docker starts when an allowlisted env is missing or empty
+- env values are never written to summary, trace, validation artifacts, or plan output
+
+Use env passthrough for API keys that must reach a container. Do not mount secret files or secret directories into Docker.
 
 ## Mount Policy
 
@@ -147,7 +182,7 @@ Blocked targets:
 - `/etc` and anything under `/etc`
 - `/var/run/docker.sock`
 
-Secrets should come from a future controlled secret injection layer, not from raw host mounts. Task 20.0 deliberately does not mount secrets by default.
+Secrets should come from controlled env passthrough or a future secret injection layer, not from raw host mounts. Docker runtime does not mount secrets by default.
 
 ## Runtime Boundary
 
@@ -160,6 +195,7 @@ Current state:
 - Docker command planning implemented
 - simple Docker command execution implemented
 - Docker validation command execution implemented
+- controlled env passthrough by allowlisted name implemented
 - worker execution remains local
 
 Not implemented yet:

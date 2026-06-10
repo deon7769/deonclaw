@@ -253,6 +253,9 @@ func validationCommandError(result ValidationCommandResult) string {
 	if result.Status == validationTimedOut {
 		return fmt.Sprintf("validation command %q timed out after %d seconds", result.Name, result.TimeoutSeconds)
 	}
+	if result.ExitCode == -1 && strings.TrimSpace(result.Error) != "" {
+		return result.Error
+	}
 	return fmt.Sprintf("validation command %q failed with exit code %d", result.Name, result.ExitCode)
 }
 

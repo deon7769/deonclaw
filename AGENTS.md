@@ -65,6 +65,7 @@ Implemented:
 - Docker runtime config validation and docker-plan dry-run
 - Docker runtime simple command execution
 - Docker runtime validation command execution
+- Docker runtime env passthrough by explicit allowlist
 - workers smoke --dry-run model_strategy planning
 - execution trace artifact
 - runs report by worker/status and by model_profile with filters

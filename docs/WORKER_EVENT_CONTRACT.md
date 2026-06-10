@@ -4,7 +4,7 @@ This document records the current worker contract used by DeonClaw runners.
 
 Workers are external command adapters. They do not own task policy, memory policy, workspace lifecycle, persistence, or approvals. A worker receives a scoped RunSpec, invokes its external tool, and returns a RunResult with events, artifacts, stderr, and optional metadata.
 
-Task 20.2 does not change worker execution. Docker runtime support covers config validation, `docker-plan`, `runtime docker-exec`, and optional Docker-backed validation commands; Codex and OpenCode still run through the local worker adapters in this contract.
+Task 20.x Docker runtime work does not change worker execution. Docker runtime support covers config validation, `docker-plan`, `runtime docker-exec`, optional Docker-backed validation commands, and allowlisted env passthrough by name; Codex and OpenCode still run through the local worker adapters in this contract.
 
 ## Core Types
 
@@ -110,7 +110,7 @@ The trace is an audit artifact for the runner lifecycle. It records:
 - validation_status, policy_status, changed_paths_count, cleanup_action, and cleanup_reason
 - timeline entries for task load/validation, profile and env checks, context pack build, workspace preparation, worker start/finish, validation, diff, path policy, artifact writing, and workspace cleanup
 
-The trace must not contain raw prompts, raw runtime config content, or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
+The trace must not contain raw prompts, raw runtime config content, or environment variable values. Environment variable names can appear because they are part of the requirement contract and Docker env passthrough allowlist; values must not.
 
 Task `model_strategy` is controlled selection metadata in the current OpenCode contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real OpenCode runs select `preferred[0]` as `selected_model_profile`, record `model_strategy: selected`, reuse `model_profile` for run report grouping, add `--model <model_arg>` when defined, and validate env requirements from the selected profile before worker execution.
 

@@ -7,6 +7,10 @@ runtime:
     read_only_root: true
     memory_limit: 2g
     cpus: "2"
+    env:
+      passthrough:
+        - ZAI_API_KEY
+        - OPENAI_API_KEY
     mounts:
       - source: .
         target: /workspace

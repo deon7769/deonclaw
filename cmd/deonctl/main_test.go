@@ -427,6 +427,25 @@ func TestRunRuntimeDockerPlanJSON(t *testing.T) {
 	}
 }
 
+func TestRunRuntimeDockerPlanIncludesEnvPassthroughNameOnly(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+	configPath := writeCLIRuntimeConfig(t, runtimeConfigWithEnvPassthroughYAML("ZAI_API_KEY"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-plan", "--config", configPath, "--workspace", "."}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "-e ZAI_API_KEY") {
+		t.Fatalf("stdout = %q, want env passthrough name", output)
+	}
+	if strings.Contains(output, "zai-real-secret") {
+		t.Fatalf("stdout leaked secret: %q", output)
+	}
+}
+
 func TestRunRuntimeDockerExecWithFakeDockerCapturesArgs(t *testing.T) {
 	argsPath := installFakeDocker(t, `#!/bin/sh
 printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
@@ -461,6 +480,61 @@ exit 0
 	joined := strings.Join(args, " ")
 	if strings.Contains(joined, "sh -c") {
 		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+	if args[len(args)-2] != "echo" || args[len(args)-1] != "hello" {
+		t.Fatalf("docker args tail = %#v, want command appended after image", args)
+	}
+}
+
+func TestRunRuntimeDockerExecRejectsMissingEnvPassthroughBeforeDocker(t *testing.T) {
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	argsPath := installFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	configPath := writeCLIRuntimeConfig(t, runtimeConfigWithEnvPassthroughYAML("ZAI_API_KEY"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-exec", "--config", configPath, "--workspace", ".", "--", "echo", "hello"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "ZAI_API_KEY") {
+		t.Fatalf("stderr = %q, want missing env name", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	assertFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunRuntimeDockerExecWithEnvPassthroughCallsFakeDockerNameOnly(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+	argsPath := installFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+printf 'docker stdout\n'
+exit 0
+`)
+	configPath := writeCLIRuntimeConfig(t, runtimeConfigWithEnvPassthroughYAML("ZAI_API_KEY"))
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-exec", "--config", configPath, "--workspace", ".", "--", "echo", "hello"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-e ZAI_API_KEY") {
+		t.Fatalf("docker args = %#v, want env passthrough flag", args)
+	}
+	if strings.Contains(joined, "zai-real-secret") || strings.Contains(stdout.String(), "zai-real-secret") || strings.Contains(stderr.String(), "zai-real-secret") {
+		t.Fatalf("secret leaked; args=%#v stdout=%q stderr=%q", args, stdout.String(), stderr.String())
 	}
 	if args[len(args)-2] != "echo" || args[len(args)-1] != "hello" {
 		t.Fatalf("docker args tail = %#v, want command appended after image", args)
@@ -5438,6 +5512,26 @@ func validRuntimeConfigYAML() string {
       - source: escalasoft_brain
         target: /memory/escalasoft_brain
         mode: ro
+`
+}
+
+func runtimeConfigWithEnvPassthroughYAML(name string) string {
+	return `runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    memory_limit: 2g
+    cpus: "2"
+    env:
+      passthrough:
+        - ` + name + `
+    mounts:
+      - source: .
+        target: /workspace
+        mode: rw
 `
 }
 

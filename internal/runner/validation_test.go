@@ -149,6 +149,37 @@ exit 0
 	}
 }
 
+func TestRunDockerValidationCommandsPassesEnvNameOnly(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+	workspace := t.TempDir()
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	cfg := validDockerValidationConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY"}
+
+	result := RunDockerValidationCommands(context.Background(), workspace, []tasks.ValidationCommand{
+		{Name: "go-test", Command: "go", Args: []string{"test"}},
+	}, cfg)
+
+	if result.Status != ValidationPassed {
+		t.Fatalf("validation status = %q, want passed: %#v", result.Status, result)
+	}
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	joined := strings.Join(args, " ")
+	if !strings.Contains(joined, "-e ZAI_API_KEY") {
+		t.Fatalf("docker args = %#v, want env passthrough flag", args)
+	}
+	if strings.Contains(joined, "zai-real-secret") || strings.Contains(result.Commands[0].Stdout, "zai-real-secret") || strings.Contains(result.Commands[0].Stderr, "zai-real-secret") {
+		t.Fatalf("secret leaked; args=%#v command=%#v", args, result.Commands[0])
+	}
+}
+
 func TestRunDockerValidationCommandsRespectsTimeout(t *testing.T) {
 	installRunnerFakeDocker(t, `#!/bin/sh
 sleep 2
@@ -242,6 +273,28 @@ exit 0
 	assertRunnerFileEmptyOrMissing(t, argsPath)
 }
 
+func TestRunDockerValidationCommandsMissingEnvFailsBeforeDocker(t *testing.T) {
+	unsetRunnerEnvForTest(t, "ZAI_API_KEY")
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	cfg := validDockerValidationConfig()
+	cfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY"}
+
+	result := RunDockerValidationCommands(context.Background(), t.TempDir(), []tasks.ValidationCommand{
+		{Name: "go-test", Command: "go", Args: []string{"test"}},
+	}, cfg)
+
+	if result.Status != ValidationFailed {
+		t.Fatalf("validation status = %q, want failed: %#v", result.Status, result)
+	}
+	if !strings.Contains(result.Error, "ZAI_API_KEY") {
+		t.Fatalf("error = %q, want missing env", result.Error)
+	}
+	assertRunnerFileEmptyOrMissing(t, argsPath)
+}
+
 func TestLimitedOutputReturnsOriginalWriteLengthWhenTruncating(t *testing.T) {
 	output := newLimitedOutput(3)
 
@@ -271,6 +324,21 @@ func installRunnerFakeDocker(t *testing.T, script string) string {
 	t.Setenv("DEONCLAW_FAKE_DOCKER_ARGS", argsPath)
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return argsPath
+}
+
+func unsetRunnerEnvForTest(t *testing.T, name string) {
+	t.Helper()
+	oldValue, hadOldValue := os.LookupEnv(name)
+	if err := os.Unsetenv(name); err != nil {
+		t.Fatalf("Unsetenv(%s) error = %v", name, err)
+	}
+	t.Cleanup(func() {
+		if hadOldValue {
+			_ = os.Setenv(name, oldValue)
+		} else {
+			_ = os.Unsetenv(name)
+		}
+	})
 }
 
 func validDockerValidationConfig() runtimeconfig.Config {
