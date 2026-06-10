@@ -4,7 +4,7 @@ This document records the current worker contract used by DeonClaw runners.
 
 Workers are external command adapters. They do not own task policy, memory policy, workspace lifecycle, persistence, or approvals. A worker receives a scoped RunSpec, invokes its external tool, and returns a RunResult with events, artifacts, stderr, and optional metadata.
 
-Task 20.x Docker runtime work does not move real agent adapters into Docker yet. Docker runtime support covers config validation, `docker-plan`, `runtime docker-exec`, optional Docker-backed validation commands, allowlisted env passthrough by name, and a Docker worker execution scaffold for fake/test workers. Codex and OpenCode still run through the local worker adapters in this contract.
+Task 20.x Docker runtime work keeps production worker execution conservative. Docker runtime support covers config validation, `docker-plan`, `runtime docker-exec`, optional Docker-backed validation commands, allowlisted env passthrough by name, a Docker worker execution scaffold for fake/test workers, and an OpenCode Docker smoke path. Codex still runs through the local worker adapter in this contract.
 
 ## Core Types
 
@@ -55,7 +55,7 @@ For Docker worker execution, the prompt delivery contract is explicit:
 - `stdin`: the runner passes the prompt through stdin. Fake/test workers use this path.
 - `arg_placeholder`: the runner replaces the placeholder only in the process args used for execution. The stored command, summary and trace keep `<prompt>`.
 
-OpenCode plans a prompt argument, but real OpenCode Docker execution remains blocked until a dedicated smoke validates that placeholder replacement, artifact capture and prompt masking behave correctly inside Docker.
+OpenCode plans a prompt argument. The Docker smoke path uses `arg_placeholder` to pass the raw prompt only to the process args while preserving `<prompt>` in the recorded command, summary, and trace. This smoke contract is not production hardening; a future wrapper may switch OpenCode prompt delivery to stdin.
 
 ### RunResult
 

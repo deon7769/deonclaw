@@ -2816,10 +2816,6 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		fmt.Fprintf(stderr, "error: %v\n", err)
 		return 1
 	}
-	if opts.workerRuntime == runner.WorkerRuntimeDocker {
-		fmt.Fprintln(stderr, "error: worker runtime docker is scaffold-only and not enabled for opencode")
-		return 1
-	}
 	runtimeCfg, err := loadRunRuntimeConfig(opts.runtimeConfigPath, opts.validationRuntime, opts.workerRuntime, task)
 	if err != nil {
 		fmt.Fprintf(stderr, "error: %v\n", err)

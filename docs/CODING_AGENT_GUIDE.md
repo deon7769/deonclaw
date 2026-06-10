@@ -15,7 +15,7 @@ Before changing code, read:
 
 For current sequencing, follow AGENTS.md Next implementation order first.
 
-Do not implement fallback execution, real Codex/OpenCode Docker worker execution, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, allowlisted env passthrough, and fake/test worker runtime scaffold only; real workers still run locally.
+Do not implement fallback execution, Codex Docker worker execution, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, allowlisted env passthrough, fake/test worker runtime scaffold, and OpenCode Docker smoke only; Codex still runs locally.
 
 Memory apply and restore already exist. Do not alter their behavior unless a task explicitly targets the memory workflow.
 

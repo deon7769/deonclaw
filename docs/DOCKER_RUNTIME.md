@@ -2,7 +2,7 @@
 
 Task 20.0 adds the Docker runtime foundation.
 
-DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, and run Docker-backed validation commands. Codex and OpenCode still run through the existing local worker runtime.
+DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, and run an OpenCode Docker smoke path. Codex still runs through the existing local worker runtime.
 
 ## Commands
 
@@ -89,14 +89,14 @@ deonctl worker codex run task.yaml \
   --runtime-config configs/examples/runtime.yaml
 ~~~
 
-`--worker-runtime local|docker` is part of the execution contract, but `docker` is scaffold-only in Task 20.4. The runner package can execute a fake/test worker command through Docker using `runtimeconfig.PlanDockerExec`; the CLI still rejects Docker worker runtime for real Codex/OpenCode runs. This keeps Docker worker execution testable without moving real agent adapters into Docker yet.
+`--worker-runtime local|docker` is part of the execution contract. Docker worker runtime started as a fake/test scaffold in Task 20.4 and is enabled for OpenCode smoke runs in Task 20.5. Codex Docker worker runtime remains blocked.
 
 Prompt delivery is worker-specific. A Docker worker plan must declare one of:
 
 - `prompt_delivery: stdin`: the runner writes the prompt to process stdin.
 - `prompt_delivery: arg_placeholder` with `placeholder: <prompt>`: the runner replaces the placeholder only in the real process args.
 
-The recorded command stays masked with `<prompt>` in `RunResult.Command`, `summary.md`, and `execution-trace.json`. The raw prompt is represented by `prompt_sha256` only. OpenCode uses a prompt argument in its local adapter, so Docker OpenCode remains blocked until a dedicated smoke validates its prompt delivery, artifacts, and command masking end to end.
+The recorded command stays masked with `<prompt>` in `RunResult.Command`, `summary.md`, and `execution-trace.json`. The raw prompt is represented by `prompt_sha256` only. OpenCode Docker smoke currently uses `arg_placeholder`, matching the OpenCode prompt-as-argument contract. This is smoke-only and not production hardening; the prompt transport can move to stdin or a wrapper later.
 
 Worker runtime audit fields:
 
@@ -222,11 +222,13 @@ Current state:
 - Docker validation command execution implemented
 - controlled env passthrough by allowlisted name implemented
 - Docker worker execution scaffold implemented for fake/test workers
-- real Codex/OpenCode worker execution remains local
+- OpenCode Docker worker smoke implemented with prompt placeholder masking
+- Codex worker execution remains local
 
 Not implemented yet:
 
-- running Codex or OpenCode inside Docker
+- running Codex inside Docker
+- production-ready OpenCode Docker worker execution
 - automatic fallback execution
 - MCP manager
 - LanceDB or memory index

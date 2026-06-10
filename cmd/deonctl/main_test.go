@@ -4277,14 +4277,126 @@ func TestParseOpenCodeRunOptions(t *testing.T) {
 	}
 }
 
-func TestRunOpenCodeWorkerRuntimeDockerRemainsBlocked(t *testing.T) {
-	taskPath := writeTaskFile(t, "opencode")
-	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+func TestRunOpenCodeWorkerRuntimeDockerSmokeWithFakeDocker(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+
+	rawPrompt := "RAW_PROMPT_SECRET_205"
+	envSecret := "ENV_SECRET_205"
+	t.Setenv("ZAI_API_KEY", envSecret)
+	argsPath := installFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+printf '%s\n' '{"type":"message","text":"docker opencode ok"}'
+printf '%s\n' 'docker opencode stderr' >&2
+exit 0
+`)
+	taskPath := writeTaskFileWithGoal(t, "opencode", rawPrompt)
+	configPath := writeCLIRuntimeConfig(t, runtimeConfigWithEnvPassthroughYAML("ZAI_API_KEY"))
+	tempDir := t.TempDir()
+	artifactsDir := filepath.Join(tempDir, "artifacts")
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
 	code := run([]string{
 		"worker", "opencode", "run", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", artifactsDir,
+		"--runtime-config", configPath,
+		"--worker-runtime", "docker",
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "run_id: run-cli-opencode-config-001") {
+		t.Fatalf("stdout = %q, want configured opencode run id", stdout.String())
+	}
+	if !strings.Contains(stdout.String(), "command: docker run ") || !strings.Contains(stdout.String(), "opencode run --dir ") || !strings.Contains(stdout.String(), "--format json <prompt>") {
+		t.Fatalf("stdout = %q, want masked docker opencode command", stdout.String())
+	}
+	if strings.Contains(stdout.String(), rawPrompt) || strings.Contains(stderr.String(), rawPrompt) {
+		t.Fatalf("prompt leaked to CLI output; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+	if strings.Contains(stdout.String(), envSecret) || strings.Contains(stderr.String(), envSecret) {
+		t.Fatalf("env value leaked to CLI output; stdout=%q stderr=%q", stdout.String(), stderr.String())
+	}
+
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	if !stringSliceContainsSequence(args, []string{"opencode", "run"}) || !stringSliceContainsSequence(args, []string{"--format", "json", rawPrompt}) {
+		t.Fatalf("docker args = %#v, want opencode run with raw prompt arg", args)
+	}
+	if !stringSliceContainsSequence(args, []string{"-e", "ZAI_API_KEY"}) {
+		t.Fatalf("docker args = %#v, want env passthrough name", args)
+	}
+	if strings.Contains(strings.Join(args, " "), envSecret) {
+		t.Fatalf("docker args leaked env value: %#v", args)
+	}
+	if strings.Contains(strings.Join(args, " "), "sh -c") {
+		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-cli-opencode-config-001")
+	assertCLIFileContent(t, filepath.Join(runDir, "stdout.jsonl"), `{"type":"message","text":"docker opencode ok"}`+"\n")
+	assertCLIFileContent(t, filepath.Join(runDir, "events.jsonl"), `{"type":"message","text":"docker opencode ok"}`+"\n")
+	assertCLIFileContent(t, filepath.Join(runDir, "stderr.log"), "docker opencode stderr\n")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Worker runtime: docker")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Command: docker run")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "--format json <prompt>")
+	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `"worker_runtime": "docker"`)
+	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `"command_display": "docker run`)
+	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `<prompt>`)
+	for _, artifact := range []string{"summary.md", "execution-trace.json", "stdout.jsonl", "events.jsonl", "stderr.log"} {
+		assertCLIFileNotContains(t, filepath.Join(runDir, artifact), rawPrompt)
+		assertCLIFileNotContains(t, filepath.Join(runDir, artifact), envSecret)
+	}
+}
+
+func TestRunOpenCodeWorkerRuntimeDockerMissingEnvFailsBeforeDocker(t *testing.T) {
+	restore := overrideOpenCodeRunConfigDeps(t)
+	defer restore()
+	unsetEnvForTest(t, "ZAI_API_KEY")
+	argsPath := installFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+exit 0
+`)
+	taskPath := writeTaskFile(t, "opencode")
+	configPath := writeCLIRuntimeConfig(t, runtimeConfigWithEnvPassthroughYAML("ZAI_API_KEY"))
+	tempDir := t.TempDir()
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"worker", "opencode", "run", taskPath,
+		"--store", filepath.Join(tempDir, "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts"),
+		"--runtime-config", configPath,
+		"--worker-runtime", "docker",
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "ZAI_API_KEY") {
+		t.Fatalf("stderr = %q, want missing env", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+	assertFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunCodexWorkerRuntimeDockerRemainsBlocked(t *testing.T) {
+	taskPath := writeTaskFile(t, "codex")
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"worker", "codex", "run", taskPath,
 		"--store", filepath.Join(t.TempDir(), "deonclaw.db"),
 		"--artifacts-dir", filepath.Join(t.TempDir(), "artifacts"),
 		"--runtime-config", configPath,
@@ -4294,8 +4406,8 @@ func TestRunOpenCodeWorkerRuntimeDockerRemainsBlocked(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("run() exit code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "worker runtime docker is scaffold-only and not enabled for opencode") {
-		t.Fatalf("stderr = %q, want opencode docker block", stderr.String())
+	if !strings.Contains(stderr.String(), "worker runtime docker is scaffold-only and not enabled for codex") {
+		t.Fatalf("stderr = %q, want codex docker block", stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
@@ -4646,11 +4758,17 @@ func TestParseArtifactPruneOptions(t *testing.T) {
 func writeTaskFile(t *testing.T, worker string) string {
 	t.Helper()
 
+	return writeTaskFileWithGoal(t, worker, "Do not execute")
+}
+
+func writeTaskFileWithGoal(t *testing.T, worker string, goal string) string {
+	t.Helper()
+
 	content := `id: worker-mismatch-001
 title: "Worker mismatch"
 domain: general
 worker: ` + worker + `
-goal: "Do not execute"
+goal: "` + goal + `"
 mode: read_only
 workspace:
   strategy: local_repo
@@ -5402,6 +5520,14 @@ func assertCLIFileContains(t *testing.T, path string, want string) {
 	}
 }
 
+func assertCLIFileNotContains(t *testing.T, path string, want string) {
+	t.Helper()
+	got := mustReadCLIFile(t, path)
+	if strings.Contains(string(got), want) {
+		t.Fatalf("ReadFile(%q) = %q, did not want %q", path, got, want)
+	}
+}
+
 func readApplyPreflightFile(t *testing.T, path string) memory.ApplyPreflight {
 	t.Helper()
 
@@ -5508,6 +5634,28 @@ func assertFileEmptyOrMissing(t *testing.T, path string) {
 func stringSliceContains(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func stringSliceContainsSequence(values []string, want []string) bool {
+	if len(want) == 0 {
+		return true
+	}
+	if len(want) > len(values) {
+		return false
+	}
+	for i := 0; i <= len(values)-len(want); i++ {
+		matched := true
+		for j := range want {
+			if values[i+j] != want[j] {
+				matched = false
+				break
+			}
+		}
+		if matched {
 			return true
 		}
 	}
