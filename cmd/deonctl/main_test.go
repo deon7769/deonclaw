@@ -4277,6 +4277,31 @@ func TestParseOpenCodeRunOptions(t *testing.T) {
 	}
 }
 
+func TestRunOpenCodeWorkerRuntimeDockerRemainsBlocked(t *testing.T) {
+	taskPath := writeTaskFile(t, "opencode")
+	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"worker", "opencode", "run", taskPath,
+		"--store", filepath.Join(t.TempDir(), "deonclaw.db"),
+		"--artifacts-dir", filepath.Join(t.TempDir(), "artifacts"),
+		"--runtime-config", configPath,
+		"--worker-runtime", "docker",
+	}, &stdout, &stderr)
+
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "worker runtime docker is scaffold-only and not enabled for opencode") {
+		t.Fatalf("stderr = %q, want opencode docker block", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
 func TestRunArtifactsPruneDryRun(t *testing.T) {
 	ctx := context.Background()
 	tempDir := t.TempDir()

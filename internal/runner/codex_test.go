@@ -719,8 +719,11 @@ func TestCodexRunnerRunDockerWorkerRuntimeWithFakeDocker(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
 	artifactsDir := filepath.Join(tempDir, "artifacts")
+	stdinPath := filepath.Join(tempDir, "docker.stdin")
+	t.Setenv("DEONCLAW_FAKE_DOCKER_STDIN", stdinPath)
 	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
 printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+cat > "$DEONCLAW_FAKE_DOCKER_STDIN"
 printf '{"type":"message","text":"docker worker ok"}\n'
 printf 'docker worker stderr\n' >&2
 exit 0
@@ -790,6 +793,7 @@ exit 0
 	if strings.Contains(strings.Join(args, " "), "sh -c") {
 		t.Fatalf("docker args = %#v, must not use implicit shell", args)
 	}
+	assertFileContent(t, stdinPath, "Do not execute")
 
 	runDir := filepath.Join(artifactsDir, "run-docker-worker-001")
 	assertFileContent(t, filepath.Join(runDir, "stdout.jsonl"), `{"type":"message","text":"docker worker ok"}`+"\n")
@@ -804,6 +808,106 @@ exit 0
 		"docker", "run", "--rm", "--network", "none", "--read-only", "-w", "/workspace",
 		"-v", ".:/workspace:rw", "--label", "deonclaw.workspace=" + filepath.Join(artifactsDir, "run-docker-worker-001", "workspace"),
 		"deonclaw-runner:latest", "fake-worker", "--json", "-",
+	}, " "))
+}
+
+func TestCodexRunnerRunDockerWorkerRuntimeArgPlaceholderMasksPrompt(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	rawPrompt := "RAW_PROMPT_SECRET_2041"
+	envSecret := "ENV_SECRET_2041"
+	t.Setenv("ZAI_API_KEY", envSecret)
+	argsPath := installRunnerFakeDocker(t, `#!/bin/sh
+printf '%s\n' "$@" > "$DEONCLAW_FAKE_DOCKER_ARGS"
+printf '{"type":"message","text":"arg placeholder ok"}\n'
+printf 'arg placeholder stderr\n' >&2
+exit 0
+`)
+	runtimeConfigContent := []byte(`runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    mounts:
+      - source: .
+        target: /workspace
+        mode: rw
+`)
+	runtimeConfigPath := filepath.Join(tempDir, "runtime.yaml")
+	if err := os.WriteFile(runtimeConfigPath, runtimeConfigContent, 0o600); err != nil {
+		t.Fatalf("WriteFile(runtime config) error = %v", err)
+	}
+	runtimeCfg := *validDockerWorkerRuntimeConfig()
+	runtimeCfg.Runtime.Docker.Env.Passthrough = []string{"ZAI_API_KEY"}
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-docker-worker-arg-placeholder-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				dryRunEvent: &workers.WorkerEvent{
+					Type:              workers.EventDryRunPlanned,
+					Worker:            "codex",
+					Command:           []string{"fake-worker", "--prompt", workers.PromptPlaceholder},
+					Workspace:         ".",
+					Sandbox:           "read-only",
+					PromptDelivery:    workers.PromptDeliveryArgPlaceholder,
+					PromptPlaceholder: workers.PromptPlaceholder,
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:          writeTaskFileWithDomainAndGoal(t, "codex", "general", rawPrompt),
+		StorePath:         storePath,
+		ArtifactsDir:      artifactsDir,
+		WorkerRuntime:     WorkerRuntimeDocker,
+		RuntimeConfig:     &runtimeCfg,
+		RuntimeConfigPath: runtimeConfigPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	argsData, err := os.ReadFile(argsPath)
+	if err != nil {
+		t.Fatalf("ReadFile(args) error = %v", err)
+	}
+	args := strings.Split(strings.TrimSpace(string(argsData)), "\n")
+	if !containsString(args, rawPrompt) {
+		t.Fatalf("docker args = %#v, want raw prompt passed to process args", args)
+	}
+	if strings.Contains(strings.Join(args, " "), envSecret) {
+		t.Fatalf("docker args leaked env value: %#v", args)
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-docker-worker-arg-placeholder-001")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Worker runtime: docker")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Command: docker run")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "--prompt <prompt>")
+	assertFileNotContains(t, filepath.Join(runDir, "summary.md"), rawPrompt)
+	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), rawPrompt)
+	assertFileNotContains(t, filepath.Join(runDir, "stdout.jsonl"), rawPrompt)
+	assertFileNotContains(t, filepath.Join(runDir, "stderr.log"), rawPrompt)
+	assertFileNotContains(t, filepath.Join(runDir, "summary.md"), envSecret)
+	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), envSecret)
+	assertFileNotContains(t, filepath.Join(runDir, "stdout.jsonl"), envSecret)
+	assertFileNotContains(t, filepath.Join(runDir, "stderr.log"), envSecret)
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "worker_runtime", "docker")
+	assertTraceString(t, trace, "runtime_config_sha256", sha256Hex(runtimeConfigContent))
+	assertTraceNonEmptyString(t, trace, "prompt_sha256")
+	assertTraceString(t, trace, "command_display", strings.Join([]string{
+		"docker", "run", "--rm", "--network", "none", "--read-only", "-w", "/workspace", "-e", "ZAI_API_KEY",
+		"-v", ".:/workspace:rw", "--label", "deonclaw.workspace=" + filepath.Join(artifactsDir, "run-docker-worker-arg-placeholder-001", "workspace"),
+		"deonclaw-runner:latest", "fake-worker", "--prompt", "<prompt>",
 	}, " "))
 }
 

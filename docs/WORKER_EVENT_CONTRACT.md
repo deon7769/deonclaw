@@ -35,6 +35,8 @@ type WorkerEvent struct {
     Command   []string
     Workspace string
     Sandbox   string
+    PromptDelivery string
+    PromptPlaceholder string
     Payload   json.RawMessage
 }
 ~~~
@@ -44,7 +46,16 @@ type WorkerEvent struct {
 - Command is the external command shape used by the worker when relevant.
 - Workspace is the workspace used by the command.
 - Sandbox is the effective sandbox or policy mode when relevant.
+- PromptDelivery is optional and currently used by the Docker worker scaffold. Supported values are `stdin` and `arg_placeholder`; empty means `stdin`.
+- PromptPlaceholder is the argument marker to replace when PromptDelivery is `arg_placeholder`; the default is `<prompt>`.
 - Payload must be valid JSON when present.
+
+For Docker worker execution, the prompt delivery contract is explicit:
+
+- `stdin`: the runner passes the prompt through stdin. Fake/test workers use this path.
+- `arg_placeholder`: the runner replaces the placeholder only in the process args used for execution. The stored command, summary and trace keep `<prompt>`.
+
+OpenCode plans a prompt argument, but real OpenCode Docker execution remains blocked until a dedicated smoke validates that placeholder replacement, artifact capture and prompt masking behave correctly inside Docker.
 
 ### RunResult
 

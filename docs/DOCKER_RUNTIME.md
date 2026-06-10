@@ -91,6 +91,13 @@ deonctl worker codex run task.yaml \
 
 `--worker-runtime local|docker` is part of the execution contract, but `docker` is scaffold-only in Task 20.4. The runner package can execute a fake/test worker command through Docker using `runtimeconfig.PlanDockerExec`; the CLI still rejects Docker worker runtime for real Codex/OpenCode runs. This keeps Docker worker execution testable without moving real agent adapters into Docker yet.
 
+Prompt delivery is worker-specific. A Docker worker plan must declare one of:
+
+- `prompt_delivery: stdin`: the runner writes the prompt to process stdin.
+- `prompt_delivery: arg_placeholder` with `placeholder: <prompt>`: the runner replaces the placeholder only in the real process args.
+
+The recorded command stays masked with `<prompt>` in `RunResult.Command`, `summary.md`, and `execution-trace.json`. The raw prompt is represented by `prompt_sha256` only. OpenCode uses a prompt argument in its local adapter, so Docker OpenCode remains blocked until a dedicated smoke validates its prompt delivery, artifacts, and command masking end to end.
+
 Worker runtime audit fields:
 
 - `summary.md` records `Worker runtime: local|docker`

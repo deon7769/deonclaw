@@ -11,6 +11,11 @@ import (
 const EventDryRunPlanned = "worker.dry_run.planned"
 const EventStdoutJSON = "worker.stdout.json"
 
+const PromptDeliveryStdin = "stdin"
+const PromptDeliveryArgPlaceholder = "arg_placeholder"
+
+const PromptPlaceholder = "<prompt>"
+
 type RunSpec struct {
 	Task      *tasks.Task
 	Workspace string
@@ -18,12 +23,14 @@ type RunSpec struct {
 }
 
 type WorkerEvent struct {
-	Type      string          `json:"type"`
-	Worker    string          `json:"worker"`
-	Command   []string        `json:"command,omitempty"`
-	Workspace string          `json:"workspace,omitempty"`
-	Sandbox   string          `json:"sandbox,omitempty"`
-	Payload   json.RawMessage `json:"payload,omitempty"`
+	Type              string          `json:"type"`
+	Worker            string          `json:"worker"`
+	Command           []string        `json:"command,omitempty"`
+	Workspace         string          `json:"workspace,omitempty"`
+	Sandbox           string          `json:"sandbox,omitempty"`
+	PromptDelivery    string          `json:"prompt_delivery,omitempty"`
+	PromptPlaceholder string          `json:"prompt_placeholder,omitempty"`
+	Payload           json.RawMessage `json:"payload,omitempty"`
 }
 
 type RunResult struct {

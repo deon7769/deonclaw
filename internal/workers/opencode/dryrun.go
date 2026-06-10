@@ -139,13 +139,15 @@ func (w *Worker) plan(ctx context.Context, spec workers.RunSpec) (*workers.Worke
 	if w.modelArg != "" {
 		command = append(command, "--model", w.modelArg)
 	}
-	command = append(command, "<prompt>")
+	command = append(command, workers.PromptPlaceholder)
 	return &workers.WorkerEvent{
-		Type:      workers.EventDryRunPlanned,
-		Worker:    "opencode",
-		Command:   command,
-		Workspace: workspace,
-		Sandbox:   policy,
+		Type:              workers.EventDryRunPlanned,
+		Worker:            "opencode",
+		Command:           command,
+		Workspace:         workspace,
+		Sandbox:           policy,
+		PromptDelivery:    workers.PromptDeliveryArgPlaceholder,
+		PromptPlaceholder: workers.PromptPlaceholder,
 	}, nil
 }
 
@@ -181,7 +183,7 @@ func commandArgsWithPrompt(args []string, prompt string) []string {
 	}
 	commandArgs := append([]string(nil), args...)
 	for i, arg := range commandArgs {
-		if arg == "<prompt>" {
+		if arg == workers.PromptPlaceholder {
 			commandArgs[i] = prompt
 		}
 	}

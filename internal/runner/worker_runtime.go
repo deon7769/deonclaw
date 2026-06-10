@@ -56,6 +56,10 @@ func runDockerWorker(ctx context.Context, worker workers.Worker, spec workers.Ru
 	if planned == nil || len(planned.Command) == 0 || strings.TrimSpace(planned.Command[0]) == "" {
 		return nil, errors.New("docker worker command must not be empty")
 	}
+	promptDelivery, promptPlaceholder, err := dockerWorkerPromptContract(planned)
+	if err != nil {
+		return nil, err
+	}
 
 	plan, err := runtimeconfig.PlanDockerExec(cfg, spec.Workspace, planned.Command)
 	result := &workers.RunResult{
@@ -74,9 +78,16 @@ func runDockerWorker(ctx context.Context, worker workers.Worker, spec workers.Ru
 		prompt = spec.Task.Goal
 	}
 
-	cmd := exec.CommandContext(ctx, plan.Command[0], plan.Command[1:]...)
+	execCommand := append([]string(nil), plan.Command...)
+	if promptDelivery == workers.PromptDeliveryArgPlaceholder {
+		execCommand = replacePromptPlaceholder(execCommand, promptPlaceholder, prompt)
+	}
+
+	cmd := exec.CommandContext(ctx, execCommand[0], execCommand[1:]...)
 	cmd.Dir = spec.Workspace
-	cmd.Stdin = strings.NewReader(prompt)
+	if promptDelivery == workers.PromptDeliveryStdin {
+		cmd.Stdin = strings.NewReader(prompt)
+	}
 
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
@@ -92,6 +103,47 @@ func runDockerWorker(ctx context.Context, worker workers.Worker, spec workers.Ru
 		return result, fmt.Errorf("docker worker command failed with exit code %d", commandExitCode(runErr))
 	}
 	return result, nil
+}
+
+func dockerWorkerPromptContract(planned *workers.WorkerEvent) (string, string, error) {
+	delivery := strings.TrimSpace(planned.PromptDelivery)
+	if delivery == "" {
+		delivery = workers.PromptDeliveryStdin
+	}
+	placeholder := strings.TrimSpace(planned.PromptPlaceholder)
+	if placeholder == "" {
+		placeholder = workers.PromptPlaceholder
+	}
+	switch delivery {
+	case workers.PromptDeliveryStdin:
+		return delivery, placeholder, nil
+	case workers.PromptDeliveryArgPlaceholder:
+		if !commandContainsArg(planned.Command, placeholder) {
+			return "", "", fmt.Errorf("docker worker prompt placeholder %q not found in command", placeholder)
+		}
+		return delivery, placeholder, nil
+	default:
+		return "", "", fmt.Errorf("docker worker prompt delivery %q is not supported", delivery)
+	}
+}
+
+func replacePromptPlaceholder(command []string, placeholder string, prompt string) []string {
+	replaced := append([]string(nil), command...)
+	for i, arg := range replaced {
+		if arg == placeholder {
+			replaced[i] = prompt
+		}
+	}
+	return replaced
+}
+
+func commandContainsArg(command []string, want string) bool {
+	for _, arg := range command {
+		if arg == want {
+			return true
+		}
+	}
+	return false
 }
 
 func parseDockerWorkerEvents(stdout []byte, workerName string, command []string, workspace string, sandbox string) []workers.WorkerEvent {
