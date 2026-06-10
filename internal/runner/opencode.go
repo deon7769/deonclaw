@@ -22,6 +22,7 @@ type OpenCodeRunOptions struct {
 	EnvRequirements   []workerconfig.EnvRequirementCheck
 	ValidationRuntime string
 	RuntimeConfig     *runtimeconfig.Config
+	RuntimeConfigPath string
 }
 
 type OpenCodeRunner struct {
@@ -70,6 +71,7 @@ func (r OpenCodeRunner) Run(ctx context.Context, opts OpenCodeRunOptions, stdout
 		EnvRequirements:   opts.EnvRequirements,
 		ValidationRuntime: opts.ValidationRuntime,
 		RuntimeConfig:     opts.RuntimeConfig,
+		RuntimeConfigPath: opts.RuntimeConfigPath,
 	}, stdout, stderr)
 }
 

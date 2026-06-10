@@ -43,8 +43,10 @@ type executionTraceOptions struct {
 	Prompt              string
 	ContextPackMarkdown []byte
 	MemoryPolicyPath    string
+	RuntimeConfigPath   string
 	EnvRequirements     []workerconfig.EnvRequirementCheck
 	Validation          ValidationResult
+	ValidationRuntime   string
 	PolicyOK            bool
 	ChangedPathCount    int
 	Cleanup             workspaceCleanup
@@ -65,6 +67,7 @@ type executionTrace struct {
 	PromptSHA256         string                             `json:"prompt_sha256"`
 	ContextPackSHA256    string                             `json:"context_pack_sha256,omitempty"`
 	MemoryPolicySHA256   string                             `json:"memory_policy_sha256,omitempty"`
+	RuntimeConfigSHA256  string                             `json:"runtime_config_sha256,omitempty"`
 	EnvRequirements      []workerconfig.EnvRequirementCheck `json:"env_requirements"`
 	StartedAt            string                             `json:"started_at"`
 	FinishedAt           string                             `json:"finished_at"`
@@ -74,6 +77,7 @@ type executionTrace struct {
 	ParsedEvents         int                                `json:"parsed_events"`
 	ParseWarnings        int                                `json:"parse_warnings"`
 	ValidationStatus     string                             `json:"validation_status"`
+	ValidationRuntime    string                             `json:"validation_runtime"`
 	PolicyStatus         string                             `json:"policy_status"`
 	ChangedPathsCount    int                                `json:"changed_paths_count"`
 	CleanupAction        string                             `json:"cleanup_action"`
@@ -174,6 +178,7 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 		ParsedEvents:         metadataInt(metadata, "opencode.parsed_events"),
 		ParseWarnings:        metadataInt(metadata, "opencode.parse_warnings"),
 		ValidationStatus:     opts.Validation.Status,
+		ValidationRuntime:    validationRuntimeForTrace(opts),
 		PolicyStatus:         policyTraceStatus(opts.PolicyOK),
 		ChangedPathsCount:    opts.ChangedPathCount,
 		CleanupAction:        opts.Cleanup.Action,
@@ -185,6 +190,9 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 	}
 	if hash := fileSHA256IfReadable(opts.MemoryPolicyPath); hash != "" {
 		trace.MemoryPolicySHA256 = hash
+	}
+	if hash := fileSHA256IfReadable(opts.RuntimeConfigPath); hash != "" {
+		trace.RuntimeConfigSHA256 = hash
 	}
 	if trace.EnvRequirements == nil {
 		trace.EnvRequirements = []workerconfig.EnvRequirementCheck{}
@@ -198,6 +206,16 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
+}
+
+func validationRuntimeForTrace(opts executionTraceOptions) string {
+	if runtime := strings.TrimSpace(opts.Validation.Runtime); runtime != "" {
+		return runtime
+	}
+	if runtime := strings.TrimSpace(opts.ValidationRuntime); runtime != "" {
+		return runtime
+	}
+	return tasks.ValidationRuntimeLocal
 }
 
 func completedTraceTimeline(events []executionTraceEvent) []executionTraceEvent {

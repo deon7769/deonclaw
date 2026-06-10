@@ -70,6 +70,14 @@ Validation Docker execution has the same boundaries as `docker-exec`:
 - invalid runtime config or dangerous mounts fail before Docker is executed
 - Codex and OpenCode workers still execute locally
 
+Validation audit fields:
+
+- `summary.md` records `Validation runtime: local|docker`
+- `execution-trace.json` records `validation_runtime`
+- `execution-trace.json` records `runtime_config_sha256` when `--runtime-config` is used
+- the raw `runtime.yaml` content is not copied into trace or summary
+- `validation.log` and `validation.json` keep per-command runtime fields
+
 ## Config Shape
 
 ~~~yaml

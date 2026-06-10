@@ -17,6 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
+	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workers"
@@ -138,6 +139,7 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Status: succeeded")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Changed paths: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: skipped")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation runtime: local")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation commands: 0")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 10")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Execution trace: execution-trace.json")
@@ -150,6 +152,7 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertTraceString(t, trace, "command_display", "codex exec --json --sandbox read-only --cd "+wantWorkspace+" -")
 	assertTraceNonEmptyString(t, trace, "prompt_sha256")
 	assertTraceString(t, trace, "validation_status", ValidationSkipped)
+	assertTraceString(t, trace, "validation_runtime", "local")
 	assertTraceString(t, trace, "policy_status", "ok")
 	assertTraceString(t, trace, "cleanup_action", "removed")
 	assertTraceTimelineContains(t, trace, requiredExecutionTraceEvents...)
@@ -637,6 +640,77 @@ func TestCodexRunnerRunValidationCommandSuccess(t *testing.T) {
 	}
 	assertPersistedArtifact(t, db, "run-validation-success-001", filepath.Join(runDir, "validation.json"))
 	assertPersistedArtifact(t, db, "run-validation-success-001", filepath.Join(runDir, "artifact-manifest.json"))
+}
+
+func TestCodexRunnerRunDockerValidationAuditFields(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	installRunnerFakeDocker(t, `#!/bin/sh
+printf 'docker ok\n'
+exit 0
+`)
+	runtimeConfigContent := []byte(`runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    mounts:
+      - source: .
+        target: /workspace
+        mode: rw
+`)
+	runtimeConfigPath := filepath.Join(tempDir, "runtime.yaml")
+	if err := os.WriteFile(runtimeConfigPath, runtimeConfigContent, 0o600); err != nil {
+		t.Fatalf("WriteFile(runtime config) error = %v", err)
+	}
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID:    "run-docker-validation-audit-001",
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:          writeTaskFileWithValidation(t, "codex"),
+		StorePath:         storePath,
+		ArtifactsDir:      artifactsDir,
+		ValidationRuntime: tasks.ValidationRuntimeDocker,
+		RuntimeConfig: &runtimeconfig.Config{
+			Runtime: runtimeconfig.Runtime{
+				Mode: runtimeconfig.ModeDocker,
+				Docker: runtimeconfig.DockerConfig{
+					Image:        "deonclaw-runner:latest",
+					Workdir:      "/workspace",
+					Network:      "none",
+					ReadOnlyRoot: true,
+					Mounts: []runtimeconfig.MountSpec{
+						{Source: ".", Target: "/workspace", Mode: "rw"},
+					},
+				},
+			},
+		},
+		RuntimeConfigPath: runtimeConfigPath,
+	}, &stdout, &stderr)
+
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-docker-validation-audit-001")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: passed")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation runtime: docker")
+	assertFileContains(t, filepath.Join(runDir, "validation.log"), "Runtime: docker")
+	assertFileContains(t, filepath.Join(runDir, "validation.json"), `"runtime": "docker"`)
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "validation_runtime", "docker")
+	assertTraceString(t, trace, "runtime_config_sha256", sha256Hex(runtimeConfigContent))
+	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), "deonclaw-runner:latest")
+	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), "/workspace")
 }
 
 func TestCodexRunnerRunValidationCommandFailure(t *testing.T) {

@@ -29,6 +29,7 @@ type ValidationRunner func(context.Context, string, []tasks.ValidationCommand) V
 
 type ValidationResult struct {
 	Status        string                    `json:"status"`
+	Runtime       string                    `json:"runtime,omitempty"`
 	CommandCount  int                       `json:"command_count"`
 	Commands      []ValidationCommandResult `json:"commands"`
 	Error         string                    `json:"error,omitempty"`
@@ -65,11 +66,14 @@ func NewDockerValidationRunner(cfg runtimeconfig.Config) ValidationRunner {
 
 func RunDockerValidationCommands(ctx context.Context, workspace string, commands []tasks.ValidationCommand, cfg runtimeconfig.Config) ValidationResult {
 	if len(commands) == 0 {
-		return skippedValidation(commands, "no validation commands configured")
+		result := skippedValidation(commands, "no validation commands configured")
+		result.Runtime = tasks.ValidationRuntimeDocker
+		return result
 	}
 	if _, err := runtimeconfig.PlanDocker(cfg, workspace); err != nil {
 		return ValidationResult{
 			Status:       ValidationFailed,
+			Runtime:      tasks.ValidationRuntimeDocker,
 			CommandCount: len(commands),
 			Commands:     []ValidationCommandResult{},
 			Error:        fmt.Sprintf("docker validation runtime config invalid: %v", err),
@@ -84,11 +88,14 @@ type validationCommandRunner func(context.Context, string, tasks.ValidationComma
 
 func runValidationCommands(ctx context.Context, workspace string, commands []tasks.ValidationCommand, runtime string, runCommand validationCommandRunner) ValidationResult {
 	if len(commands) == 0 {
-		return skippedValidation(commands, "no validation commands configured")
+		result := skippedValidation(commands, "no validation commands configured")
+		result.Runtime = runtime
+		return result
 	}
 
 	result := ValidationResult{
 		Status:       ValidationPassed,
+		Runtime:      runtime,
 		CommandCount: len(commands),
 		Commands:     make([]ValidationCommandResult, 0, len(commands)),
 	}

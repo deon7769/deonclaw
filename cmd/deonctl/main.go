@@ -2695,6 +2695,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		EnvRequirements:   envRequirements,
 		ValidationRuntime: opts.validationRuntime,
 		RuntimeConfig:     runtimeCfg,
+		RuntimeConfigPath: opts.runtimeConfigPath,
 	}, stdout, stderr)
 }
 
@@ -2819,6 +2820,7 @@ func runOpenCodeRun(opts openCodeRunOptions, stdout io.Writer, stderr io.Writer)
 		EnvRequirements:   envRequirements,
 		ValidationRuntime: opts.validationRuntime,
 		RuntimeConfig:     runtimeCfg,
+		RuntimeConfigPath: opts.runtimeConfigPath,
 	}, stdout, stderr)
 }
 

@@ -30,6 +30,7 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 		fmt.Sprintf("Policy: %s", policySummary),
 		fmt.Sprintf("Changed paths: %d", changedPathCount),
 		fmt.Sprintf("Validation: %s", validation.Status),
+		fmt.Sprintf("Validation runtime: %s", validationRuntimeForSummary(validation)),
 		fmt.Sprintf("Validation commands: %d", validation.CommandCount),
 		fmt.Sprintf("Memory proposal: %s", memoryProposal.Status),
 		fmt.Sprintf("Memory proposal violations: %d", len(memoryProposal.Violations)),
@@ -63,6 +64,13 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 		lines = append(lines, fmt.Sprintf("Cleanup warning: %s", cleanup.Warning))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func validationRuntimeForSummary(validation ValidationResult) string {
+	if runtime := strings.TrimSpace(validation.Runtime); runtime != "" {
+		return runtime
+	}
+	return tasks.ValidationRuntimeLocal
 }
 
 func opencodeStdoutSummaryLines(result *workers.RunResult) []string {

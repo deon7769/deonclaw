@@ -50,6 +50,7 @@ type CodexRunOptions struct {
 	EnvRequirements   []workerconfig.EnvRequirementCheck
 	ValidationRuntime string
 	RuntimeConfig     *runtimeconfig.Config
+	RuntimeConfigPath string
 }
 
 type CodexRunner struct {
@@ -136,7 +137,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	if workspace == "" {
 		workspace = "."
 	}
-	validationRunner, err := resolveValidationRunner(r.ValidationRunner, opts.ValidationRuntime, task.Validation.Runtime, opts.RuntimeConfig, workspace)
+	validationRunner, validationRuntime, err := resolveValidationRunner(r.ValidationRunner, opts.ValidationRuntime, task.Validation.Runtime, opts.RuntimeConfig, workspace)
 	if err != nil {
 		fmt.Fprintf(stderr, "validation runtime failed: %v\n", err)
 		return 1
@@ -215,6 +216,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	result.Workspace = workspace
 
 	validationResult := skippedValidation(task.Validation.Commands, "worker failed")
+	validationResult.Runtime = validationRuntime
 	var validationErr error
 	if runErr == nil {
 		validationResult = validationRunner(ctx, workspace, task.Validation.Commands)
@@ -300,8 +302,10 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		Prompt:              prompt,
 		ContextPackMarkdown: contextPackMarkdown,
 		MemoryPolicyPath:    opts.MemoryPolicyPath,
+		RuntimeConfigPath:   opts.RuntimeConfigPath,
 		EnvRequirements:     opts.EnvRequirements,
 		Validation:          validationResult,
+		ValidationRuntime:   validationRuntime,
 		PolicyOK:            policyResult.OK(),
 		ChangedPathCount:    len(changedPaths),
 		Cleanup:             cleanup,
@@ -350,24 +354,24 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	return 0
 }
 
-func resolveValidationRunner(defaultRunner ValidationRunner, overrideRuntime string, taskRuntime string, runtimeConfig *runtimeconfig.Config, workspace string) (ValidationRunner, error) {
+func resolveValidationRunner(defaultRunner ValidationRunner, overrideRuntime string, taskRuntime string, runtimeConfig *runtimeconfig.Config, workspace string) (ValidationRunner, string, error) {
 	runtimeName := strings.TrimSpace(overrideRuntime)
 	if runtimeName == "" {
 		runtimeName = strings.TrimSpace(taskRuntime)
 	}
 	switch runtimeName {
 	case "", tasks.ValidationRuntimeLocal:
-		return defaultRunner, nil
+		return defaultRunner, tasks.ValidationRuntimeLocal, nil
 	case tasks.ValidationRuntimeDocker:
 		if runtimeConfig == nil {
-			return nil, errors.New("validation.runtime docker requires --runtime-config")
+			return nil, "", errors.New("validation.runtime docker requires --runtime-config")
 		}
 		if _, err := runtimeconfig.PlanDocker(*runtimeConfig, workspace); err != nil {
-			return nil, err
+			return nil, "", err
 		}
-		return NewDockerValidationRunner(*runtimeConfig), nil
+		return NewDockerValidationRunner(*runtimeConfig), tasks.ValidationRuntimeDocker, nil
 	default:
-		return nil, fmt.Errorf("validation.runtime %q is not supported", runtimeName)
+		return nil, "", fmt.Errorf("validation.runtime %q is not supported", runtimeName)
 	}
 }
 

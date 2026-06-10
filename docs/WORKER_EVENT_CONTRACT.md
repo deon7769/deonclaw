@@ -102,13 +102,15 @@ The trace is an audit artifact for the runner lifecycle. It records:
 - prompt_sha256 instead of raw prompt text
 - context_pack_sha256 when `--domains` built a context pack
 - memory_policy_sha256 when `--memory-policy` was configured and readable
+- validation_runtime as `local` or `docker`
+- runtime_config_sha256 when `--runtime-config` was configured and readable
 - env_requirements by name, requirement, and state only
 - started_at, finished_at, and duration_ms
 - stdout_format, parsed_events, and parse_warnings
 - validation_status, policy_status, changed_paths_count, cleanup_action, and cleanup_reason
 - timeline entries for task load/validation, profile and env checks, context pack build, workspace preparation, worker start/finish, validation, diff, path policy, artifact writing, and workspace cleanup
 
-The trace must not contain raw prompts or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
+The trace must not contain raw prompts, raw runtime config content, or environment variable values. Environment variable names can appear because they are part of the requirement contract; values must not.
 
 Task `model_strategy` is controlled selection metadata in the current OpenCode contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real OpenCode runs select `preferred[0]` as `selected_model_profile`, record `model_strategy: selected`, reuse `model_profile` for run report grouping, add `--model <model_arg>` when defined, and validate env requirements from the selected profile before worker execution.
 
