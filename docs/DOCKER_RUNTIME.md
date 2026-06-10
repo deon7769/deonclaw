@@ -12,6 +12,8 @@ Validate runtime config:
 deonctl runtime validate --config configs/examples/runtime.yaml
 ~~~
 
+`configs/examples/runtime.yaml` is the safe base runtime example. It keeps `network: none` and does not require provider API key passthrough. External-provider smoke tests should use a dedicated runtime such as `configs/examples/runtime-opencode-zai-smoke.yaml`.
+
 Plan the future Docker command without executing it:
 
 ~~~bash
@@ -118,10 +120,6 @@ runtime:
     read_only_root: true
     memory_limit: 2g
     cpus: "2"
-    env:
-      passthrough:
-        - ZAI_API_KEY
-        - OPENAI_API_KEY
     mounts:
       - source: .
         target: /workspace
@@ -159,11 +157,13 @@ Example:
 runtime:
   mode: docker
   docker:
+    network: default
     env:
       passthrough:
         - ZAI_API_KEY
-        - OPENAI_API_KEY
 ~~~
+
+Use provider env passthrough in purpose-specific configs. The OpenCode Z.AI Docker smoke uses `configs/examples/runtime-opencode-zai-smoke.yaml` and requires `network: default` so the container can reach the external model endpoint.
 
 Rules:
 

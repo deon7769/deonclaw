@@ -342,6 +342,48 @@ func TestRunRuntimeValidate(t *testing.T) {
 	}
 }
 
+func TestRunExampleSafeRuntimeValidate(t *testing.T) {
+	configPath := examplePath(t, "configs", "examples", "runtime.yaml")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "runtime config valid: mode=docker") {
+		t.Fatalf("stdout = %q, want runtime valid", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "ZAI_API_KEY") || strings.Contains(stdout.String(), "OPENAI_API_KEY") {
+		t.Fatalf("stdout = %q, safe runtime should not require provider passthrough", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "warning:") {
+		t.Fatalf("stdout = %q, safe runtime should not warn", stdout.String())
+	}
+}
+
+func TestRunExampleOpenCodeZAISmokeRuntimeValidateWarnsForNetworkDefault(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+	configPath := examplePath(t, "configs", "examples", "runtime-opencode-zai-smoke.yaml")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, "runtime config valid: mode=docker") {
+		t.Fatalf("stdout = %q, want runtime valid", output)
+	}
+	if !strings.Contains(output, "warning: runtime.docker.network default allows container network access") {
+		t.Fatalf("stdout = %q, want network default warning", output)
+	}
+	if strings.Contains(output, "zai-real-secret") {
+		t.Fatalf("stdout leaked secret: %q", output)
+	}
+}
+
 func TestRunRuntimeValidateRejectsDangerousMount(t *testing.T) {
 	configPath := writeCLIRuntimeConfig(t, `runtime:
   mode: docker
@@ -443,6 +485,37 @@ func TestRunRuntimeDockerPlanIncludesEnvPassthroughNameOnly(t *testing.T) {
 	}
 	if strings.Contains(output, "zai-real-secret") {
 		t.Fatalf("stdout leaked secret: %q", output)
+	}
+}
+
+func TestRunExampleOpenCodeZAISmokeDockerPlanIncludesEnvNameOnly(t *testing.T) {
+	t.Setenv("ZAI_API_KEY", "zai-real-secret")
+	configPath := examplePath(t, "configs", "examples", "runtime-opencode-zai-smoke.yaml")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"runtime", "docker-plan", "--config", configPath, "--workspace", "."}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"docker run --rm --network default",
+		"-e ZAI_API_KEY",
+		"-v .:/workspace:rw",
+		"-v mysecondbrain:/memory/mysecondbrain:ro",
+		"-v escalasoft_brain:/memory/escalasoft_brain:ro",
+		"deonclaw-runner:latest",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+	if strings.Contains(output, "zai-real-secret") {
+		t.Fatalf("stdout leaked secret: %q", output)
+	}
+	if strings.Contains(output, "OPENAI_API_KEY") {
+		t.Fatalf("stdout = %q, smoke runtime should not pass OPENAI_API_KEY", output)
 	}
 }
 
@@ -5679,6 +5752,16 @@ func writeCLIRuntimeConfig(t *testing.T, content string) string {
 	path := filepath.Join(t.TempDir(), "runtime.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write runtime config: %v", err)
+	}
+	return path
+}
+
+func examplePath(t *testing.T, parts ...string) string {
+	t.Helper()
+	items := append([]string{"..", ".."}, parts...)
+	path := filepath.Join(items...)
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("example path %q: %v", path, err)
 	}
 	return path
 }
