@@ -57,6 +57,8 @@ For Docker worker execution, the prompt delivery contract is explicit:
 
 OpenCode plans a prompt argument. The Docker smoke path uses `arg_placeholder` to pass the raw prompt only to the process args while preserving `<prompt>` in the recorded command, summary, and trace. This smoke contract is not production hardening; a future wrapper may switch OpenCode prompt delivery to stdin.
 
+For Docker worker runtime, RunSpec.Workspace passed to the worker dry-run is the container workspace path from `runtime.docker.workdir`, usually `/workspace`. The runner mounts the prepared host workspace to that target as `rw` and keeps memory mounts from `runtime.yaml` separate. This prevents workers from planning commands with host-only workspace paths.
+
 ### RunResult
 
 RunResult is the worker output returned to the shared runner:

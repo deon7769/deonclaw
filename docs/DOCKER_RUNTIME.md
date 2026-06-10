@@ -98,6 +98,8 @@ Prompt delivery is worker-specific. A Docker worker plan must declare one of:
 
 The recorded command stays masked with `<prompt>` in `RunResult.Command`, `summary.md`, and `execution-trace.json`. The raw prompt is represented by `prompt_sha256` only. OpenCode Docker smoke currently uses `arg_placeholder`, matching the OpenCode prompt-as-argument contract. This is smoke-only and not production hardening; the prompt transport can move to stdin or a wrapper later.
 
+For Docker worker runtime, the prepared host workspace is mounted dynamically into the container workdir, usually `/workspace`, as `rw`. Worker command planning receives the container workspace path, so OpenCode smoke commands use `--dir /workspace` even though the prepared workspace lives on the host. Existing memory mounts from `runtime.yaml` remain configured separately and should stay `ro`.
+
 Worker runtime audit fields:
 
 - `summary.md` records `Worker runtime: local|docker`

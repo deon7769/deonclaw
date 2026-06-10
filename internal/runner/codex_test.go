@@ -804,9 +804,10 @@ exit 0
 	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
 	assertTraceString(t, trace, "worker_runtime", "docker")
 	assertTraceString(t, trace, "runtime_config_sha256", sha256Hex(runtimeConfigContent))
+	workspaceMount := filepath.Join(artifactsDir, "run-docker-worker-001", "workspace") + ":/workspace:rw"
 	assertTraceString(t, trace, "command_display", strings.Join([]string{
 		"docker", "run", "--rm", "--network", "none", "--read-only", "-w", "/workspace",
-		"-v", ".:/workspace:rw", "--label", "deonclaw.workspace=" + filepath.Join(artifactsDir, "run-docker-worker-001", "workspace"),
+		"-v", workspaceMount, "--label", "deonclaw.workspace=" + filepath.Join(artifactsDir, "run-docker-worker-001", "workspace"),
 		"deonclaw-runner:latest", "fake-worker", "--json", "-",
 	}, " "))
 }
@@ -904,9 +905,10 @@ exit 0
 	assertTraceString(t, trace, "worker_runtime", "docker")
 	assertTraceString(t, trace, "runtime_config_sha256", sha256Hex(runtimeConfigContent))
 	assertTraceNonEmptyString(t, trace, "prompt_sha256")
+	workspaceMount := filepath.Join(artifactsDir, "run-docker-worker-arg-placeholder-001", "workspace") + ":/workspace:rw"
 	assertTraceString(t, trace, "command_display", strings.Join([]string{
 		"docker", "run", "--rm", "--network", "none", "--read-only", "-w", "/workspace", "-e", "ZAI_API_KEY",
-		"-v", ".:/workspace:rw", "--label", "deonclaw.workspace=" + filepath.Join(artifactsDir, "run-docker-worker-arg-placeholder-001", "workspace"),
+		"-v", workspaceMount, "--label", "deonclaw.workspace=" + filepath.Join(artifactsDir, "run-docker-worker-arg-placeholder-001", "workspace"),
 		"deonclaw-runner:latest", "fake-worker", "--prompt", "<prompt>",
 	}, " "))
 }

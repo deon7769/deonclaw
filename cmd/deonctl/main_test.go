@@ -4329,6 +4329,16 @@ exit 0
 	if !stringSliceContainsSequence(args, []string{"opencode", "run"}) || !stringSliceContainsSequence(args, []string{"--format", "json", rawPrompt}) {
 		t.Fatalf("docker args = %#v, want opencode run with raw prompt arg", args)
 	}
+	if !stringSliceContainsSequence(args, []string{"--dir", "/workspace"}) {
+		t.Fatalf("docker args = %#v, want container workspace dir", args)
+	}
+	workspaceMount := filepath.Join(artifactsDir, "run-cli-opencode-config-001", "workspace") + ":/workspace:rw"
+	if !stringSliceContainsSequence(args, []string{"-v", workspaceMount}) {
+		t.Fatalf("docker args = %#v, want prepared workspace mount %q", args, workspaceMount)
+	}
+	if !stringSliceContainsSequence(args, []string{"-v", "mysecondbrain:/memory/mysecondbrain:ro"}) || !stringSliceContainsSequence(args, []string{"-v", "escalasoft_brain:/memory/escalasoft_brain:ro"}) {
+		t.Fatalf("docker args = %#v, want memory mounts preserved", args)
+	}
 	if !stringSliceContainsSequence(args, []string{"-e", "ZAI_API_KEY"}) {
 		t.Fatalf("docker args = %#v, want env passthrough name", args)
 	}
@@ -4345,9 +4355,11 @@ exit 0
 	assertCLIFileContent(t, filepath.Join(runDir, "stderr.log"), "docker opencode stderr\n")
 	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Worker runtime: docker")
 	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "Command: docker run")
+	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "--dir /workspace")
 	assertCLIFileContains(t, filepath.Join(runDir, "summary.md"), "--format json <prompt>")
 	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `"worker_runtime": "docker"`)
 	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `"command_display": "docker run`)
+	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `--dir /workspace`)
 	assertCLIFileContains(t, filepath.Join(runDir, "execution-trace.json"), `<prompt>`)
 	for _, artifact := range []string{"summary.md", "execution-trace.json", "stdout.jsonl", "events.jsonl", "stderr.log"} {
 		assertCLIFileNotContains(t, filepath.Join(runDir, artifact), rawPrompt)
@@ -5711,6 +5723,12 @@ func runtimeConfigWithEnvPassthroughYAML(name string) string {
       - source: .
         target: /workspace
         mode: rw
+      - source: mysecondbrain
+        target: /memory/mysecondbrain
+        mode: ro
+      - source: escalasoft_brain
+        target: /memory/escalasoft_brain
+        mode: ro
 `
 }
 

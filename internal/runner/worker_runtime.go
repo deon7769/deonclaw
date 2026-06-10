@@ -49,7 +49,12 @@ func normalizeWorkerRuntime(runtimeName string) (string, error) {
 }
 
 func runDockerWorker(ctx context.Context, worker workers.Worker, spec workers.RunSpec, cfg runtimeconfig.Config) (*workers.RunResult, error) {
-	planned, err := worker.DryRun(ctx, spec)
+	hostWorkspace := spec.Workspace
+	containerWorkspace := dockerWorkerContainerWorkspace(cfg)
+	dockerSpec := spec
+	dockerSpec.Workspace = containerWorkspace
+
+	planned, err := worker.DryRun(ctx, dockerSpec)
 	if err != nil {
 		return nil, fmt.Errorf("plan docker worker command: %w", err)
 	}
@@ -61,11 +66,12 @@ func runDockerWorker(ctx context.Context, worker workers.Worker, spec workers.Ru
 		return nil, err
 	}
 
-	plan, err := runtimeconfig.PlanDockerExec(cfg, spec.Workspace, planned.Command)
+	dockerCfg := dockerWorkerRuntimeConfig(cfg, hostWorkspace, containerWorkspace)
+	plan, err := runtimeconfig.PlanDockerExec(dockerCfg, hostWorkspace, planned.Command)
 	result := &workers.RunResult{
 		Worker:    firstNonEmpty(planned.Worker, workerNameFromSpec(spec)),
 		Command:   append([]string(nil), planned.Command...),
-		Workspace: spec.Workspace,
+		Workspace: hostWorkspace,
 		Sandbox:   planned.Sandbox,
 	}
 	if err != nil {
@@ -84,7 +90,7 @@ func runDockerWorker(ctx context.Context, worker workers.Worker, spec workers.Ru
 	}
 
 	cmd := exec.CommandContext(ctx, execCommand[0], execCommand[1:]...)
-	cmd.Dir = spec.Workspace
+	cmd.Dir = hostWorkspace
 	if promptDelivery == workers.PromptDeliveryStdin {
 		cmd.Stdin = strings.NewReader(prompt)
 	}
@@ -96,13 +102,46 @@ func runDockerWorker(ctx context.Context, worker workers.Worker, spec workers.Ru
 
 	started := time.Now().UTC()
 	runErr := cmd.Run()
-	result.Events = parseDockerWorkerEvents(stdout.Bytes(), result.Worker, result.Command, spec.Workspace, result.Sandbox)
+	result.Events = parseDockerWorkerEvents(stdout.Bytes(), result.Worker, result.Command, planned.Workspace, result.Sandbox)
 	result.Artifacts = dockerWorkerArtifacts(stdout.Bytes(), stderr.String(), started)
 	result.Stderr = stderr.String()
 	if runErr != nil {
 		return result, fmt.Errorf("docker worker command failed with exit code %d", commandExitCode(runErr))
 	}
 	return result, nil
+}
+
+func dockerWorkerContainerWorkspace(cfg runtimeconfig.Config) string {
+	workdir := strings.TrimSpace(cfg.Runtime.Docker.Workdir)
+	if workdir == "" {
+		return "/workspace"
+	}
+	return workdir
+}
+
+func dockerWorkerRuntimeConfig(cfg runtimeconfig.Config, hostWorkspace string, containerWorkspace string) runtimeconfig.Config {
+	mount := runtimeconfig.MountSpec{
+		Source: hostWorkspace,
+		Target: containerWorkspace,
+		Mode:   runtimeconfig.MountModeReadWrite,
+	}
+	mounts := make([]runtimeconfig.MountSpec, 0, len(cfg.Runtime.Docker.Mounts)+1)
+	replaced := false
+	for _, existing := range cfg.Runtime.Docker.Mounts {
+		if strings.TrimSpace(existing.Target) == containerWorkspace {
+			if !replaced {
+				mounts = append(mounts, mount)
+				replaced = true
+			}
+			continue
+		}
+		mounts = append(mounts, existing)
+	}
+	if !replaced {
+		mounts = append(mounts, mount)
+	}
+	cfg.Runtime.Docker.Mounts = mounts
+	return cfg
 }
 
 func dockerWorkerPromptContract(planned *workers.WorkerEvent) (string, string, error) {
