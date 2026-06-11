@@ -412,6 +412,167 @@ func TestRunRuntimeValidateRejectsDangerousMount(t *testing.T) {
 	}
 }
 
+func TestRunMCPValidateExample(t *testing.T) {
+	configPath := examplePath(t, "configs", "examples", "mcp.yaml")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "mcp config valid: servers=2") {
+		t.Fatalf("stdout = %q, want valid mcp config", stdout.String())
+	}
+}
+
+func TestRunMCPValidateRejectsMissingCommand(t *testing.T) {
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    bad-server:
+      command: ""
+      enabled: false
+      trust: local
+      capabilities:
+        - read
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "command is required") {
+		t.Fatalf("stderr = %q, want missing command", stderr.String())
+	}
+	if stdout.Len() != 0 {
+		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestRunMCPValidateRejectsInlineEnvWithoutLeakingValue(t *testing.T) {
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    github-readonly:
+      command: placeholder
+      enabled: false
+      trust: external
+      capabilities:
+        - read
+      env:
+        passthrough:
+          - GITHUB_TOKEN=super-secret-value
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "inline env values are forbidden") {
+		t.Fatalf("stderr = %q, want inline env rejection", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "super-secret-value") {
+		t.Fatalf("stderr leaked secret: %q", stderr.String())
+	}
+}
+
+func TestRunMCPValidateRejectsUnknownCapability(t *testing.T) {
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    github-readonly:
+      command: placeholder
+      enabled: false
+      trust: external
+      capabilities:
+        - network
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), `"network" is not supported`) {
+		t.Fatalf("stderr = %q, want unknown capability", stderr.String())
+	}
+}
+
+func TestRunMCPValidateWriteExecDisabledWarns(t *testing.T) {
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    risky:
+      command: placeholder
+      enabled: false
+      trust: local
+      capabilities:
+        - write
+        - exec
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "validate", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `capability "write" is dangerous`) || !strings.Contains(stdout.String(), `capability "exec" is dangerous`) {
+		t.Fatalf("stdout = %q, want write/exec warnings", stdout.String())
+	}
+}
+
+func TestRunMCPListShowsServers(t *testing.T) {
+	configPath := examplePath(t, "configs", "examples", "mcp.yaml")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "list", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"filesystem-readonly", "github-readonly", "external", "read"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+}
+
+func TestRunMCPPlanJSONNameOnly(t *testing.T) {
+	t.Setenv("GITHUB_TOKEN", "super-secret-value")
+	configPath := examplePath(t, "configs", "examples", "mcp.yaml")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "plan", "--config", configPath, "--server", "github-readonly", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !json.Valid(stdout.Bytes()) {
+		t.Fatalf("stdout is not valid JSON: %s", stdout.String())
+	}
+	var decoded struct {
+		Server   string   `json:"server"`
+		Command  string   `json:"command"`
+		EnvNames []string `json:"env_names"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	if decoded.Server != "github-readonly" || decoded.Command != "placeholder" {
+		t.Fatalf("decoded = %#v, want github-readonly plan", decoded)
+	}
+	if len(decoded.EnvNames) != 1 || decoded.EnvNames[0] != "GITHUB_TOKEN" {
+		t.Fatalf("env_names = %#v, want GITHUB_TOKEN", decoded.EnvNames)
+	}
+	if strings.Contains(stdout.String(), "super-secret-value") {
+		t.Fatalf("stdout leaked env value: %q", stdout.String())
+	}
+}
+
 func TestRunRuntimeDockerPlanText(t *testing.T) {
 	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
 	var stdout bytes.Buffer
@@ -5800,6 +5961,15 @@ func writeCLIRuntimeConfig(t *testing.T, content string) string {
 	path := filepath.Join(t.TempDir(), "runtime.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("write runtime config: %v", err)
+	}
+	return path
+}
+
+func writeCLIMCPConfig(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "mcp.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write mcp config: %v", err)
 	}
 	return path
 }

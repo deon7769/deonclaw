@@ -83,6 +83,7 @@ Implemented:
 - Docker runtime config validation, docker-plan, docker-exec, and Docker validation commands
 - OpenCode Docker worker runtime supported experimental
 - OpenCode Docker Z.AI smoke runtime
+- MCP registry config validation, list and plan foundation
 - memory proposal/lint/dry-run/approval/preflight/backup/materialize/apply/restore workflow
 - real memory apply for create/append/update/archive
 - real restore execution
@@ -92,7 +93,7 @@ Not implemented yet:
 - real run automatic selection from `model_strategy.preferred[0]`
 - real fallback execution
 - Codex Docker worker runtime
-- MCP manager
+- MCP execution/manager
 - memory index/LanceDB
 - UI/dashboard
 

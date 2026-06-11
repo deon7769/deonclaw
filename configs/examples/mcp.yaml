@@ -1,0 +1,23 @@
+mcp:
+  servers:
+    filesystem-readonly:
+      command: npx
+      args:
+        - "@modelcontextprotocol/server-filesystem"
+        - "."
+      enabled: false
+      trust: local
+      capabilities:
+        - read
+      env:
+        passthrough: []
+    github-readonly:
+      command: placeholder
+      args: []
+      enabled: false
+      trust: external
+      capabilities:
+        - read
+      env:
+        passthrough:
+          - GITHUB_TOKEN

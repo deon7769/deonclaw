@@ -15,7 +15,7 @@ Before changing code, read:
 
 For current sequencing, follow AGENTS.md Next implementation order first.
 
-Do not implement fallback execution, Codex Docker worker execution, MCP manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, allowlisted env passthrough, fake/test worker runtime scaffold, and OpenCode Docker smoke only; Codex still runs locally.
+Do not implement fallback execution, Codex Docker worker execution, MCP execution/manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, allowlisted env passthrough, fake/test worker runtime scaffold, and OpenCode Docker smoke only; Codex still runs locally. The current MCP surface is registry validation, list, and plan only; no server execution or worker integration.
 
 Memory apply and restore already exist. Do not alter their behavior unless a task explicitly targets the memory workflow.
 
@@ -35,6 +35,7 @@ backup plan -> backup materialization -> restore dry-run -> restore execute
 - internal/workerconfig: workers.yaml, model_profiles, model_strategy resolution, fallback policy schema validation, and env requirement metadata
 - internal/runtime: workspace lifecycle
 - internal/runtimeconfig: runtime.yaml loading, validation, Docker mount/env passthrough policy, docker-plan generation, simple docker-exec planning, validation command Docker planning, and fake/test worker Docker planning
+- internal/mcpconfig: mcp.yaml loading, validation, registry listing, and static command/env planning only
 - internal/policy: path policy
 - internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/restore-execute/apply-execute
 - internal/contextpack: scoped context generation

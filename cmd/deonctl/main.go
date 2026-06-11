@@ -22,6 +22,7 @@ import (
 	doctorpkg "github.com/deon7769/deonclaw/internal/doctor"
 	"github.com/deon7769/deonclaw/internal/domains"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/mcpconfig"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runreport"
@@ -51,6 +52,9 @@ Usage:
   deonctl runtime validate --config <runtime.yaml>
   deonctl runtime docker-plan --config <runtime.yaml> --workspace <path> [--output-format text|json]
   deonctl runtime docker-exec --config <runtime.yaml> --workspace <path> -- <command> [args...]
+  deonctl mcp validate --config <mcp.yaml>
+  deonctl mcp list --config <mcp.yaml>
+  deonctl mcp plan --config <mcp.yaml> --server <name> [--output-format text|json]
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -240,6 +244,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runRuntimeDockerExec(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "mcp":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			opts, err := parseMCPConfigOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPValidate(opts, stdout, stderr)
+		case "list":
+			opts, err := parseMCPConfigOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPList(opts, stdout, stderr)
+		case "plan":
+			opts, err := parseMCPPlanOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPPlan(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -692,6 +730,153 @@ func runRuntimeDockerExec(opts runtimeDockerExecOptions, stdout io.Writer, stder
 		}
 		fmt.Fprintf(stderr, "runtime docker-exec failed: %v\n", err)
 		return 1
+	}
+	return 0
+}
+
+type mcpConfigOptions struct {
+	configPath string
+}
+
+func parseMCPConfigOptions(args []string) (mcpConfigOptions, error) {
+	var opts mcpConfigOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return mcpConfigOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		default:
+			return mcpConfigOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return mcpConfigOptions{}, fmt.Errorf("missing --config")
+	}
+	return opts, nil
+}
+
+func runMCPValidate(opts mcpConfigOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp validate failed: %v\n", err)
+		return 1
+	}
+	result, err := mcpconfig.Validate(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp validate failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "mcp config valid: servers=%d\n", len(cfg.MCP.Servers))
+	for _, warning := range result.Warnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
+	}
+	return 0
+}
+
+func runMCPList(opts mcpConfigOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp list failed: %v\n", err)
+		return 1
+	}
+	servers, err := mcpconfig.ListServers(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp list failed: %v\n", err)
+		return 1
+	}
+	writer := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(writer, "name\tcommand\tenabled\ttrust\tcapabilities")
+	for _, server := range servers {
+		fmt.Fprintf(writer, "%s\t%s\t%t\t%s\t%s\n", server.Name, server.Command, server.Enabled, server.Trust, strings.Join(server.Capabilities, ","))
+	}
+	_ = writer.Flush()
+	return 0
+}
+
+type mcpPlanOptions struct {
+	configPath   string
+	server       string
+	outputFormat string
+}
+
+func parseMCPPlanOptions(args []string) (mcpPlanOptions, error) {
+	opts := mcpPlanOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return mcpPlanOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--server":
+			if i+1 >= len(args) {
+				return mcpPlanOptions{}, fmt.Errorf("missing value for --server")
+			}
+			opts.server = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return mcpPlanOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return mcpPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return mcpPlanOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.server == "" {
+		return mcpPlanOptions{}, fmt.Errorf("missing --server")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return mcpPlanOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMCPPlan(opts mcpPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp plan failed: %v\n", err)
+		return 1
+	}
+	plan, err := mcpconfig.PlanServer(cfg, opts.server)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp plan failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat == "json" {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(plan); err != nil {
+			fmt.Fprintf(stderr, "mcp plan output failed: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintf(stdout, "server: %s\n", plan.Server)
+	fmt.Fprintf(stdout, "enabled: %t\n", plan.Enabled)
+	fmt.Fprintf(stdout, "trust: %s\n", plan.Trust)
+	fmt.Fprintf(stdout, "capabilities: %s\n", strings.Join(plan.Capabilities, ","))
+	fmt.Fprintf(stdout, "command: %s\n", plan.Command)
+	if len(plan.Args) > 0 {
+		fmt.Fprintf(stdout, "args: %s\n", strings.Join(plan.Args, " "))
+	} else {
+		fmt.Fprintln(stdout, "args:")
+	}
+	if len(plan.EnvNames) > 0 {
+		fmt.Fprintf(stdout, "env: %s\n", strings.Join(plan.EnvNames, ","))
+	} else {
+		fmt.Fprintln(stdout, "env:")
+	}
+	for _, warning := range plan.Warnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
 	}
 	return 0
 }
