@@ -2677,7 +2677,7 @@ func runCodexRun(opts codexRunOptions, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	if opts.workerRuntime == runner.WorkerRuntimeDocker {
-		fmt.Fprintln(stderr, "error: worker runtime docker is scaffold-only and not enabled for codex")
+		fmt.Fprintln(stderr, "error: Codex Docker worker runtime is not implemented; OpenCode Docker is experimental")
 		return 1
 	}
 	runtimeCfg, err := loadRunRuntimeConfig(opts.runtimeConfigPath, opts.validationRuntime, opts.workerRuntime, task)

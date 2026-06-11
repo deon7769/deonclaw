@@ -80,6 +80,9 @@ Implemented:
 - `execution-trace.json`
 - `runs report`
 - `runs report --by model_profile` and filters
+- Docker runtime config validation, docker-plan, docker-exec, and Docker validation commands
+- OpenCode Docker worker runtime supported experimental
+- OpenCode Docker Z.AI smoke runtime
 - memory proposal/lint/dry-run/approval/preflight/backup/materialize/apply/restore workflow
 - real memory apply for create/append/update/archive
 - real restore execution
@@ -88,7 +91,7 @@ Not implemented yet:
 
 - real run automatic selection from `model_strategy.preferred[0]`
 - real fallback execution
-- Docker runtime
+- Codex Docker worker runtime
 - MCP manager
 - memory index/LanceDB
 - UI/dashboard

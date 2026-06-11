@@ -8,6 +8,8 @@ It is a snapshot of the current MVP contract, not a provider roadmap.
 
 - yes: implemented and covered by the shared runner or worker adapter
 - partial: implemented with worker-specific behavior or remaining caveat
+- supported_experimental: implemented and validated for narrow use, but still carries production caveats
+- blocked: intentionally rejected by the CLI
 - no: not implemented
 - inspiration_only: future reference only, with no operational config example, doctor entry, smoke path, or worker adapter
 
@@ -25,6 +27,7 @@ It is a snapshot of the current MVP contract, not a provider roadmap.
 | execution trace | yes | yes | Shared runner writes execution-trace.json with command display, hashes, env requirement states, validation/policy/cleanup, stdout parsing metadata, and timeline. |
 | runs report | yes | yes | deonctl runs report aggregates SQLite runs and execution traces by worker, with optional model_profile grouping. |
 | validation | yes | yes | Shared runner applies task validation commands after successful worker execution. |
+| worker_runtime docker | blocked | supported_experimental | OpenCode Docker is enabled for the validated smoke/experimental path. Codex Docker remains blocked and is not implemented. |
 | path policy | yes | yes | Shared runner evaluates changed paths and can mark policy_failed. |
 | cleanup | yes | yes | succeeded removes workspace; failed and policy_failed keep workspace. |
 | event parsing | partial | yes | Codex expects JSONL from codex exec --json. OpenCode accepts jsonl, mixed, text, and empty stdout. |

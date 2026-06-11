@@ -4491,11 +4491,59 @@ func TestRunCodexWorkerRuntimeDockerRemainsBlocked(t *testing.T) {
 	if code != 1 {
 		t.Fatalf("run() exit code = %d, want 1", code)
 	}
-	if !strings.Contains(stderr.String(), "worker runtime docker is scaffold-only and not enabled for codex") {
+	if !strings.Contains(stderr.String(), "Codex Docker worker runtime is not implemented; OpenCode Docker is experimental") {
 		t.Fatalf("stderr = %q, want codex docker block", stderr.String())
 	}
 	if stdout.Len() != 0 {
 		t.Fatalf("stdout = %q, want empty", stdout.String())
+	}
+}
+
+func TestDocsMarkOpenCodeDockerSupportedExperimental(t *testing.T) {
+	parity, err := os.ReadFile(examplePath(t, "docs", "WORKER_PARITY.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(WORKER_PARITY) error = %v", err)
+	}
+	parityText := string(parity)
+	for _, want := range []string{
+		"supported_experimental",
+		"| worker_runtime docker | blocked | supported_experimental |",
+		"Codex Docker remains blocked",
+	} {
+		if !strings.Contains(parityText, want) {
+			t.Fatalf("WORKER_PARITY missing %q", want)
+		}
+	}
+
+	dockerRuntime, err := os.ReadFile(examplePath(t, "docs", "DOCKER_RUNTIME.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(DOCKER_RUNTIME) error = %v", err)
+	}
+	dockerRuntimeText := string(dockerRuntime)
+	for _, want := range []string{
+		"OpenCode Docker worker runtime is now supported experimental",
+		"Codex Docker worker runtime remains blocked",
+		"prompt-as-argument contract",
+		"configs/examples/runtime-opencode-zai-smoke.yaml",
+	} {
+		if !strings.Contains(dockerRuntimeText, want) {
+			t.Fatalf("DOCKER_RUNTIME missing %q", want)
+		}
+	}
+
+	eventContract, err := os.ReadFile(examplePath(t, "docs", "WORKER_EVENT_CONTRACT.md"))
+	if err != nil {
+		t.Fatalf("ReadFile(WORKER_EVENT_CONTRACT) error = %v", err)
+	}
+	eventContractText := string(eventContract)
+	for _, want := range []string{
+		"OpenCode Docker worker runtime marked `supported_experimental`",
+		"Codex Docker remains blocked",
+		"supported experimental, not production hardening",
+	} {
+		if !strings.Contains(eventContractText, want) {
+			t.Fatalf("WORKER_EVENT_CONTRACT missing %q", want)
+		}
 	}
 }
 

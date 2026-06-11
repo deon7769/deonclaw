@@ -2,7 +2,9 @@
 
 Task 20.0 adds the Docker runtime foundation.
 
-DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, and run an OpenCode Docker smoke path. Codex still runs through the existing local worker runtime.
+DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, and run an OpenCode Docker worker runtime path marked `supported_experimental`. Codex still runs through the existing local worker runtime.
+
+The OpenCode Docker Z.AI smoke has been validated, but production use still requires caution because the current OpenCode Docker prompt contract uses a prompt argument placeholder. The recorded command keeps `<prompt>`, but the real process args receive the raw prompt. A future wrapper may move this to stdin or another hardened transport.
 
 ## Commands
 
@@ -91,14 +93,14 @@ deonctl worker codex run task.yaml \
   --runtime-config configs/examples/runtime.yaml
 ~~~
 
-`--worker-runtime local|docker` is part of the execution contract. Docker worker runtime started as a fake/test scaffold in Task 20.4 and is enabled for OpenCode smoke runs in Task 20.5. Codex Docker worker runtime remains blocked.
+`--worker-runtime local|docker` is part of the execution contract. Docker worker runtime started as a fake/test scaffold in Task 20.4. OpenCode Docker worker runtime is now supported experimental for the validated smoke path. Codex Docker worker runtime remains blocked and not implemented.
 
 Prompt delivery is worker-specific. A Docker worker plan must declare one of:
 
 - `prompt_delivery: stdin`: the runner writes the prompt to process stdin.
 - `prompt_delivery: arg_placeholder` with `placeholder: <prompt>`: the runner replaces the placeholder only in the real process args.
 
-The recorded command stays masked with `<prompt>` in `RunResult.Command`, `summary.md`, and `execution-trace.json`. The raw prompt is represented by `prompt_sha256` only. OpenCode Docker smoke currently uses `arg_placeholder`, matching the OpenCode prompt-as-argument contract. This is smoke-only and not production hardening; the prompt transport can move to stdin or a wrapper later.
+The recorded command stays masked with `<prompt>` in `RunResult.Command`, `summary.md`, and `execution-trace.json`. The raw prompt is represented by `prompt_sha256` only. OpenCode Docker currently uses `arg_placeholder`, matching the OpenCode prompt-as-argument contract. This keeps artifacts masked but is still a production caveat because the real process receives the raw prompt as an argument; the prompt transport can move to stdin or a wrapper later.
 
 For Docker worker runtime, the prepared host workspace is mounted dynamically into the container workdir, usually `/workspace`, as `rw`. Worker command planning receives the container workspace path, so OpenCode smoke commands use `--dir /workspace` even though the prepared workspace lives on the host. Existing memory mounts from `runtime.yaml` remain configured separately and should stay `ro`.
 
@@ -224,13 +226,14 @@ Current state:
 - Docker validation command execution implemented
 - controlled env passthrough by allowlisted name implemented
 - Docker worker execution scaffold implemented for fake/test workers
-- OpenCode Docker worker smoke implemented with prompt placeholder masking
+- OpenCode Docker worker runtime supported experimental with prompt placeholder masking
+- OpenCode Docker Z.AI smoke validated with `configs/examples/runtime-opencode-zai-smoke.yaml`
 - Codex worker execution remains local
 
 Not implemented yet:
 
 - running Codex inside Docker
-- production-ready OpenCode Docker worker execution
+- production-ready hardened OpenCode Docker prompt transport
 - automatic fallback execution
 - MCP manager
 - LanceDB or memory index
