@@ -35,6 +35,7 @@ It is a snapshot of the current MVP contract, not a provider roadmap.
 | model profiles | partial | yes | Both can resolve task model_profile entries from workers.yaml, validate worker/profile matching, and apply profile env requirements before run. OpenCode also wires model_arg into --model. Codex keeps its command unchanged for now. |
 | model strategies | partial | yes | Both validate task model_strategy syntax, fallback_policy schema, and referenced profiles/tags against workers.yaml. OpenCode dry-run shows planned preferred[0] model selection; OpenCode real run selects preferred[0] as selected_model_profile and can pass --model. Strategy fallback execution, retries, and worker switching are not implemented. Codex does not select a strategy profile at run time. |
 | fallback policy schema | yes | yes | model_strategy.fallback_policy is parsed and validated with default disabled semantics. policy_failed and memory_policy_failed never retry. Missing fallback profile env can be reported before any future fallback attempt. No worker executes fallback yet. |
+| MCP | registry_only | registry_only | MCP support is limited to registry config validation, list, and plan. MCP tools are not executed and MCP is not connected to Codex or OpenCode. |
 | doctor | yes | yes | deonctl workers doctor can check configured commands for both workers. |
 | parity smoke | no | yes | deonctl workers smoke currently supports OpenCode only and runs task validation, worker doctor, env requirement validation, and dry-run/run dispatch. |
 

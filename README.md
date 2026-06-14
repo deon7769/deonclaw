@@ -76,6 +76,7 @@ Implemented:
 - OpenCode `--model` through selected `model_profile`
 - `model_strategy` schema and validation
 - `model_strategy` dry-run planning
+- controlled `model_strategy.preferred[0]` selection for OpenCode real runs
 - `workers smoke --dry-run` with `model_strategy` planning
 - `execution-trace.json`
 - `runs report`
@@ -84,13 +85,13 @@ Implemented:
 - OpenCode Docker worker runtime supported experimental
 - OpenCode Docker Z.AI smoke runtime
 - MCP registry config validation, list and plan foundation
+- fallback policy schema validation only; no fallback execution or retries
 - memory proposal/lint/dry-run/approval/preflight/backup/materialize/apply/restore workflow
 - real memory apply for create/append/update/archive
 - real restore execution
 
 Not implemented yet:
 
-- real run automatic selection from `model_strategy.preferred[0]`
 - real fallback execution
 - Codex Docker worker runtime
 - MCP execution/manager

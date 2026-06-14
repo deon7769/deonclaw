@@ -70,6 +70,7 @@ Implemented:
 - OpenCode Docker worker runtime supported experimental
 - MCP registry config validation, list and plan foundation
 - workers smoke --dry-run model_strategy planning
+- fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
 - runs report by worker/status and by model_profile with filters
 
@@ -77,7 +78,7 @@ Not implemented yet:
 
 - real fallback execution/retry
 - Codex Docker worker execution
-- MCP execution/manager
+- MCP execution/manager; current MCP support is registry config/list/plan only
 - memory index/LanceDB
 - UI/dashboard
 
