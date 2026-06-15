@@ -174,14 +174,27 @@ func Smoke(ctx context.Context, opts Options) (Result, error) {
 	}
 	result.Protocol = server.Protocol
 	result.TestOnly = server.TestOnly
-	result.Command = append([]string{server.Command}, server.Args...)
+	serverCommand := append([]string{server.Command}, server.Args...)
+	runCommand := append([]string(nil), serverCommand...)
 	switch result.Runtime {
 	case RuntimeLocal:
 	case RuntimeDocker:
-		return result, errors.New("mcp smoke runtime docker is not implemented in Task 21.2; use runtime local")
+		if opts.RuntimeConfig == nil {
+			return result, errors.New("mcp smoke runtime docker requires --runtime-config")
+		}
+		if err := validateServerEnvPassthrough(server); err != nil {
+			return result, err
+		}
+		plan, err := mcpconfig.PlanDockerLaunch(opts.Config, opts.Server, *opts.RuntimeConfig, opts.Workspace)
+		if err != nil {
+			return result, err
+		}
+		runCommand = append([]string(nil), plan.Command...)
+		result.Warnings = append(result.Warnings, plan.Warnings...)
 	default:
 		return result, fmt.Errorf("mcp smoke runtime %q is not supported", result.Runtime)
 	}
+	result.Command = append([]string(nil), runCommand...)
 
 	if err := os.MkdirAll(opts.ArtifactsDir, 0o755); err != nil {
 		return result, fmt.Errorf("create mcp smoke artifacts dir: %w", err)
@@ -192,7 +205,7 @@ func Smoke(ctx context.Context, opts Options) (Result, error) {
 	result.StderrPath = filepath.Join(opts.ArtifactsDir, "mcp-stderr.log")
 	result.ResultPath = filepath.Join(opts.ArtifactsDir, "mcp-smoke-result.json")
 
-	transcript, rawStdout, rawStderr, runErr := runLocalSmoke(ctx, server, opts.Timeout, clock)
+	transcript, rawStdout, rawStderr, runErr := runCommandSmoke(ctx, runCommand, opts.Timeout, clock)
 	finishedAt := clock().UTC()
 	result.FinishedAt = finishedAt.Format(time.RFC3339Nano)
 	result.DurationMS = time.Since(startWall).Milliseconds()
@@ -237,10 +250,22 @@ func validateSmokeServer(server mcpconfig.ServerConfig) error {
 	return nil
 }
 
-func runLocalSmoke(ctx context.Context, server mcpconfig.ServerConfig, timeout time.Duration, clock func() time.Time) ([]transcriptEntry, []byte, string, error) {
+func validateServerEnvPassthrough(server mcpconfig.ServerConfig) error {
+	var errs []error
+	for _, name := range server.Env.Passthrough {
+		if !envIsSet(name) {
+			errs = append(errs, fmt.Errorf("mcp server env passthrough %s is not set in process env", name))
+		}
+	}
+	return errors.Join(errs...)
+}
+
+func runCommandSmoke(ctx context.Context, command []string, timeout time.Duration, clock func() time.Time) ([]transcriptEntry, []byte, string, error) {
 	smokeCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	command := append([]string{server.Command}, server.Args...)
+	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+		return nil, nil, "", errors.New("mcp smoke command must not be empty")
+	}
 	cmd := exec.CommandContext(smokeCtx, command[0], command[1:]...)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -349,7 +374,7 @@ func runLocalSmoke(ctx context.Context, server mcpconfig.ServerConfig, timeout t
 		return transcript, stdout.Bytes(), stderr.String(), runErr
 	}
 	if waitErr != nil {
-		return transcript, stdout.Bytes(), stderr.String(), fmt.Errorf("mcp smoke server exited non-zero: %w", waitErr)
+		return transcript, stdout.Bytes(), stderr.String(), fmt.Errorf("mcp smoke process exited non-zero: %w", waitErr)
 	}
 	return transcript, stdout.Bytes(), stderr.String(), nil
 }
@@ -419,6 +444,11 @@ func hasCapability(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+func envIsSet(name string) bool {
+	value, ok := os.LookupEnv(name)
+	return ok && value != ""
 }
 
 func mustRawJSON(value any) json.RawMessage {

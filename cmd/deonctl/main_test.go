@@ -913,6 +913,173 @@ func TestRunMCPSmokeTimeoutFailsControlled(t *testing.T) {
 	}
 }
 
+func TestRunMCPSmokeDockerWithFakeDockerGeneratesArtifacts(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	argsPath := installCLIMCPFakeDocker(t, "fake", "docker fake stderr\n")
+	tempDir := t.TempDir()
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", true, []string{"read"})
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--artifacts-dir", artifactsDir,
+		"--timeout-seconds", "3",
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "fake/test smoke only") || !strings.Contains(stdout.String(), "runtime: docker") || !strings.Contains(stdout.String(), "status: succeeded") {
+		t.Fatalf("stdout = %q, want docker fake smoke summary", stdout.String())
+	}
+	for _, name := range []string{"mcp-smoke-summary.md", "mcp-transcript.jsonl", "mcp-stdout.log", "mcp-stderr.log", "mcp-smoke-result.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+	}
+	transcript := assertCLITranscriptJSONLValid(t, filepath.Join(artifactsDir, "mcp-transcript.jsonl"))
+	if !strings.Contains(transcript, `"tools/list"`) {
+		t.Fatalf("transcript = %q, want tools/list", transcript)
+	}
+	assertCLIFileContains(t, filepath.Join(artifactsDir, "mcp-stdout.log"), `"serverInfo"`)
+	assertCLIFileContains(t, filepath.Join(artifactsDir, "mcp-stderr.log"), "docker fake stderr")
+
+	args := readCLIDockerArgs(t, argsPath)
+	if !stringSliceContainsSequence(args, []string{"-e", "MCP_TOKEN"}) {
+		t.Fatalf("docker args = %#v, want MCP_TOKEN passthrough by name", args)
+	}
+	imageIndex := indexOfString(args, "deonclaw-runner:latest")
+	if imageIndex < 0 {
+		t.Fatalf("docker args = %#v, want image", args)
+	}
+	if !stringSliceContainsSequence(args[imageIndex+1:], []string{os.Args[0], "-test.run=TestCLIMCPFakeServerHelperProcess", "--", "fake"}) {
+		t.Fatalf("docker args tail = %#v, want fake server command after image", args[imageIndex+1:])
+	}
+	joinedArgs := strings.Join(args, " ")
+	if strings.Contains(joinedArgs, "sh -c") {
+		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+	for _, content := range []string{stdout.String(), stderr.String(), joinedArgs} {
+		if strings.Contains(content, "super-secret-value") {
+			t.Fatalf("secret leaked in output/args: %q", content)
+		}
+	}
+	for _, name := range []string{"mcp-smoke-summary.md", "mcp-transcript.jsonl", "mcp-stdout.log", "mcp-stderr.log", "mcp-smoke-result.json"} {
+		assertCLIFileNotContains(t, filepath.Join(artifactsDir, name), "super-secret-value")
+	}
+}
+
+func TestRunMCPSmokeDockerMissingEnvFailsBeforeDocker(t *testing.T) {
+	unsetEnvForTest(t, "MCP_TOKEN")
+	argsPath := installCLIMCPFakeDocker(t, "fake", "")
+	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", true, []string{"read"})
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--artifacts-dir", t.TempDir(),
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "MCP_TOKEN") {
+		t.Fatalf("stderr = %q, want missing env name", stderr.String())
+	}
+	if strings.Contains(stderr.String(), "super-secret-value") {
+		t.Fatalf("stderr leaked secret: %q", stderr.String())
+	}
+	assertFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunMCPSmokeDockerRejectsServerWithoutTestOnly(t *testing.T) {
+	argsPath := installCLIMCPFakeDocker(t, "fake", "")
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"read"})
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--artifacts-dir", t.TempDir(),
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "test_only=true") {
+		t.Fatalf("stderr = %q, want test_only rejection", stderr.String())
+	}
+	assertFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunMCPSmokeDockerRejectsWriteExecCapability(t *testing.T) {
+	argsPath := installCLIMCPFakeDocker(t, "fake", "")
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", true, []string{"exec"})
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--artifacts-dir", t.TempDir(),
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "write or exec") {
+		t.Fatalf("stderr = %q, want write/exec rejection", stderr.String())
+	}
+	assertFileEmptyOrMissing(t, argsPath)
+}
+
+func TestRunMCPSmokeDockerTimeoutFailsControlled(t *testing.T) {
+	_ = installCLIMCPFakeDocker(t, "hang", "")
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", true, []string{"read"})
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--artifacts-dir", t.TempDir(),
+		"--timeout-seconds", "1",
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "timed out") {
+		t.Fatalf("stderr = %q, want timeout", stderr.String())
+	}
+}
+
 func TestCLIMCPFakeServerHelperProcess(t *testing.T) {
 	if os.Getenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER") != "1" {
 		return
@@ -923,6 +1090,13 @@ func TestCLIMCPFakeServerHelperProcess(t *testing.T) {
 		os.Exit(0)
 	}
 	os.Exit(runMCPFakeServer(os.Stdin, os.Stdout, os.Stderr))
+}
+
+func TestCLIMCPFakeDockerHelperProcess(t *testing.T) {
+	if os.Getenv("DEONCLAW_CLI_MCP_FAKE_DOCKER_HELPER") != "1" {
+		return
+	}
+	os.Exit(runCLIMCPFakeDockerHelper())
 }
 
 func TestRunRuntimeDockerPlanText(t *testing.T) {
@@ -6228,6 +6402,55 @@ func installFakeDocker(t *testing.T, script string) string {
 	return argsPath
 }
 
+func installCLIMCPFakeDocker(t *testing.T, mode string, stderr string) string {
+	t.Helper()
+	tempDir := t.TempDir()
+	argsPath := filepath.Join(tempDir, "docker.args")
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_DOCKER_ARGS_PATH", argsPath)
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_DOCKER_MODE", mode)
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_DOCKER_STDERR", stderr)
+
+	path := filepath.Join(tempDir, "docker")
+	if stdruntime.GOOS == "windows" {
+		path += ".bat"
+	}
+	testBinary, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatalf("Abs(test binary) error = %v", err)
+	}
+	var content string
+	if stdruntime.GOOS == "windows" {
+		content = fmt.Sprintf("@echo off\r\nset DEONCLAW_CLI_MCP_FAKE_DOCKER_HELPER=1\r\n\"%s\" -test.run=TestCLIMCPFakeDockerHelperProcess -- %%*\r\nexit /b %%ERRORLEVEL%%\r\n", testBinary)
+	} else {
+		content = "#!/bin/sh\nDEONCLAW_CLI_MCP_FAKE_DOCKER_HELPER=1 exec " + cliShellQuote(testBinary) + " -test.run=TestCLIMCPFakeDockerHelperProcess -- \"$@\"\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake docker) error = %v", err)
+	}
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	return argsPath
+}
+
+func runCLIMCPFakeDockerHelper() int {
+	if argsPath := os.Getenv("DEONCLAW_CLI_MCP_FAKE_DOCKER_ARGS_PATH"); argsPath != "" {
+		content := strings.Join(cliHelperArgs(), "\n")
+		if content != "" {
+			content += "\n"
+		}
+		_ = os.WriteFile(argsPath, []byte(content), 0o600)
+	}
+	if stderr := os.Getenv("DEONCLAW_CLI_MCP_FAKE_DOCKER_STDERR"); stderr != "" {
+		_, _ = fmt.Fprint(os.Stderr, stderr)
+	}
+	switch os.Getenv("DEONCLAW_CLI_MCP_FAKE_DOCKER_MODE") {
+	case "hang":
+		time.Sleep(10 * time.Second)
+		return 0
+	default:
+		return runMCPFakeServer(os.Stdin, os.Stdout, os.Stderr)
+	}
+}
+
 type cliFakeOpenCodeOptions struct {
 	ArgsPath   string
 	MarkerPath string
@@ -6521,6 +6744,28 @@ func assertCLITranscriptJSONLValid(t *testing.T, path string) string {
 		}
 	}
 	return string(data)
+}
+
+func readCLIDockerArgs(t *testing.T, path string) []string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		return nil
+	}
+	return lines
+}
+
+func indexOfString(values []string, want string) int {
+	for i, value := range values {
+		if value == want {
+			return i
+		}
+	}
+	return -1
 }
 
 func examplePath(t *testing.T, parts ...string) string {

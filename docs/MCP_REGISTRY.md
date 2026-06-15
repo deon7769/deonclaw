@@ -1,6 +1,6 @@
 # MCP Registry
 
-Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts.
+Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime.
 
 The registry records MCP server definitions so DeonClaw can validate and inspect them before any future execution layer exists. It does not start real MCP servers, call real MCP tools, connect MCP to Codex or OpenCode, or participate in fallback execution.
 
@@ -160,6 +160,18 @@ deonctl mcp smoke \
   --timeout-seconds 5
 ~~~
 
+Run the same fake/test smoke through Docker:
+
+~~~bash
+deonctl mcp smoke \
+  --config configs/examples/mcp-fake.yaml \
+  --server fake-stdio \
+  --artifacts-dir artifacts/mcp-smoke \
+  --runtime docker \
+  --runtime-config configs/examples/runtime.yaml \
+  --workspace .
+~~~
+
 `mcp smoke` is not real MCP execution. It only accepts registry entries that are explicitly marked for tests:
 
 - `test_only: true`
@@ -167,7 +179,7 @@ deonctl mcp smoke \
 - `enabled: false`
 - no `write` or `exec` capability
 
-The current smoke starts the configured fake/test process, sends only:
+The smoke starts the configured fake/test process, either locally or through the validated Docker runtime, and sends only:
 
 - `initialize`
 - `tools/list`
@@ -175,6 +187,13 @@ The current smoke starts the configured fake/test process, sends only:
 - `exit`
 
 It never calls a tool. `tools/list` may return an empty list. Environment values are never printed.
+
+For `--runtime docker`, DeonClaw loads and validates `runtime.yaml`, uses the Docker runtime planner, appends the fake/test server command and args after the Docker image, and executes Docker directly without `sh -c`. Runtime mount and env policy are preserved. MCP server env passthrough is name-only; if a required MCP env passthrough name is absent from the DeonClaw process environment, smoke fails before Docker starts.
+
+`mcp docker-plan` and `mcp smoke --runtime docker` are different:
+
+- `mcp docker-plan` prints a Docker command plan and never executes it.
+- `mcp smoke --runtime docker` executes Docker, but only for a `test_only: true` fake/test stdio server and still does not call MCP tools.
 
 Artifacts:
 
@@ -200,13 +219,11 @@ deonctl mcp fake-server
 
 `mcp fake-server` is a minimal JSON-RPC stdio server for smoke tests only. It responds to `initialize`, `tools/list`, `shutdown`, and `exit`.
 
-Docker smoke is not implemented in Task 21.2. Passing `--runtime docker` is rejected intentionally; use `mcp docker-plan` for Docker planning and keep Docker smoke execution for a future 21.2.1 task.
-
 ## Boundary
 
 Docker runtime comes before MCP execution. The current registry is a static validation, inventory, diagnostic, risk, planning, and fake/test-smoke layer only.
 
-Not implemented in Task 21.0, Task 21.1, or Task 21.2:
+Not implemented in Task 21.0, Task 21.1, Task 21.2, or Task 21.2.1:
 
 - real MCP server execution
 - real MCP tool calls

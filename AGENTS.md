@@ -69,7 +69,7 @@ Implemented:
 - Docker worker execution scaffold for fake/test workers
 - OpenCode Docker worker runtime supported experimental
 - MCP registry config validation, list and plan foundation
-- MCP fake/test stdio smoke with transcript artifacts
+- MCP fake/test stdio smoke with transcript artifacts, locally and through Docker
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -79,7 +79,7 @@ Not implemented yet:
 
 - real fallback execution/retry
 - Codex Docker worker execution
-- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus fake/test smoke only
+- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke only
 - memory index/LanceDB
 - UI/dashboard
 
