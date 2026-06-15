@@ -822,6 +822,109 @@ func TestRunMCPDockerPlanJSONValid(t *testing.T) {
 	}
 }
 
+func TestRunMCPFakeServerRespondsInitialize(t *testing.T) {
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}`,
+		`{"jsonrpc":"2.0","method":"exit"}`,
+		"",
+	}, "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := runMCPFakeServer(strings.NewReader(input), &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("runMCPFakeServer() exit code = %d, stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"id":1`) || !strings.Contains(stdout.String(), `"serverInfo"`) {
+		t.Fatalf("stdout = %q, want initialize response", stdout.String())
+	}
+}
+
+func TestRunMCPSmokeLocalGeneratesArtifacts(t *testing.T) {
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER", "1")
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	tempDir := t.TempDir()
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", true, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "smoke", "--config", configPath, "--server", "fake-stdio", "--artifacts-dir", artifactsDir, "--timeout-seconds", "3"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "fake/test smoke only") || !strings.Contains(stdout.String(), "status: succeeded") {
+		t.Fatalf("stdout = %q, want fake smoke summary", stdout.String())
+	}
+	for _, name := range []string{"mcp-smoke-summary.md", "mcp-transcript.jsonl", "mcp-stdout.log", "mcp-stderr.log", "mcp-smoke-result.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+	}
+	transcript := assertCLITranscriptJSONLValid(t, filepath.Join(artifactsDir, "mcp-transcript.jsonl"))
+	if !strings.Contains(transcript, `"tools/list"`) {
+		t.Fatalf("transcript = %q, want tools/list", transcript)
+	}
+	for _, name := range []string{"mcp-smoke-summary.md", "mcp-transcript.jsonl", "mcp-stdout.log", "mcp-stderr.log", "mcp-smoke-result.json"} {
+		assertCLIFileNotContains(t, filepath.Join(artifactsDir, name), "super-secret-value")
+	}
+}
+
+func TestRunMCPSmokeRejectsServerWithoutTestOnly(t *testing.T) {
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "smoke", "--config", configPath, "--server", "fake-stdio", "--artifacts-dir", t.TempDir()}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "test_only=true") {
+		t.Fatalf("stderr = %q, want test_only rejection", stderr.String())
+	}
+}
+
+func TestRunMCPSmokeRejectsWriteExecCapability(t *testing.T) {
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", true, []string{"write"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "smoke", "--config", configPath, "--server", "fake-stdio", "--artifacts-dir", t.TempDir()}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "write or exec") {
+		t.Fatalf("stderr = %q, want write/exec rejection", stderr.String())
+	}
+}
+
+func TestRunMCPSmokeTimeoutFailsControlled(t *testing.T) {
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER", "1")
+	configPath := writeCLIMCPFakeConfig(t, nil, "hang", true, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "smoke", "--config", configPath, "--server", "fake-stdio", "--artifacts-dir", t.TempDir(), "--timeout-seconds", "1"}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "timed out") {
+		t.Fatalf("stderr = %q, want timeout", stderr.String())
+	}
+}
+
+func TestCLIMCPFakeServerHelperProcess(t *testing.T) {
+	if os.Getenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER") != "1" {
+		return
+	}
+	args := cliHelperArgs()
+	if len(args) > 0 && args[0] == "hang" {
+		time.Sleep(10 * time.Second)
+		os.Exit(0)
+	}
+	os.Exit(runMCPFakeServer(os.Stdin, os.Stdout, os.Stderr))
+}
+
 func TestRunRuntimeDockerPlanText(t *testing.T) {
 	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
 	var stdout bytes.Buffer
@@ -6362,6 +6465,62 @@ func writeCLIMCPConfig(t *testing.T, content string) string {
 		t.Fatalf("write mcp config: %v", err)
 	}
 	return path
+}
+
+func writeCLIMCPFakeConfig(t *testing.T, env []string, mode string, testOnly bool, capabilities []string) string {
+	t.Helper()
+	if len(capabilities) == 0 {
+		capabilities = []string{"read"}
+	}
+	var builder strings.Builder
+	builder.WriteString("mcp:\n  servers:\n    fake-stdio:\n")
+	builder.WriteString("      command: " + strconv.Quote(os.Args[0]) + "\n")
+	builder.WriteString("      args:\n")
+	builder.WriteString("        - \"-test.run=TestCLIMCPFakeServerHelperProcess\"\n")
+	builder.WriteString("        - \"--\"\n")
+	builder.WriteString("        - " + strconv.Quote(mode) + "\n")
+	builder.WriteString("      enabled: false\n")
+	builder.WriteString(fmt.Sprintf("      test_only: %t\n", testOnly))
+	builder.WriteString("      protocol: stdio\n")
+	builder.WriteString("      trust: local\n")
+	builder.WriteString("      capabilities:\n")
+	for _, capability := range capabilities {
+		builder.WriteString("        - " + strconv.Quote(capability) + "\n")
+	}
+	builder.WriteString("      env:\n")
+	builder.WriteString("        passthrough:\n")
+	for _, name := range env {
+		builder.WriteString("          - " + strconv.Quote(name) + "\n")
+	}
+	return writeCLIMCPConfig(t, builder.String())
+}
+
+func assertCLITranscriptJSONLValid(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s) error = %v", path, err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
+		t.Fatalf("transcript %s is empty", path)
+	}
+	for _, line := range lines {
+		var decoded struct {
+			Direction string          `json:"direction"`
+			Method    string          `json:"method"`
+			ID        json.RawMessage `json:"id"`
+			Timestamp string          `json:"timestamp"`
+			Payload   json.RawMessage `json:"payload"`
+		}
+		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+			t.Fatalf("transcript line is not valid JSON: %q error=%v", line, err)
+		}
+		if decoded.Direction == "" || decoded.Method == "" || decoded.Timestamp == "" || len(decoded.Payload) == 0 {
+			t.Fatalf("transcript line missing fields: %#v", decoded)
+		}
+	}
+	return string(data)
 }
 
 func examplePath(t *testing.T, parts ...string) string {

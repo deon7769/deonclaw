@@ -24,6 +24,39 @@ func TestLoadAndValidateValidMCPConfig(t *testing.T) {
 	}
 }
 
+func TestLoadAndValidateFakeMCPConfig(t *testing.T) {
+	cfg, err := Load(filepath.Join("..", "..", "configs", "examples", "mcp-fake.yaml"))
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	result, err := Validate(cfg)
+	if err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+	if len(result.Warnings) != 0 {
+		t.Fatalf("warnings = %#v, want none", result.Warnings)
+	}
+	server := cfg.MCP.Servers["fake-stdio"]
+	if !server.TestOnly || server.Protocol != ProtocolStdio {
+		t.Fatalf("server = %#v, want test_only stdio", server)
+	}
+}
+
+func TestValidateRejectsUnknownProtocol(t *testing.T) {
+	cfg := validConfig()
+	server := cfg.MCP.Servers["filesystem-readonly"]
+	server.Protocol = "http"
+	cfg.MCP.Servers["filesystem-readonly"] = server
+
+	_, err := Validate(cfg)
+	if err == nil {
+		t.Fatal("Validate() error = nil, want unknown protocol")
+	}
+	if !strings.Contains(err.Error(), `protocol "http" is not supported`) {
+		t.Fatalf("error = %v, want protocol rejection", err)
+	}
+}
+
 func TestValidateRejectsMissingCommand(t *testing.T) {
 	cfg := validConfig()
 	server := cfg.MCP.Servers["filesystem-readonly"]

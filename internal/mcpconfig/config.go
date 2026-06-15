@@ -21,6 +21,8 @@ const (
 	CapabilityWrite = "write"
 	CapabilityExec  = "exec"
 
+	ProtocolStdio = "stdio"
+
 	RiskLow    = "low"
 	RiskMedium = "medium"
 	RiskHigh   = "high"
@@ -44,6 +46,8 @@ type ServerConfig struct {
 	Command      string    `yaml:"command" json:"command"`
 	Args         []string  `yaml:"args,omitempty" json:"args,omitempty"`
 	Enabled      bool      `yaml:"enabled" json:"enabled"`
+	TestOnly     bool      `yaml:"test_only,omitempty" json:"test_only,omitempty"`
+	Protocol     string    `yaml:"protocol,omitempty" json:"protocol,omitempty"`
 	Trust        string    `yaml:"trust" json:"trust"`
 	Capabilities []string  `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
 	Env          ServerEnv `yaml:"env,omitempty" json:"env,omitempty"`
@@ -155,6 +159,11 @@ func Validate(cfg Config) (ValidationResult, error) {
 		case TrustLocal, TrustExternal:
 		default:
 			errs = append(errs, fmt.Errorf("%s.trust %q is not supported", prefix, server.Trust))
+		}
+		switch server.Protocol {
+		case "", ProtocolStdio:
+		default:
+			errs = append(errs, fmt.Errorf("%s.protocol %q is not supported", prefix, server.Protocol))
 		}
 		for i, capability := range server.Capabilities {
 			switch capability {
@@ -338,6 +347,7 @@ func PlanDockerLaunch(cfg Config, serverName string, runtimeCfg runtimeconfig.Co
 func normalize(cfg *Config) {
 	for name, server := range cfg.MCP.Servers {
 		server.Command = strings.TrimSpace(server.Command)
+		server.Protocol = strings.TrimSpace(server.Protocol)
 		server.Trust = strings.TrimSpace(server.Trust)
 		for i := range server.Args {
 			server.Args[i] = strings.TrimSpace(server.Args[i])

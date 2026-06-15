@@ -23,6 +23,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/domains"
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/mcpconfig"
+	"github.com/deon7769/deonclaw/internal/mcpsmoke"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runreport"
@@ -58,6 +59,8 @@ Usage:
   deonctl mcp doctor --config <mcp.yaml> [--output-format text|json]
   deonctl mcp risk --config <mcp.yaml> [--output-format text|json]
   deonctl mcp docker-plan --config <mcp.yaml> --server <name> --runtime-config <runtime.yaml> --workspace <path> [--output-format text|json]
+  deonctl mcp fake-server
+  deonctl mcp smoke --config <mcp.yaml> --server <name> --artifacts-dir <dir> [--timeout-seconds 5] [--runtime local|docker] [--runtime-config <runtime.yaml>] [--workspace <path>]
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -305,6 +308,20 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMCPDockerPlan(opts, stdout, stderr)
+		case "fake-server":
+			if len(args) != 2 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPFakeServer(os.Stdin, stdout, stderr)
+		case "smoke":
+			opts, err := parseMCPSmokeOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPSmoke(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -1131,6 +1148,132 @@ func formatMCPEnvRequirements(requirements []mcpconfig.EnvRequirement) string {
 		parts = append(parts, requirement.Name+"="+requirement.State)
 	}
 	return strings.Join(parts, ",")
+}
+
+func runMCPFakeServer(stdin io.Reader, stdout io.Writer, stderr io.Writer) int {
+	if err := mcpsmoke.RunFakeServer(context.Background(), stdin, stdout, stderr); err != nil {
+		fmt.Fprintf(stderr, "mcp fake-server failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+type mcpSmokeOptions struct {
+	configPath        string
+	server            string
+	artifactsDir      string
+	timeoutSeconds    int
+	runtime           string
+	runtimeConfigPath string
+	workspace         string
+}
+
+func parseMCPSmokeOptions(args []string) (mcpSmokeOptions, error) {
+	opts := mcpSmokeOptions{timeoutSeconds: 5, runtime: mcpsmoke.RuntimeLocal}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return mcpSmokeOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--server":
+			if i+1 >= len(args) {
+				return mcpSmokeOptions{}, fmt.Errorf("missing value for --server")
+			}
+			opts.server = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return mcpSmokeOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		case "--timeout-seconds":
+			if i+1 >= len(args) {
+				return mcpSmokeOptions{}, fmt.Errorf("missing value for --timeout-seconds")
+			}
+			value, err := strconv.Atoi(args[i+1])
+			if err != nil || value <= 0 {
+				return mcpSmokeOptions{}, fmt.Errorf("--timeout-seconds must be a positive integer")
+			}
+			opts.timeoutSeconds = value
+			i++
+		case "--runtime":
+			if i+1 >= len(args) {
+				return mcpSmokeOptions{}, fmt.Errorf("missing value for --runtime")
+			}
+			opts.runtime = args[i+1]
+			i++
+		case "--runtime-config":
+			if i+1 >= len(args) {
+				return mcpSmokeOptions{}, fmt.Errorf("missing value for --runtime-config")
+			}
+			opts.runtimeConfigPath = args[i+1]
+			i++
+		case "--workspace":
+			if i+1 >= len(args) {
+				return mcpSmokeOptions{}, fmt.Errorf("missing value for --workspace")
+			}
+			opts.workspace = args[i+1]
+			i++
+		default:
+			return mcpSmokeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return mcpSmokeOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.server == "" {
+		return mcpSmokeOptions{}, fmt.Errorf("missing --server")
+	}
+	if opts.artifactsDir == "" {
+		return mcpSmokeOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	switch opts.runtime {
+	case mcpsmoke.RuntimeLocal, mcpsmoke.RuntimeDocker:
+	default:
+		return mcpSmokeOptions{}, fmt.Errorf("unsupported runtime %q", opts.runtime)
+	}
+	return opts, nil
+}
+
+func runMCPSmoke(opts mcpSmokeOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp smoke failed: %v\n", err)
+		return 1
+	}
+	var runtimeCfg *runtimeconfig.Config
+	if opts.runtime == mcpsmoke.RuntimeDocker && opts.runtimeConfigPath != "" {
+		loaded, err := runtimeconfig.Load(opts.runtimeConfigPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "mcp smoke failed: %v\n", err)
+			return 1
+		}
+		runtimeCfg = &loaded
+	}
+	result, err := mcpsmoke.Smoke(context.Background(), mcpsmoke.Options{
+		Config:        cfg,
+		Server:        opts.server,
+		ArtifactsDir:  opts.artifactsDir,
+		Timeout:       time.Duration(opts.timeoutSeconds) * time.Second,
+		Runtime:       opts.runtime,
+		RuntimeConfig: runtimeCfg,
+		Workspace:     opts.workspace,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp smoke failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "mcp smoke: fake/test smoke only")
+	fmt.Fprintf(stdout, "server: %s\n", result.Server)
+	fmt.Fprintf(stdout, "status: %s\n", result.Status)
+	fmt.Fprintf(stdout, "runtime: %s\n", result.Runtime)
+	fmt.Fprintf(stdout, "artifacts_dir: %s\n", result.ArtifactsDir)
+	fmt.Fprintf(stdout, "transcript: %s\n", result.TranscriptPath)
+	return 0
 }
 
 type memoryProposalNewOptions struct {

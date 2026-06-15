@@ -1,0 +1,15 @@
+mcp:
+  servers:
+    fake-stdio:
+      command: deonctl
+      args:
+        - mcp
+        - fake-server
+      enabled: false
+      test_only: true
+      protocol: stdio
+      trust: local
+      capabilities:
+        - read
+      env:
+        passthrough: []
