@@ -3,8 +3,10 @@ package opencode
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -217,33 +219,101 @@ func assertWorkerArtifactContent(t *testing.T, result *workers.RunResult, name s
 
 func writeExecutableScript(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "opencode-fake.sh")
-	content := strings.Join([]string{
-		"#!/bin/sh",
-		"shift 4",
-		body,
-		"",
-	}, "\n")
-	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
-		t.Fatalf("WriteFile(script) error = %v", err)
-	}
-	return path
+	return writeOpenCodeFakeCommand(t, openCodeFakeBehaviorFromBody(body))
 }
 
 func writeRawExecutableScript(t *testing.T, body string) string {
 	t.Helper()
-	path := filepath.Join(t.TempDir(), "opencode-fake.sh")
-	content := strings.Join([]string{
-		"#!/bin/sh",
-		body,
-		"",
-	}, "\n")
+	behavior := openCodeFakeBehaviorFromBody(body)
+	behavior.argsPath = openCodeFakeArgsPathFromBody(body)
+	return writeOpenCodeFakeCommand(t, behavior)
+}
+
+func shellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+}
+
+type openCodeFakeCommandBehavior struct {
+	argsPath string
+	stdout   string
+	stderr   string
+}
+
+func writeOpenCodeFakeCommand(t *testing.T, behavior openCodeFakeCommandBehavior) string {
+	t.Helper()
+	t.Setenv("DEONCLAW_OPENCODE_FAKE_ARGS_PATH", behavior.argsPath)
+	t.Setenv("DEONCLAW_OPENCODE_FAKE_STDOUT", behavior.stdout)
+	t.Setenv("DEONCLAW_OPENCODE_FAKE_STDERR", behavior.stderr)
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "opencode-fake")
+	if runtime.GOOS == "windows" {
+		path += ".bat"
+	}
+	testBinary, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatalf("Abs(test binary) error = %v", err)
+	}
+	var content string
+	if runtime.GOOS == "windows" {
+		content = fmt.Sprintf("@echo off\r\nset DEONCLAW_OPENCODE_FAKE_HELPER=1\r\n\"%s\" -test.run=TestOpenCodeFakeCommandHelperProcess -- %%*\r\nexit /b %%ERRORLEVEL%%\r\n", testBinary)
+	} else {
+		content = "#!/bin/sh\nDEONCLAW_OPENCODE_FAKE_HELPER=1 exec " + shellQuote(testBinary) + " -test.run=TestOpenCodeFakeCommandHelperProcess -- \"$@\"\n"
+	}
 	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
 		t.Fatalf("WriteFile(script) error = %v", err)
 	}
 	return path
 }
 
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
+func TestOpenCodeFakeCommandHelperProcess(t *testing.T) {
+	if os.Getenv("DEONCLAW_OPENCODE_FAKE_HELPER") != "1" {
+		return
+	}
+	if argsPath := os.Getenv("DEONCLAW_OPENCODE_FAKE_ARGS_PATH"); argsPath != "" {
+		_ = os.WriteFile(argsPath, []byte(strings.Join(openCodeHelperArgs(), " ")+"\n"), 0o600)
+	}
+	_, _ = fmt.Fprint(os.Stdout, os.Getenv("DEONCLAW_OPENCODE_FAKE_STDOUT"))
+	_, _ = fmt.Fprint(os.Stderr, os.Getenv("DEONCLAW_OPENCODE_FAKE_STDERR"))
+	os.Exit(0)
+}
+
+func openCodeHelperArgs() []string {
+	for i, arg := range os.Args {
+		if arg == "--" && i+1 < len(os.Args) {
+			return os.Args[i+1:]
+		}
+	}
+	return nil
+}
+
+func openCodeFakeBehaviorFromBody(body string) openCodeFakeCommandBehavior {
+	var behavior openCodeFakeCommandBehavior
+	if strings.Contains(body, "plain stdout") {
+		behavior.stdout += "plain stdout\n"
+	}
+	if strings.Contains(body, "plain stderr") {
+		behavior.stderr += "plain stderr\n"
+	}
+	if strings.Contains(body, "plain line") {
+		behavior.stdout += "plain line\n"
+	}
+	if strings.Contains(body, `{"type":"message","text":"ok"}`) {
+		behavior.stdout += `{"type":"message","text":"ok"}` + "\n"
+	}
+	if strings.Contains(body, "{not-json}") {
+		behavior.stdout += "{not-json}\n"
+	}
+	return behavior
+}
+
+func openCodeFakeArgsPathFromBody(body string) string {
+	marker := "> "
+	index := strings.Index(body, marker)
+	if index < 0 {
+		return ""
+	}
+	rest := strings.TrimSpace(body[index+len(marker):])
+	line, _, _ := strings.Cut(rest, "\n")
+	return strings.Trim(strings.TrimSpace(line), `'"`)
 }

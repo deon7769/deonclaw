@@ -5,8 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	stdruntime "runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -62,10 +66,7 @@ func TestRunDoctorJSON(t *testing.T) {
 
 func TestRunWorkersDoctorWithWorkerFilterAndConfig(t *testing.T) {
 	tempDir := t.TempDir()
-	fake := filepath.Join(tempDir, "fake-codex")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake) error = %v", err)
-	}
+	writeCLIPathFakeExecutable(t, tempDir, "fake-codex", 0)
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	workersConfigPath := filepath.Join(tempDir, "workers.yaml")
 	if err := os.WriteFile(workersConfigPath, []byte("workers:\n  codex:\n    command: fake-codex\n"), 0o600); err != nil {
@@ -95,10 +96,7 @@ func TestRunWorkersDoctorWithWorkerFilterAndConfig(t *testing.T) {
 
 func TestRunWorkersDoctorJSONIncludesProviderModel(t *testing.T) {
 	tempDir := t.TempDir()
-	fake := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake) error = %v", err)
-	}
+	writeCLIPathFakeExecutable(t, tempDir, "fake-opencode", 0)
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	workersConfigPath := filepath.Join(tempDir, "workers.yaml")
 	if err := os.WriteFile(workersConfigPath, []byte(`workers:
@@ -3534,10 +3532,7 @@ func TestRunWorkerOpenCodeRunUsesWorkersConfig(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "zai-real-secret")
 
 	tempDir := t.TempDir()
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{JSONLine: `{"type":"done"}`})
 	configPath := filepath.Join(tempDir, "workers.yaml")
 	if err := os.WriteFile(configPath, []byte(`workers:
   opencode:
@@ -3573,10 +3568,7 @@ func TestRunWorkerOpenCodeRunFailsBeforeWorkerWhenRequiredEnvMissing(t *testing.
 
 	tempDir := t.TempDir()
 	markerPath := filepath.Join(tempDir, "worker-executed")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{MarkerPath: markerPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -3612,10 +3604,7 @@ func TestRunWorkerOpenCodeRunFailsBeforeWorkerWhenProfileRequiredEnvMissing(t *t
 
 	tempDir := t.TempDir()
 	markerPath := filepath.Join(tempDir, "worker-executed")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{MarkerPath: markerPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -3657,10 +3646,7 @@ func TestRunWorkerOpenCodeRunWithProfileEnvPresentCallsOpenCodeRun(t *testing.T)
 
 	tempDir := t.TempDir()
 	argsPath := filepath.Join(tempDir, "opencode-args")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{ArgsPath: argsPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -3742,10 +3728,7 @@ func TestRunWorkerOpenCodeRunWithModelStrategySelectsFirstPreferredProfile(t *te
 
 	tempDir := t.TempDir()
 	argsPath := filepath.Join(tempDir, "opencode-args")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{ArgsPath: argsPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -3830,10 +3813,7 @@ func TestRunWorkerOpenCodeRunWithModelStrategyWithoutModelArgKeepsCommandAndReco
 
 	tempDir := t.TempDir()
 	argsPath := filepath.Join(tempDir, "opencode-args")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{ArgsPath: argsPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -3882,10 +3862,7 @@ func TestRunWorkerOpenCodeRunWithModelStrategySelectedProfileMissingEnvFailsBefo
 
 	tempDir := t.TempDir()
 	markerPath := filepath.Join(tempDir, "worker-executed")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{MarkerPath: markerPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -4163,10 +4140,7 @@ func TestRunWorkersSmokeRunWithMissingEnvFailsBeforeWorker(t *testing.T) {
 	unsetEnvForTest(t, "ZAI_API_KEY")
 	tempDir := t.TempDir()
 	markerPath := filepath.Join(tempDir, "worker-executed")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\ntouch "+markerPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{MarkerPath: markerPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -4210,10 +4184,7 @@ func TestRunWorkersSmokeRunWithEnvPresentCallsOpenCodeRun(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "zai-real-secret")
 
 	tempDir := t.TempDir()
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -4263,10 +4234,7 @@ func TestRunWorkersSmokeRunWithModelStrategySelectsFirstPreferredProfile(t *test
 
 	tempDir := t.TempDir()
 	argsPath := filepath.Join(tempDir, "opencode-args")
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' \"$*\" > "+argsPath+"\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{ArgsPath: argsPath, JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -4337,10 +4305,7 @@ model_profiles:
 func TestRunWorkersSmokeInvalidTaskFailsBeforeWorker(t *testing.T) {
 	t.Setenv("ZAI_API_KEY", "zai-real-secret")
 	tempDir := t.TempDir()
-	fakeOpenCode := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fakeOpenCode, []byte("#!/bin/sh\nprintf '%s\\n' '{\"type\":\"done\"}'\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake opencode) error = %v", err)
-	}
+	fakeOpenCode := writeCLIFakeOpenCode(t, tempDir, cliFakeOpenCodeOptions{JSONLine: `{"type":"done"}`})
 	configPath := writeCLIWorkersConfig(t, `workers:
   opencode:
     command: `+fakeOpenCode+`
@@ -5901,14 +5866,188 @@ func loadCLIExamplePolicy(t *testing.T) *memory.MemoryPolicy {
 func installFakeDocker(t *testing.T, script string) string {
 	t.Helper()
 	tempDir := t.TempDir()
-	fakeDocker := filepath.Join(tempDir, "docker")
 	argsPath := filepath.Join(tempDir, "docker.args")
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake docker) error = %v", err)
-	}
-	t.Setenv("DEONCLAW_FAKE_DOCKER_ARGS", argsPath)
+	behavior := cliFakeDockerBehaviorFromScript(script)
+	behavior.argsPath = argsPath
+	writeCLIFakeCommand(t, tempDir, "docker", behavior)
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return argsPath
+}
+
+type cliFakeOpenCodeOptions struct {
+	ArgsPath   string
+	MarkerPath string
+	JSONLine   string
+}
+
+type cliFakeCommandBehavior struct {
+	argsPath   string
+	argsFormat string
+	stdinPath  string
+	markerPath string
+	stdout     string
+	stderr     string
+	exitCode   int
+	sleepMS    int
+}
+
+func writeCLIPathFakeExecutable(t *testing.T, dir string, name string, exitCode int) string {
+	t.Helper()
+	return writeCLIFakeCommand(t, dir, name, cliFakeCommandBehavior{exitCode: exitCode})
+}
+
+func writeCLIFakeOpenCode(t *testing.T, dir string, opts cliFakeOpenCodeOptions) string {
+	t.Helper()
+	stdout := ""
+	if opts.JSONLine != "" {
+		stdout = opts.JSONLine + "\n"
+	}
+	return writeCLIFakeCommand(t, dir, "fake-opencode", cliFakeCommandBehavior{
+		argsPath:   opts.ArgsPath,
+		argsFormat: "space",
+		markerPath: opts.MarkerPath,
+		stdout:     stdout,
+	})
+}
+
+func writeCLIFakeCommand(t *testing.T, dir string, name string, behavior cliFakeCommandBehavior) string {
+	t.Helper()
+	t.Setenv("DEONCLAW_FAKE_ARGS_PATH", behavior.argsPath)
+	t.Setenv("DEONCLAW_FAKE_ARGS_FORMAT", behavior.argsFormat)
+	t.Setenv("DEONCLAW_FAKE_STDIN_PATH", behavior.stdinPath)
+	t.Setenv("DEONCLAW_FAKE_MARKER_PATH", behavior.markerPath)
+	t.Setenv("DEONCLAW_FAKE_STDOUT", behavior.stdout)
+	t.Setenv("DEONCLAW_FAKE_STDERR", behavior.stderr)
+	t.Setenv("DEONCLAW_FAKE_EXIT_CODE", strconv.Itoa(behavior.exitCode))
+	t.Setenv("DEONCLAW_FAKE_SLEEP_MS", strconv.Itoa(behavior.sleepMS))
+
+	path := filepath.Join(dir, name)
+	if stdruntime.GOOS == "windows" {
+		path += ".bat"
+	}
+	testBinary, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatalf("Abs(test binary) error = %v", err)
+	}
+
+	var content string
+	if stdruntime.GOOS == "windows" {
+		content = fmt.Sprintf("@echo off\r\nset DEONCLAW_CLI_FAKE_HELPER=1\r\n\"%s\" -test.run=TestCLIFakeCommandHelperProcess -- %%*\r\nexit /b %%ERRORLEVEL%%\r\n", testBinary)
+	} else {
+		content = "#!/bin/sh\nDEONCLAW_CLI_FAKE_HELPER=1 exec " + cliShellQuote(testBinary) + " -test.run=TestCLIFakeCommandHelperProcess -- \"$@\"\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake command) error = %v", err)
+	}
+	return path
+}
+
+func TestCLIFakeCommandHelperProcess(t *testing.T) {
+	if os.Getenv("DEONCLAW_CLI_FAKE_HELPER") != "1" {
+		return
+	}
+	os.Exit(runCLIFakeCommandHelper())
+}
+
+func runCLIFakeCommandHelper() int {
+	if sleepMS, err := strconv.Atoi(os.Getenv("DEONCLAW_FAKE_SLEEP_MS")); err == nil && sleepMS > 0 {
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	}
+	args := cliHelperArgs()
+	if argsPath := os.Getenv("DEONCLAW_FAKE_ARGS_PATH"); argsPath != "" {
+		content := strings.Join(args, "\n")
+		if os.Getenv("DEONCLAW_FAKE_ARGS_FORMAT") == "space" {
+			content = strings.Join(args, " ")
+		}
+		if content != "" {
+			content += "\n"
+		}
+		_ = os.WriteFile(argsPath, []byte(content), 0o600)
+	}
+	if stdinPath := os.Getenv("DEONCLAW_FAKE_STDIN_PATH"); stdinPath != "" {
+		data, _ := io.ReadAll(os.Stdin)
+		_ = os.WriteFile(stdinPath, data, 0o600)
+	}
+	if markerPath := os.Getenv("DEONCLAW_FAKE_MARKER_PATH"); markerPath != "" {
+		_ = os.WriteFile(markerPath, []byte{}, 0o600)
+	}
+	_, _ = fmt.Fprint(os.Stdout, os.Getenv("DEONCLAW_FAKE_STDOUT"))
+	_, _ = fmt.Fprint(os.Stderr, os.Getenv("DEONCLAW_FAKE_STDERR"))
+	exitCode, err := strconv.Atoi(os.Getenv("DEONCLAW_FAKE_EXIT_CODE"))
+	if err != nil {
+		return 0
+	}
+	return exitCode
+}
+
+func cliHelperArgs() []string {
+	for i, arg := range os.Args {
+		if arg == "--" && i+1 < len(os.Args) {
+			return os.Args[i+1:]
+		}
+	}
+	return nil
+}
+
+func cliFakeDockerBehaviorFromScript(script string) cliFakeCommandBehavior {
+	behavior := cliFakeCommandBehavior{argsFormat: "lines", exitCode: 0}
+	if strings.Contains(script, "DEONCLAW_FAKE_DOCKER_STDIN") {
+		behavior.stdinPath = os.Getenv("DEONCLAW_FAKE_DOCKER_STDIN")
+	}
+	if strings.Contains(script, "sleep 2") {
+		behavior.sleepMS = 2000
+	}
+	for _, line := range strings.Split(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "exit ") {
+			fields := strings.Fields(trimmed)
+			if len(fields) == 2 {
+				if exitCode, err := strconv.Atoi(fields[1]); err == nil {
+					behavior.exitCode = exitCode
+				}
+			}
+		}
+		if strings.Contains(trimmed, ">&2") {
+			behavior.stderr += cliFakeDockerOutputForLine(trimmed)
+			continue
+		}
+		if strings.Contains(trimmed, "DEONCLAW_FAKE_DOCKER_ARGS") || strings.Contains(trimmed, "DEONCLAW_FAKE_DOCKER_STDIN") {
+			continue
+		}
+		behavior.stdout += cliFakeDockerOutputForLine(trimmed)
+	}
+	return behavior
+}
+
+func cliFakeDockerOutputForLine(line string) string {
+	switch {
+	case strings.Contains(line, `{"type":"message","text":"docker opencode ok"}`):
+		return `{"type":"message","text":"docker opencode ok"}` + "\n"
+	case strings.Contains(line, `{"type":"message","text":"docker worker ok"}`):
+		return `{"type":"message","text":"docker worker ok"}` + "\n"
+	case strings.Contains(line, "docker opencode stderr"):
+		return "docker opencode stderr\n"
+	case strings.Contains(line, "docker worker stderr"):
+		return "docker worker stderr\n"
+	case strings.Contains(line, "docker validation stdout"):
+		return "docker validation stdout\n"
+	case strings.Contains(line, "docker validation stderr"):
+		return "docker validation stderr\n"
+	case strings.Contains(line, "docker stdout"):
+		return "docker stdout\n"
+	case strings.Contains(line, "docker stderr"):
+		return "docker stderr\n"
+	case strings.Contains(line, "bad stdout"):
+		return "bad stdout\n"
+	case strings.Contains(line, "bad stderr"):
+		return "bad stderr\n"
+	default:
+		return ""
+	}
+}
+
+func cliShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func assertFileEmptyOrMissing(t *testing.T, path string) {

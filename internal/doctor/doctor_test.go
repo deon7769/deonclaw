@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -43,10 +44,7 @@ func TestDoctorJSONIsValid(t *testing.T) {
 
 func TestWorkersDoctorDetectsFakeCommandOnPath(t *testing.T) {
 	tempDir := t.TempDir()
-	fake := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake) error = %v", err)
-	}
+	fake := writeDoctorFakeCommand(t, tempDir, "fake-opencode")
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	configPath := filepath.Join(tempDir, "workers.yaml")
 	if err := os.WriteFile(configPath, []byte("workers:\n  opencode:\n    command: fake-opencode\n"), 0o600); err != nil {
@@ -68,10 +66,7 @@ func TestWorkersDoctorDetectsFakeCommandOnPath(t *testing.T) {
 
 func TestWorkersDoctorReportsProviderModel(t *testing.T) {
 	tempDir := t.TempDir()
-	fake := filepath.Join(tempDir, "fake-opencode")
-	if err := os.WriteFile(fake, []byte("#!/bin/sh\nexit 0\n"), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake) error = %v", err)
-	}
+	writeDoctorFakeCommand(t, tempDir, "fake-opencode")
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	configPath := filepath.Join(tempDir, "workers.yaml")
 	if err := os.WriteFile(configPath, []byte(`workers:
@@ -388,6 +383,20 @@ func writeDoctorWorkersConfig(t *testing.T, content string) string {
 	path := filepath.Join(t.TempDir(), "workers.yaml")
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("WriteFile(config) error = %v", err)
+	}
+	return path
+}
+
+func writeDoctorFakeCommand(t *testing.T, dir string, name string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	content := "#!/bin/sh\nexit 0\n"
+	if runtime.GOOS == "windows" {
+		path += ".bat"
+		content = "@echo off\r\nexit /b 0\r\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake) error = %v", err)
 	}
 	return path
 }

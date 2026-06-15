@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -316,14 +318,135 @@ func TestLimitedOutputReturnsOriginalWriteLengthWhenTruncating(t *testing.T) {
 func installRunnerFakeDocker(t *testing.T, script string) string {
 	t.Helper()
 	tempDir := t.TempDir()
-	fakeDocker := filepath.Join(tempDir, "docker")
 	argsPath := filepath.Join(tempDir, "docker.args")
-	if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
-		t.Fatalf("WriteFile(fake docker) error = %v", err)
-	}
-	t.Setenv("DEONCLAW_FAKE_DOCKER_ARGS", argsPath)
+	behavior := runnerFakeDockerBehaviorFromScript(script)
+	behavior.argsPath = argsPath
+	writeRunnerFakeDockerCommand(t, tempDir, behavior)
 	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return argsPath
+}
+
+type runnerFakeDockerBehavior struct {
+	argsPath  string
+	stdinPath string
+	stdout    string
+	stderr    string
+	exitCode  int
+	sleepMS   int
+}
+
+func writeRunnerFakeDockerCommand(t *testing.T, dir string, behavior runnerFakeDockerBehavior) {
+	t.Helper()
+	t.Setenv("DEONCLAW_RUNNER_FAKE_DOCKER_ARGS_PATH", behavior.argsPath)
+	t.Setenv("DEONCLAW_RUNNER_FAKE_DOCKER_STDIN_PATH", behavior.stdinPath)
+	t.Setenv("DEONCLAW_RUNNER_FAKE_DOCKER_STDOUT", behavior.stdout)
+	t.Setenv("DEONCLAW_RUNNER_FAKE_DOCKER_STDERR", behavior.stderr)
+	t.Setenv("DEONCLAW_RUNNER_FAKE_DOCKER_EXIT_CODE", strconv.Itoa(behavior.exitCode))
+	t.Setenv("DEONCLAW_RUNNER_FAKE_DOCKER_SLEEP_MS", strconv.Itoa(behavior.sleepMS))
+
+	path := filepath.Join(dir, "docker")
+	if runtime.GOOS == "windows" {
+		path += ".bat"
+	}
+	testBinary, err := filepath.Abs(os.Args[0])
+	if err != nil {
+		t.Fatalf("Abs(test binary) error = %v", err)
+	}
+	var content string
+	if runtime.GOOS == "windows" {
+		content = fmt.Sprintf("@echo off\r\nset DEONCLAW_RUNNER_FAKE_DOCKER_HELPER=1\r\n\"%s\" -test.run=TestRunnerFakeDockerHelperProcess -- %%*\r\nexit /b %%ERRORLEVEL%%\r\n", testBinary)
+	} else {
+		content = "#!/bin/sh\nDEONCLAW_RUNNER_FAKE_DOCKER_HELPER=1 exec " + runnerShellQuote(testBinary) + " -test.run=TestRunnerFakeDockerHelperProcess -- \"$@\"\n"
+	}
+	if err := os.WriteFile(path, []byte(content), 0o700); err != nil {
+		t.Fatalf("WriteFile(fake docker) error = %v", err)
+	}
+}
+
+func TestRunnerFakeDockerHelperProcess(t *testing.T) {
+	if os.Getenv("DEONCLAW_RUNNER_FAKE_DOCKER_HELPER") != "1" {
+		return
+	}
+	if sleepMS, err := strconv.Atoi(os.Getenv("DEONCLAW_RUNNER_FAKE_DOCKER_SLEEP_MS")); err == nil && sleepMS > 0 {
+		time.Sleep(time.Duration(sleepMS) * time.Millisecond)
+	}
+	if argsPath := os.Getenv("DEONCLAW_RUNNER_FAKE_DOCKER_ARGS_PATH"); argsPath != "" {
+		content := strings.Join(validationHelperArgs(), "\n")
+		if content != "" {
+			content += "\n"
+		}
+		_ = os.WriteFile(argsPath, []byte(content), 0o600)
+	}
+	if stdinPath := os.Getenv("DEONCLAW_RUNNER_FAKE_DOCKER_STDIN_PATH"); stdinPath != "" {
+		data, _ := io.ReadAll(os.Stdin)
+		_ = os.WriteFile(stdinPath, data, 0o600)
+	}
+	_, _ = fmt.Fprint(os.Stdout, os.Getenv("DEONCLAW_RUNNER_FAKE_DOCKER_STDOUT"))
+	_, _ = fmt.Fprint(os.Stderr, os.Getenv("DEONCLAW_RUNNER_FAKE_DOCKER_STDERR"))
+	exitCode, err := strconv.Atoi(os.Getenv("DEONCLAW_RUNNER_FAKE_DOCKER_EXIT_CODE"))
+	if err != nil {
+		exitCode = 0
+	}
+	os.Exit(exitCode)
+}
+
+func runnerFakeDockerBehaviorFromScript(script string) runnerFakeDockerBehavior {
+	behavior := runnerFakeDockerBehavior{exitCode: 0}
+	if strings.Contains(script, "DEONCLAW_FAKE_DOCKER_STDIN") {
+		behavior.stdinPath = os.Getenv("DEONCLAW_FAKE_DOCKER_STDIN")
+	}
+	if strings.Contains(script, "sleep 2") {
+		behavior.sleepMS = 2000
+	}
+	for _, line := range strings.Split(script, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "exit ") {
+			fields := strings.Fields(trimmed)
+			if len(fields) == 2 {
+				if exitCode, err := strconv.Atoi(fields[1]); err == nil {
+					behavior.exitCode = exitCode
+				}
+			}
+		}
+		if strings.Contains(trimmed, ">&2") {
+			behavior.stderr += runnerFakeDockerOutputForLine(trimmed)
+			continue
+		}
+		if strings.Contains(trimmed, "DEONCLAW_FAKE_DOCKER_ARGS") || strings.Contains(trimmed, "DEONCLAW_FAKE_DOCKER_STDIN") {
+			continue
+		}
+		behavior.stdout += runnerFakeDockerOutputForLine(trimmed)
+	}
+	return behavior
+}
+
+func runnerFakeDockerOutputForLine(line string) string {
+	switch {
+	case strings.Contains(line, `{"type":"message","text":"docker worker ok"}`):
+		return `{"type":"message","text":"docker worker ok"}` + "\n"
+	case strings.Contains(line, `{"type":"message","text":"arg placeholder ok"}`):
+		return `{"type":"message","text":"arg placeholder ok"}` + "\n"
+	case strings.Contains(line, "docker worker stderr"):
+		return "docker worker stderr\n"
+	case strings.Contains(line, "arg placeholder stderr"):
+		return "arg placeholder stderr\n"
+	case strings.Contains(line, "docker validation stdout"):
+		return "docker validation stdout\n"
+	case strings.Contains(line, "docker validation stderr"):
+		return "docker validation stderr\n"
+	case strings.Contains(line, "docker ok"):
+		return "docker ok\n"
+	case strings.Contains(line, "bad stdout"):
+		return "bad stdout\n"
+	case strings.Contains(line, "bad stderr"):
+		return "bad stderr\n"
+	default:
+		return ""
+	}
+}
+
+func runnerShellQuote(value string) string {
+	return "'" + strings.ReplaceAll(value, "'", `'\''`) + "'"
 }
 
 func unsetRunnerEnvForTest(t *testing.T, name string) {
