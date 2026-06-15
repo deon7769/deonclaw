@@ -571,6 +571,257 @@ func TestRunMCPPlanJSONNameOnly(t *testing.T) {
 	}
 }
 
+func TestRunMCPDoctorTextReportsEnvAvailabilityAndRisk(t *testing.T) {
+	tempDir := t.TempDir()
+	writeCLIPathFakeExecutable(t, tempDir, "fake-mcp", 0)
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	unsetEnvForTest(t, "MISSING_TOKEN")
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    filesystem-readonly:
+      command: fake-mcp
+      enabled: false
+      trust: local
+      capabilities:
+        - read
+      env:
+        passthrough:
+          - MCP_TOKEN
+    github-readonly:
+      command: missing-mcp-command
+      enabled: false
+      trust: external
+      capabilities:
+        - read
+      env:
+        passthrough:
+          - MISSING_TOKEN
+    risky-disabled:
+      command: missing-risky-command
+      enabled: false
+      trust: local
+      capabilities:
+        - write
+        - exec
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "doctor", "--config", configPath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{
+		"mcp doctor:",
+		"filesystem-readonly",
+		"command_available=true",
+		"risk=low",
+		"MCP_TOKEN=set_masked",
+		"github-readonly",
+		"command_available=false",
+		"risk=medium",
+		"MISSING_TOKEN=missing",
+		"risky-disabled",
+		"risk=high",
+		"warning:",
+	} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+	if strings.Contains(output+stderr.String(), "super-secret-value") {
+		t.Fatalf("output leaked env value: stdout=%q stderr=%q", output, stderr.String())
+	}
+}
+
+func TestRunMCPDoctorJSONValid(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    filesystem-readonly:
+      command: placeholder
+      enabled: false
+      trust: local
+      capabilities:
+        - read
+      env:
+        passthrough:
+          - MCP_TOKEN
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "doctor", "--config", configPath, "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !json.Valid(stdout.Bytes()) {
+		t.Fatalf("stdout is not valid JSON: %s", stdout.String())
+	}
+	var decoded struct {
+		Servers []struct {
+			Name             string `json:"name"`
+			CommandAvailable bool   `json:"command_available"`
+			RiskLevel        string `json:"risk_level"`
+			EnvRequirements  []struct {
+				Name  string `json:"name"`
+				State string `json:"state"`
+			} `json:"env_requirements"`
+		} `json:"servers"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if len(decoded.Servers) != 1 || decoded.Servers[0].Name != "filesystem-readonly" || decoded.Servers[0].RiskLevel != "low" {
+		t.Fatalf("decoded = %#v, want filesystem-readonly low risk", decoded)
+	}
+	if len(decoded.Servers[0].EnvRequirements) != 1 || decoded.Servers[0].EnvRequirements[0].State != "set_masked" {
+		t.Fatalf("env = %#v, want set_masked", decoded.Servers[0].EnvRequirements)
+	}
+	if strings.Contains(stdout.String(), "super-secret-value") {
+		t.Fatalf("stdout leaked env value: %q", stdout.String())
+	}
+}
+
+func TestRunMCPRiskJSONAggregatesCounts(t *testing.T) {
+	unsetEnvForTest(t, "MISSING_TOKEN")
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    local-read:
+      command: placeholder
+      enabled: false
+      trust: local
+      capabilities:
+        - read
+    external-read:
+      command: placeholder
+      enabled: true
+      trust: external
+      capabilities:
+        - read
+      env:
+        passthrough:
+          - MISSING_TOKEN
+    high-write-exec:
+      command: placeholder
+      enabled: false
+      trust: local
+      capabilities:
+        - write
+        - exec
+`)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "risk", "--config", configPath, "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !json.Valid(stdout.Bytes()) {
+		t.Fatalf("stdout is not valid JSON: %s", stdout.String())
+	}
+	var decoded struct {
+		TotalServers           int `json:"total_servers"`
+		EnabledServers         int `json:"enabled_servers"`
+		DisabledServers        int `json:"disabled_servers"`
+		ExternalServers        int `json:"external_servers"`
+		WriteCapabilityServers int `json:"write_capability_servers"`
+		ExecCapabilityServers  int `json:"exec_capability_servers"`
+		MissingEnvCount        int `json:"missing_env_count"`
+		HighRiskCount          int `json:"high_risk_count"`
+		MediumRiskCount        int `json:"medium_risk_count"`
+		LowRiskCount           int `json:"low_risk_count"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if decoded.TotalServers != 3 || decoded.EnabledServers != 1 || decoded.DisabledServers != 2 ||
+		decoded.ExternalServers != 1 || decoded.WriteCapabilityServers != 1 || decoded.ExecCapabilityServers != 1 ||
+		decoded.MissingEnvCount != 1 || decoded.HighRiskCount != 1 || decoded.MediumRiskCount != 1 || decoded.LowRiskCount != 1 {
+		t.Fatalf("decoded = %#v, want aggregate counts", decoded)
+	}
+}
+
+func TestRunMCPDockerPlanTextDoesNotExecuteServerAndHidesEnvValue(t *testing.T) {
+	tempDir := t.TempDir()
+	markerPath := filepath.Join(tempDir, "server-executed")
+	writeCLIFakeCommand(t, tempDir, "fake-mcp-server", cliFakeCommandBehavior{markerPath: markerPath})
+	t.Setenv("PATH", tempDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    filesystem-readonly:
+      command: fake-mcp-server
+      args:
+        - --root
+        - .
+      enabled: false
+      trust: local
+      capabilities:
+        - read
+      env:
+        passthrough:
+          - MCP_TOKEN
+`)
+	runtimePath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "docker-plan", "--config", configPath, "--server", "filesystem-readonly", "--runtime-config", runtimePath, "--workspace", "."}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	output := stdout.String()
+	for _, want := range []string{"mcp docker-plan: plan only, not executed", "docker run", "deonclaw-runner:latest", "fake-mcp-server", "--root", "-e MCP_TOKEN"} {
+		if !strings.Contains(output, want) {
+			t.Fatalf("stdout = %q, want %q", output, want)
+		}
+	}
+	if strings.Contains(output+stderr.String(), "super-secret-value") {
+		t.Fatalf("output leaked env value: stdout=%q stderr=%q", output, stderr.String())
+	}
+	if _, err := os.Stat(markerPath); !os.IsNotExist(err) {
+		t.Fatalf("fake MCP server was executed or stat failed: %v", err)
+	}
+}
+
+func TestRunMCPDockerPlanJSONValid(t *testing.T) {
+	configPath := writeCLIMCPConfig(t, `mcp:
+  servers:
+    filesystem-readonly:
+      command: mcp-server
+      enabled: false
+      trust: local
+      capabilities:
+        - read
+`)
+	runtimePath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "docker-plan", "--config", configPath, "--server", "filesystem-readonly", "--runtime-config", runtimePath, "--workspace", ".", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !json.Valid(stdout.Bytes()) {
+		t.Fatalf("stdout is not valid JSON: %s", stdout.String())
+	}
+	var decoded struct {
+		Server   string   `json:"server"`
+		PlanOnly bool     `json:"plan_only"`
+		Command  []string `json:"command"`
+		Display  string   `json:"display"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if decoded.Server != "filesystem-readonly" || !decoded.PlanOnly || len(decoded.Command) == 0 || decoded.Command[0] != "docker" || !strings.Contains(decoded.Display, "mcp-server") {
+		t.Fatalf("decoded = %#v, want docker MCP plan", decoded)
+	}
+}
+
 func TestRunRuntimeDockerPlanText(t *testing.T) {
 	configPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
 	var stdout bytes.Buffer

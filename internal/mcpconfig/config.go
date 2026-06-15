@@ -4,10 +4,12 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"regexp"
 	"sort"
 	"strings"
 
+	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	"gopkg.in/yaml.v3"
 )
 
@@ -18,6 +20,14 @@ const (
 	CapabilityRead  = "read"
 	CapabilityWrite = "write"
 	CapabilityExec  = "exec"
+
+	RiskLow    = "low"
+	RiskMedium = "medium"
+	RiskHigh   = "high"
+
+	EnvStateSetMasked = "set_masked"
+	EnvStateMissing   = "missing"
+	commandUnknown    = "unknown"
 )
 
 var safeServerNamePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -64,6 +74,51 @@ type Plan struct {
 	Trust        string   `json:"trust"`
 	Capabilities []string `json:"capabilities,omitempty"`
 	Warnings     []string `json:"warnings,omitempty"`
+}
+
+type DoctorReport struct {
+	Servers []DoctorServer `json:"servers"`
+}
+
+type DoctorServer struct {
+	Name             string           `json:"name"`
+	Enabled          bool             `json:"enabled"`
+	Command          string           `json:"command"`
+	CommandAvailable any              `json:"command_available"`
+	Trust            string           `json:"trust"`
+	Capabilities     []string         `json:"capabilities,omitempty"`
+	RiskLevel        string           `json:"risk_level"`
+	EnvRequirements  []EnvRequirement `json:"env_requirements,omitempty"`
+	Warnings         []string         `json:"warnings,omitempty"`
+}
+
+type EnvRequirement struct {
+	Name  string `json:"name"`
+	State string `json:"state"`
+}
+
+type RiskReport struct {
+	TotalServers           int `json:"total_servers"`
+	EnabledServers         int `json:"enabled_servers"`
+	DisabledServers        int `json:"disabled_servers"`
+	ExternalServers        int `json:"external_servers"`
+	WriteCapabilityServers int `json:"write_capability_servers"`
+	ExecCapabilityServers  int `json:"exec_capability_servers"`
+	MissingEnvCount        int `json:"missing_env_count"`
+	HighRiskCount          int `json:"high_risk_count"`
+	MediumRiskCount        int `json:"medium_risk_count"`
+	LowRiskCount           int `json:"low_risk_count"`
+}
+
+type DockerLaunchPlan struct {
+	Server       string   `json:"server"`
+	PlanOnly     bool     `json:"plan_only"`
+	Command      []string `json:"command"`
+	Display      string   `json:"display"`
+	EnvNames     []string `json:"env_names,omitempty"`
+	Warnings     []string `json:"warnings,omitempty"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Trust        string   `json:"trust"`
 }
 
 func Load(path string) (Config, error) {
@@ -167,6 +222,119 @@ func PlanServer(cfg Config, serverName string) (Plan, error) {
 	}, nil
 }
 
+func Doctor(cfg Config) (DoctorReport, error) {
+	result, err := Validate(cfg)
+	if err != nil {
+		return DoctorReport{}, err
+	}
+	warningsByServer := serverWarnings(result.Warnings, cfg)
+	report := DoctorReport{Servers: make([]DoctorServer, 0, len(cfg.MCP.Servers))}
+	for _, name := range sortedServerNames(cfg.MCP.Servers) {
+		server := cfg.MCP.Servers[name]
+		envRequirements := make([]EnvRequirement, 0, len(server.Env.Passthrough))
+		for _, envName := range server.Env.Passthrough {
+			envRequirements = append(envRequirements, EnvRequirement{
+				Name:  envName,
+				State: envRequirementState(envName),
+			})
+		}
+		warnings := append([]string(nil), warningsByServer[name]...)
+		if riskLevel(server) == RiskHigh {
+			warnings = append(warnings, "server has write or exec capability; keep disabled until MCP execution policy exists")
+		}
+		for _, envRequirement := range envRequirements {
+			if envRequirement.State == EnvStateMissing {
+				warnings = append(warnings, fmt.Sprintf("env %s is missing", envRequirement.Name))
+			}
+		}
+		report.Servers = append(report.Servers, DoctorServer{
+			Name:             name,
+			Enabled:          server.Enabled,
+			Command:          server.Command,
+			CommandAvailable: commandAvailability(server.Command),
+			Trust:            server.Trust,
+			Capabilities:     append([]string(nil), server.Capabilities...),
+			RiskLevel:        riskLevel(server),
+			EnvRequirements:  envRequirements,
+			Warnings:         uniqueStrings(warnings),
+		})
+	}
+	return report, nil
+}
+
+func Risk(cfg Config) (RiskReport, error) {
+	report, err := Doctor(cfg)
+	if err != nil {
+		return RiskReport{}, err
+	}
+	risk := RiskReport{
+		TotalServers: len(report.Servers),
+	}
+	for _, server := range report.Servers {
+		if server.Enabled {
+			risk.EnabledServers++
+		} else {
+			risk.DisabledServers++
+		}
+		if server.Trust == TrustExternal {
+			risk.ExternalServers++
+		}
+		if containsString(server.Capabilities, CapabilityWrite) {
+			risk.WriteCapabilityServers++
+		}
+		if containsString(server.Capabilities, CapabilityExec) {
+			risk.ExecCapabilityServers++
+		}
+		for _, envRequirement := range server.EnvRequirements {
+			if envRequirement.State == EnvStateMissing {
+				risk.MissingEnvCount++
+			}
+		}
+		switch server.RiskLevel {
+		case RiskHigh:
+			risk.HighRiskCount++
+		case RiskMedium:
+			risk.MediumRiskCount++
+		case RiskLow:
+			risk.LowRiskCount++
+		}
+	}
+	return risk, nil
+}
+
+func PlanDockerLaunch(cfg Config, serverName string, runtimeCfg runtimeconfig.Config, workspace string) (DockerLaunchPlan, error) {
+	serverPlan, err := PlanServer(cfg, serverName)
+	if err != nil {
+		return DockerLaunchPlan{}, err
+	}
+	serverCommand := append([]string{serverPlan.Command}, serverPlan.Args...)
+	dockerPlan, err := runtimeconfig.PlanDockerExec(runtimeCfg, workspace, serverCommand)
+	if err != nil {
+		return DockerLaunchPlan{}, err
+	}
+	command, err := addDockerEnvPassthrough(dockerPlan.Command, runtimeCfg.Runtime.Docker.Image, serverPlan.EnvNames)
+	if err != nil {
+		return DockerLaunchPlan{}, err
+	}
+	warnings := append([]string(nil), serverPlan.Warnings...)
+	warnings = append(warnings, dockerPlan.Warnings...)
+	for _, name := range serverPlan.EnvNames {
+		if !envIsSet(name) {
+			warnings = append(warnings, fmt.Sprintf("mcp server %s env passthrough %s is not set; docker-plan is plan only and future execution may fail", serverPlan.Server, name))
+		}
+	}
+	return DockerLaunchPlan{
+		Server:       serverPlan.Server,
+		PlanOnly:     true,
+		Command:      command,
+		Display:      strings.Join(command, " "),
+		EnvNames:     append([]string(nil), serverPlan.EnvNames...),
+		Warnings:     uniqueStrings(warnings),
+		Capabilities: append([]string(nil), serverPlan.Capabilities...),
+		Trust:        serverPlan.Trust,
+	}, nil
+}
+
 func normalize(cfg *Config) {
 	for name, server := range cfg.MCP.Servers {
 		server.Command = strings.TrimSpace(server.Command)
@@ -201,6 +369,119 @@ func invalidServerNameReason(name string) string {
 		return "use only letters, numbers, '.', '_' and '-', starting with a letter or number"
 	}
 	return ""
+}
+
+func serverWarnings(warnings []string, cfg Config) map[string][]string {
+	byServer := make(map[string][]string)
+	for _, warning := range warnings {
+		for name := range cfg.MCP.Servers {
+			if strings.Contains(warning, "mcp.servers."+name) {
+				byServer[name] = append(byServer[name], warning)
+			}
+		}
+	}
+	return byServer
+}
+
+func commandAvailability(command string) any {
+	first := firstCommand(command)
+	if first == "" {
+		return commandUnknown
+	}
+	if _, err := exec.LookPath(first); err != nil {
+		return false
+	}
+	return true
+}
+
+func firstCommand(command string) string {
+	fields := strings.Fields(strings.TrimSpace(command))
+	if len(fields) == 0 {
+		return ""
+	}
+	return fields[0]
+}
+
+func envRequirementState(name string) string {
+	if envIsSet(name) {
+		return EnvStateSetMasked
+	}
+	return EnvStateMissing
+}
+
+func riskLevel(server ServerConfig) string {
+	if containsString(server.Capabilities, CapabilityWrite) || containsString(server.Capabilities, CapabilityExec) {
+		return RiskHigh
+	}
+	if server.Trust == TrustExternal {
+		return RiskMedium
+	}
+	return RiskLow
+}
+
+func containsString(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
+func envIsSet(name string) bool {
+	value, ok := os.LookupEnv(name)
+	return ok && value != ""
+}
+
+func addDockerEnvPassthrough(command []string, image string, envNames []string) ([]string, error) {
+	out := append([]string(nil), command...)
+	if len(envNames) == 0 {
+		return out, nil
+	}
+	imageIndex := -1
+	for i, part := range out {
+		if part == image {
+			imageIndex = i
+			break
+		}
+	}
+	if imageIndex < 0 {
+		return nil, fmt.Errorf("docker plan image %q not found", image)
+	}
+	existing := map[string]bool{}
+	for i := 0; i+1 < len(out); i++ {
+		if out[i] == "-e" {
+			existing[out[i+1]] = true
+		}
+	}
+	var insertion []string
+	for _, name := range envNames {
+		if existing[name] {
+			continue
+		}
+		insertion = append(insertion, "-e", name)
+	}
+	if len(insertion) == 0 {
+		return out, nil
+	}
+	updated := make([]string, 0, len(out)+len(insertion))
+	updated = append(updated, out[:imageIndex]...)
+	updated = append(updated, insertion...)
+	updated = append(updated, out[imageIndex:]...)
+	return updated, nil
+}
+
+func uniqueStrings(values []string) []string {
+	seen := map[string]bool{}
+	var unique []string
+	for _, value := range values {
+		if value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		unique = append(unique, value)
+	}
+	return unique
 }
 
 func invalidEnvPassthroughNameReason(name string) string {

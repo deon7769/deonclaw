@@ -55,6 +55,9 @@ Usage:
   deonctl mcp validate --config <mcp.yaml>
   deonctl mcp list --config <mcp.yaml>
   deonctl mcp plan --config <mcp.yaml> --server <name> [--output-format text|json]
+  deonctl mcp doctor --config <mcp.yaml> [--output-format text|json]
+  deonctl mcp risk --config <mcp.yaml> [--output-format text|json]
+  deonctl mcp docker-plan --config <mcp.yaml> --server <name> --runtime-config <runtime.yaml> --workspace <path> [--output-format text|json]
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -278,6 +281,30 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMCPPlan(opts, stdout, stderr)
+		case "doctor":
+			opts, err := parseMCPReportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPDoctor(opts, stdout, stderr)
+		case "risk":
+			opts, err := parseMCPReportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPRisk(opts, stdout, stderr)
+		case "docker-plan":
+			opts, err := parseMCPDockerPlanOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPDockerPlan(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -879,6 +906,231 @@ func runMCPPlan(opts mcpPlanOptions, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stdout, "warning: %s\n", warning)
 	}
 	return 0
+}
+
+type mcpReportOptions struct {
+	configPath   string
+	outputFormat string
+}
+
+func parseMCPReportOptions(args []string) (mcpReportOptions, error) {
+	opts := mcpReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return mcpReportOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return mcpReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return mcpReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return mcpReportOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return mcpReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMCPDoctor(opts mcpReportOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp doctor failed: %v\n", err)
+		return 1
+	}
+	report, err := mcpconfig.Doctor(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp doctor failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat == "json" {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "mcp doctor output failed: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintln(stdout, "mcp doctor:")
+	for _, server := range report.Servers {
+		fmt.Fprintf(stdout, "server %s: command=%s enabled=%t command_available=%v trust=%s risk=%s capabilities=%s env=%s\n",
+			server.Name,
+			server.Command,
+			server.Enabled,
+			server.CommandAvailable,
+			server.Trust,
+			server.RiskLevel,
+			strings.Join(server.Capabilities, ","),
+			formatMCPEnvRequirements(server.EnvRequirements),
+		)
+	}
+	for _, server := range report.Servers {
+		for _, warning := range server.Warnings {
+			fmt.Fprintf(stdout, "warning: %s: %s\n", server.Name, warning)
+		}
+	}
+	return 0
+}
+
+func runMCPRisk(opts mcpReportOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp risk failed: %v\n", err)
+		return 1
+	}
+	report, err := mcpconfig.Risk(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp risk failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat == "json" {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(report); err != nil {
+			fmt.Fprintf(stderr, "mcp risk output failed: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintln(stdout, "mcp risk:")
+	fmt.Fprintf(stdout, "total_servers: %d\n", report.TotalServers)
+	fmt.Fprintf(stdout, "enabled_servers: %d\n", report.EnabledServers)
+	fmt.Fprintf(stdout, "disabled_servers: %d\n", report.DisabledServers)
+	fmt.Fprintf(stdout, "external_servers: %d\n", report.ExternalServers)
+	fmt.Fprintf(stdout, "write_capability_servers: %d\n", report.WriteCapabilityServers)
+	fmt.Fprintf(stdout, "exec_capability_servers: %d\n", report.ExecCapabilityServers)
+	fmt.Fprintf(stdout, "missing_env_count: %d\n", report.MissingEnvCount)
+	fmt.Fprintf(stdout, "high_risk_count: %d\n", report.HighRiskCount)
+	fmt.Fprintf(stdout, "medium_risk_count: %d\n", report.MediumRiskCount)
+	fmt.Fprintf(stdout, "low_risk_count: %d\n", report.LowRiskCount)
+	return 0
+}
+
+type mcpDockerPlanOptions struct {
+	configPath        string
+	server            string
+	runtimeConfigPath string
+	workspace         string
+	outputFormat      string
+}
+
+func parseMCPDockerPlanOptions(args []string) (mcpDockerPlanOptions, error) {
+	opts := mcpDockerPlanOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return mcpDockerPlanOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--server":
+			if i+1 >= len(args) {
+				return mcpDockerPlanOptions{}, fmt.Errorf("missing value for --server")
+			}
+			opts.server = args[i+1]
+			i++
+		case "--runtime-config":
+			if i+1 >= len(args) {
+				return mcpDockerPlanOptions{}, fmt.Errorf("missing value for --runtime-config")
+			}
+			opts.runtimeConfigPath = args[i+1]
+			i++
+		case "--workspace":
+			if i+1 >= len(args) {
+				return mcpDockerPlanOptions{}, fmt.Errorf("missing value for --workspace")
+			}
+			opts.workspace = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return mcpDockerPlanOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return mcpDockerPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return mcpDockerPlanOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.server == "" {
+		return mcpDockerPlanOptions{}, fmt.Errorf("missing --server")
+	}
+	if opts.runtimeConfigPath == "" {
+		return mcpDockerPlanOptions{}, fmt.Errorf("missing --runtime-config")
+	}
+	if opts.workspace == "" {
+		return mcpDockerPlanOptions{}, fmt.Errorf("missing --workspace")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return mcpDockerPlanOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMCPDockerPlan(opts mcpDockerPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp docker-plan failed: %v\n", err)
+		return 1
+	}
+	runtimeCfg, err := runtimeconfig.Load(opts.runtimeConfigPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp docker-plan failed: %v\n", err)
+		return 1
+	}
+	plan, err := mcpconfig.PlanDockerLaunch(cfg, opts.server, runtimeCfg, opts.workspace)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp docker-plan failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat == "json" {
+		encoder := json.NewEncoder(stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(plan); err != nil {
+			fmt.Fprintf(stderr, "mcp docker-plan output failed: %v\n", err)
+			return 1
+		}
+		return 0
+	}
+	fmt.Fprintln(stdout, "mcp docker-plan: plan only, not executed")
+	fmt.Fprintf(stdout, "server: %s\n", plan.Server)
+	fmt.Fprintf(stdout, "trust: %s\n", plan.Trust)
+	fmt.Fprintf(stdout, "capabilities: %s\n", strings.Join(plan.Capabilities, ","))
+	if len(plan.EnvNames) > 0 {
+		fmt.Fprintf(stdout, "env: %s\n", strings.Join(plan.EnvNames, ","))
+	} else {
+		fmt.Fprintln(stdout, "env:")
+	}
+	for _, warning := range plan.Warnings {
+		fmt.Fprintf(stdout, "warning: %s\n", warning)
+	}
+	fmt.Fprintf(stdout, "command: %s\n", plan.Display)
+	return 0
+}
+
+func formatMCPEnvRequirements(requirements []mcpconfig.EnvRequirement) string {
+	if len(requirements) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(requirements))
+	for _, requirement := range requirements {
+		parts = append(parts, requirement.Name+"="+requirement.State)
+	}
+	return strings.Join(parts, ",")
 }
 
 type memoryProposalNewOptions struct {
