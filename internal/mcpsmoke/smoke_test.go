@@ -37,8 +37,45 @@ func TestFakeServerRespondsInitializeAndToolsList(t *testing.T) {
 	if !strings.Contains(output, `"id":1`) || !strings.Contains(output, `"serverInfo"`) {
 		t.Fatalf("stdout = %q, want initialize response", output)
 	}
-	if !strings.Contains(output, `"id":2`) || !strings.Contains(output, `"tools":[]`) {
-		t.Fatalf("stdout = %q, want empty tools/list response", output)
+	if !strings.Contains(output, `"id":2`) || !strings.Contains(output, FakeEchoToolName) {
+		t.Fatalf("stdout = %q, want fake echo tool in tools/list response", output)
+	}
+}
+
+func TestFakeServerToolCallEchoReturnsPayload(t *testing.T) {
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"deonclaw.fake.echo","arguments":{"text":"hello"}}}`,
+		`{"jsonrpc":"2.0","method":"exit"}`,
+		"",
+	}, "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := RunFakeServer(context.Background(), strings.NewReader(input), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunFakeServer() error = %v, stderr=%q", err, stderr.String())
+	}
+	output := stdout.String()
+	if !strings.Contains(output, `"id":1`) || !strings.Contains(output, `"content"`) || !strings.Contains(output, `"hello"`) {
+		t.Fatalf("stdout = %q, want echo tool response", output)
+	}
+}
+
+func TestFakeServerUnknownToolReturnsJSONRPCError(t *testing.T) {
+	input := strings.Join([]string{
+		`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"other.tool","arguments":{"text":"hello"}}}`,
+		`{"jsonrpc":"2.0","method":"exit"}`,
+		"",
+	}, "\n")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	err := RunFakeServer(context.Background(), strings.NewReader(input), &stdout, &stderr)
+	if err != nil {
+		t.Fatalf("RunFakeServer() error = %v, stderr=%q", err, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"error"`) || !strings.Contains(stdout.String(), `"unknown tool"`) {
+		t.Fatalf("stdout = %q, want unknown tool JSON-RPC error", stdout.String())
 	}
 }
 
@@ -280,6 +317,262 @@ func TestSmokeDockerTimeoutFailsControlled(t *testing.T) {
 	}
 }
 
+func TestToolSmokeLocalGeneratesArtifactsAndCallsToolOnce(t *testing.T) {
+	t.Setenv("DEONCLAW_MCP_SMOKE_HELPER", "1")
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	artifactsDir := filepath.Join(t.TempDir(), "artifacts")
+	cfg := mcpSmokeTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	policy := testToolPolicy()
+
+	result, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:         cfg,
+		Server:         "fake-stdio",
+		Tool:           FakeEchoToolName,
+		Arguments:      []byte(`{"text":"hello"}`),
+		ArtifactsDir:   artifactsDir,
+		Timeout:        3 * time.Second,
+		Runtime:        RuntimeLocal,
+		Policy:         &policy,
+		StartedAtClock: fixedSmokeClock,
+	})
+	if err != nil {
+		t.Fatalf("ToolSmoke() error = %v", err)
+	}
+	if result.Status != StatusSucceeded || result.Tool != FakeEchoToolName || result.ToolCalls != 1 {
+		t.Fatalf("result = %#v, want one successful fake tool call", result)
+	}
+	for _, name := range []string{"mcp-tool-smoke-summary.md", "mcp-tool-transcript.jsonl", "mcp-tool-stdout.log", "mcp-tool-stderr.log", "mcp-tool-result.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+	}
+	transcript := readSmokeArtifact(t, artifactsDir, "mcp-tool-transcript.jsonl")
+	assertTranscriptJSONLValid(t, transcript)
+	assertTranscriptRequestMethodCount(t, transcript, "tools/call", 1)
+	if !strings.Contains(transcript, `"hello"`) {
+		t.Fatalf("transcript = %q, want echo payload", transcript)
+	}
+	allArtifacts := transcript + readSmokeArtifact(t, artifactsDir, "mcp-tool-smoke-summary.md") + readSmokeArtifact(t, artifactsDir, "mcp-tool-result.json")
+	if strings.Contains(allArtifacts, "super-secret-value") {
+		t.Fatalf("artifacts leaked env value: %q", allArtifacts)
+	}
+}
+
+func TestToolSmokeDockerGeneratesArtifacts(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	argsPath := installMCPFakeDocker(t, "fake", "docker fake stderr\n")
+	artifactsDir := filepath.Join(t.TempDir(), "artifacts")
+	cfg := mcpSmokeTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testToolPolicy()
+
+	result, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:         cfg,
+		Server:         "fake-stdio",
+		Tool:           FakeEchoToolName,
+		Arguments:      []byte(`{"text":"hello docker"}`),
+		ArtifactsDir:   artifactsDir,
+		Timeout:        3 * time.Second,
+		Runtime:        RuntimeDocker,
+		RuntimeConfig:  &runtimeCfg,
+		Workspace:      ".",
+		Policy:         &policy,
+		StartedAtClock: fixedSmokeClock,
+	})
+	if err != nil {
+		t.Fatalf("ToolSmoke() error = %v", err)
+	}
+	if result.Status != StatusSucceeded || result.Runtime != RuntimeDocker || result.ToolCalls != 1 {
+		t.Fatalf("result = %#v, want successful docker fake tool smoke", result)
+	}
+	transcript := readSmokeArtifact(t, artifactsDir, "mcp-tool-transcript.jsonl")
+	assertTranscriptJSONLValid(t, transcript)
+	assertTranscriptRequestMethodCount(t, transcript, "tools/call", 1)
+	if !strings.Contains(readSmokeArtifact(t, artifactsDir, "mcp-tool-stderr.log"), "docker fake stderr") {
+		t.Fatalf("stderr artifact missing docker stderr")
+	}
+	args := readDockerArgs(t, argsPath)
+	if !stringSliceContainsSequence(args, []string{"-e", "MCP_TOKEN"}) {
+		t.Fatalf("docker args = %#v, want MCP_TOKEN passthrough by name", args)
+	}
+	imageIndex := indexOf(args, "deonclaw-runner:latest")
+	if imageIndex < 0 {
+		t.Fatalf("docker args = %#v, want runtime image", args)
+	}
+	if !stringSliceContainsSequence(args[imageIndex+1:], []string{os.Args[0], "-test.run=TestMCPFakeServerHelperProcess", "--", "fake"}) {
+		t.Fatalf("docker args tail = %#v, want fake server command after image", args[imageIndex+1:])
+	}
+	joinedArgs := strings.Join(args, " ")
+	if strings.Contains(joinedArgs, "sh -c") || strings.Contains(joinedArgs, "super-secret-value") {
+		t.Fatalf("docker args unsafe or leaked secret: %#v", args)
+	}
+}
+
+func TestToolSmokeRejectsToolNotAllowlisted(t *testing.T) {
+	cfg := mcpSmokeTestConfig(t, nil, "fake")
+	policy := testToolPolicy()
+	policy.MCPToolPolicy.AllowedTools = []string{"other.tool"}
+
+	_, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:       cfg,
+		Server:       "fake-stdio",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not allowlisted") {
+		t.Fatalf("ToolSmoke() error = %v, want tool allowlist rejection", err)
+	}
+}
+
+func TestToolSmokeRejectsServerNotAllowlisted(t *testing.T) {
+	cfg := mcpSmokeTestConfig(t, nil, "fake")
+	policy := testToolPolicy()
+	policy.MCPToolPolicy.AllowedServers = []string{"other-server"}
+
+	_, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:       cfg,
+		Server:       "fake-stdio",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not allowlisted") {
+		t.Fatalf("ToolSmoke() error = %v, want server allowlist rejection", err)
+	}
+}
+
+func TestToolSmokeRejectsWriteExecCapability(t *testing.T) {
+	cfg := mcpSmokeTestConfig(t, nil, "fake")
+	server := cfg.MCP.Servers["fake-stdio"]
+	server.Capabilities = []string{mcpconfig.CapabilityWrite}
+	cfg.MCP.Servers["fake-stdio"] = server
+	policy := testToolPolicy()
+
+	_, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:       cfg,
+		Server:       "fake-stdio",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "write or exec") {
+		t.Fatalf("ToolSmoke() error = %v, want write/exec rejection", err)
+	}
+}
+
+func TestToolSmokeRejectsServerWithoutTestOnly(t *testing.T) {
+	cfg := mcpSmokeTestConfig(t, nil, "fake")
+	server := cfg.MCP.Servers["fake-stdio"]
+	server.TestOnly = false
+	cfg.MCP.Servers["fake-stdio"] = server
+	policy := testToolPolicy()
+
+	_, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:       cfg,
+		Server:       "fake-stdio",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "test_only=true") {
+		t.Fatalf("ToolSmoke() error = %v, want test_only rejection", err)
+	}
+}
+
+func TestToolSmokeRejectsInvalidArguments(t *testing.T) {
+	cfg := mcpSmokeTestConfig(t, nil, "fake")
+	policy := testToolPolicy()
+
+	_, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:       cfg,
+		Server:       "fake-stdio",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "arguments") {
+		t.Fatalf("ToolSmoke() error = %v, want invalid arguments rejection", err)
+	}
+}
+
+func TestToolSmokeRejectsOversizedArguments(t *testing.T) {
+	cfg := mcpSmokeTestConfig(t, nil, "fake")
+	policy := testToolPolicy()
+
+	_, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:       cfg,
+		Server:       "fake-stdio",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"` + strings.Repeat("x", MaxToolArgumentsBytes) + `"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("ToolSmoke() error = %v, want oversized arguments rejection", err)
+	}
+}
+
+func TestToolSmokeTimeoutFailsControlled(t *testing.T) {
+	t.Setenv("DEONCLAW_MCP_SMOKE_HELPER", "1")
+	cfg := mcpSmokeTestConfig(t, nil, "hang")
+	policy := testToolPolicy()
+
+	_, err := ToolSmoke(context.Background(), ToolOptions{
+		Config:       cfg,
+		Server:       "fake-stdio",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      100 * time.Millisecond,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("ToolSmoke() error = %v, want timeout", err)
+	}
+}
+
+func TestLoadExampleToolPolicy(t *testing.T) {
+	policy, err := LoadToolPolicy(filepath.Join("..", "..", "configs", "examples", "mcp-tool-policy.yaml"))
+	if err != nil {
+		t.Fatalf("LoadToolPolicy() error = %v", err)
+	}
+	if err := ValidateToolPolicy(policy); err != nil {
+		t.Fatalf("ValidateToolPolicy() error = %v", err)
+	}
+	if !stringSliceContainsSequence(policy.MCPToolPolicy.AllowedTools, []string{FakeEchoToolName}) {
+		t.Fatalf("allowed tools = %#v, want fake echo", policy.MCPToolPolicy.AllowedTools)
+	}
+}
+
+func TestToolPolicyRejectsWriteExecAllowedCapabilities(t *testing.T) {
+	policy := testToolPolicy()
+	policy.MCPToolPolicy.AllowedCapabilities = []string{mcpconfig.CapabilityRead, mcpconfig.CapabilityExec}
+
+	err := ValidateToolPolicy(policy)
+	if err == nil || !strings.Contains(err.Error(), "not permitted") {
+		t.Fatalf("ValidateToolPolicy() error = %v, want write/exec rejection", err)
+	}
+}
+
 func TestMCPFakeServerHelperProcess(t *testing.T) {
 	if os.Getenv("DEONCLAW_MCP_SMOKE_HELPER") != "1" {
 		return
@@ -385,6 +678,46 @@ func assertTranscriptJSONLValid(t *testing.T, content string) {
 	}
 	if lineCount == 0 {
 		t.Fatalf("transcript had no JSONL lines")
+	}
+}
+
+func assertTranscriptRequestMethodCount(t *testing.T, content string, method string, want int) {
+	t.Helper()
+	scanner := bufio.NewScanner(strings.NewReader(content))
+	count := 0
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		var decoded struct {
+			Direction string `json:"direction"`
+			Method    string `json:"method"`
+		}
+		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+			t.Fatalf("transcript line is not valid JSON: %q error=%v", line, err)
+		}
+		if decoded.Direction == "request" && decoded.Method == method {
+			count++
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		t.Fatalf("scan transcript error = %v", err)
+	}
+	if count != want {
+		t.Fatalf("request method %s count = %d, want %d in %q", method, count, want, content)
+	}
+}
+
+func testToolPolicy() ToolPolicy {
+	return ToolPolicy{
+		MCPToolPolicy: MCPToolPolicy{
+			AllowTestOnly:       true,
+			MaxToolCalls:        1,
+			AllowedServers:      []string{"fake-stdio"},
+			AllowedTools:        []string{FakeEchoToolName},
+			AllowedCapabilities: []string{mcpconfig.CapabilityRead},
+		},
 	}
 }
 

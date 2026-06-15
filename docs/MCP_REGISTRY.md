@@ -1,8 +1,8 @@
 # MCP Registry
 
-Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime.
+Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold.
 
-The registry records MCP server definitions so DeonClaw can validate and inspect them before any future execution layer exists. It does not start real MCP servers, call real MCP tools, connect MCP to Codex or OpenCode, or participate in fallback execution.
+The registry records MCP server definitions so DeonClaw can validate and inspect them before any future execution layer exists. It does not start real MCP servers, call real external MCP tools, connect MCP to Codex or OpenCode, or participate in fallback execution.
 
 ## Config
 
@@ -56,6 +56,12 @@ Safe fake smoke example:
 
 ~~~bash
 configs/examples/mcp-fake.yaml
+~~~
+
+Safe fake tool policy example:
+
+~~~bash
+configs/examples/mcp-tool-policy.yaml
 ~~~
 
 ## Secrets
@@ -186,7 +192,7 @@ The smoke starts the configured fake/test process, either locally or through the
 - `shutdown`
 - `exit`
 
-It never calls a tool. `tools/list` may return an empty list. Environment values are never printed.
+It never calls a tool. The built-in fake server lists `deonclaw.fake.echo`, but plain `mcp smoke` stops after `tools/list`. Environment values are never printed.
 
 For `--runtime docker`, DeonClaw loads and validates `runtime.yaml`, uses the Docker runtime planner, appends the fake/test server command and args after the Docker image, and executes Docker directly without `sh -c`. Runtime mount and env policy are preserved. MCP server env passthrough is name-only; if a required MCP env passthrough name is absent from the DeonClaw process environment, smoke fails before Docker starts.
 
@@ -211,22 +217,89 @@ The transcript is JSONL. Each line records:
 - `timestamp`
 - `payload`
 
+Run a controlled fake/read-only tool smoke:
+
+~~~bash
+deonctl mcp tool-smoke \
+  --config configs/examples/mcp-fake.yaml \
+  --server fake-stdio \
+  --tool deonclaw.fake.echo \
+  --arguments '{"text":"hello"}' \
+  --artifacts-dir artifacts/mcp-tool-smoke \
+  --policy configs/examples/mcp-tool-policy.yaml
+~~~
+
+Run the same fake tool smoke through Docker:
+
+~~~bash
+deonctl mcp tool-smoke \
+  --config configs/examples/mcp-fake.yaml \
+  --server fake-stdio \
+  --tool deonclaw.fake.echo \
+  --arguments '{"text":"hello"}' \
+  --artifacts-dir artifacts/mcp-tool-smoke \
+  --runtime docker \
+  --runtime-config configs/examples/runtime.yaml \
+  --workspace . \
+  --policy configs/examples/mcp-tool-policy.yaml
+~~~
+
+`mcp tool-smoke` is still not real MCP tool execution. It accepts only fake/test stdio registry entries that satisfy the same smoke restrictions, then performs:
+
+- `initialize`
+- `tools/list`
+- exactly one `tools/call`
+- `shutdown`
+- `exit`
+
+The only built-in fake tool is:
+
+- `deonclaw.fake.echo`: read-only test echo for MCP smoke only
+
+The fake tool has a minimal object input schema with required `text`. The response content echoes the provided text. Unknown tools return a JSON-RPC error.
+
+Tool policy scaffold:
+
+~~~yaml
+mcp_tool_policy:
+  allow_test_only: true
+  max_tool_calls: 1
+  allowed_servers:
+    - fake-stdio
+  allowed_tools:
+    - deonclaw.fake.echo
+  allowed_capabilities:
+    - read
+~~~
+
+If `--policy` is omitted, DeonClaw uses a safe default policy: test-only servers, one tool call, read-only capability, and the fake echo tool only. Explicit policy files must keep `allow_test_only: true`, `max_tool_calls >= 1`, and must not allow `write` or `exec`.
+
+Arguments must be valid JSON objects and are capped at 64 KiB. Environment values are never printed. Docker tool-smoke follows the same Docker runtime path as smoke: direct `docker` execution, no `sh -c`, server env name-only passthrough, and failure before Docker starts when required MCP env passthrough is missing.
+
+Tool-smoke artifacts:
+
+- `mcp-tool-smoke-summary.md`
+- `mcp-tool-transcript.jsonl`
+- `mcp-tool-stdout.log`
+- `mcp-tool-stderr.log`
+- `mcp-tool-result.json`
+
 Run the built-in fake server directly:
 
 ~~~bash
 deonctl mcp fake-server
 ~~~
 
-`mcp fake-server` is a minimal JSON-RPC stdio server for smoke tests only. It responds to `initialize`, `tools/list`, `shutdown`, and `exit`.
+`mcp fake-server` is a minimal JSON-RPC stdio server for smoke tests only. It responds to `initialize`, `tools/list`, `tools/call` for `deonclaw.fake.echo`, `shutdown`, and `exit`.
 
 ## Boundary
 
-Docker runtime comes before MCP execution. The current registry is a static validation, inventory, diagnostic, risk, planning, and fake/test-smoke layer only.
+Docker runtime comes before MCP execution. The current registry is a static validation, inventory, diagnostic, risk, planning, fake/test-smoke, and fake read-only tool-smoke layer only.
 
-Not implemented in Task 21.0, Task 21.1, Task 21.2, or Task 21.2.1:
+Not implemented in Task 21.0, Task 21.1, Task 21.2, Task 21.2.1, or Task 21.3:
 
 - real MCP server execution
-- real MCP tool calls
+- real external MCP tool calls
 - MCP integration with Codex or OpenCode
 - fallback execution
 - LanceDB or memory index

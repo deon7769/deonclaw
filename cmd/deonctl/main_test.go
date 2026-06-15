@@ -1080,6 +1080,171 @@ func TestRunMCPSmokeDockerTimeoutFailsControlled(t *testing.T) {
 	}
 }
 
+func TestRunMCPToolSmokeLocalGeneratesArtifacts(t *testing.T) {
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER", "1")
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	tempDir := t.TempDir()
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", true, []string{"read"})
+	policyPath := writeCLIMCPToolPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "tool-smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--tool", "deonclaw.fake.echo",
+		"--arguments", `{"text":"hello"}`,
+		"--artifacts-dir", artifactsDir,
+		"--timeout-seconds", "3",
+		"--policy", policyPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "fake/test tool smoke only") || !strings.Contains(stdout.String(), "status: succeeded") {
+		t.Fatalf("stdout = %q, want tool smoke summary", stdout.String())
+	}
+	for _, name := range []string{"mcp-tool-smoke-summary.md", "mcp-tool-transcript.jsonl", "mcp-tool-stdout.log", "mcp-tool-stderr.log", "mcp-tool-result.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+	}
+	transcript := assertCLITranscriptJSONLValid(t, filepath.Join(artifactsDir, "mcp-tool-transcript.jsonl"))
+	assertCLITranscriptRequestMethodCount(t, transcript, "tools/call", 1)
+	if !strings.Contains(transcript, `"hello"`) {
+		t.Fatalf("transcript = %q, want echo payload", transcript)
+	}
+	for _, name := range []string{"mcp-tool-smoke-summary.md", "mcp-tool-transcript.jsonl", "mcp-tool-stdout.log", "mcp-tool-stderr.log", "mcp-tool-result.json"} {
+		assertCLIFileNotContains(t, filepath.Join(artifactsDir, name), "super-secret-value")
+	}
+}
+
+func TestRunMCPToolSmokeDockerWithFakeDockerGeneratesArtifacts(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	argsPath := installCLIMCPFakeDocker(t, "fake", "docker fake stderr\n")
+	tempDir := t.TempDir()
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", true, []string{"read"})
+	policyPath := writeCLIMCPToolPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"})
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "tool-smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--tool", "deonclaw.fake.echo",
+		"--arguments", `{"text":"hello docker"}`,
+		"--artifacts-dir", artifactsDir,
+		"--timeout-seconds", "3",
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+		"--policy", policyPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "fake/test tool smoke only") || !strings.Contains(stdout.String(), "runtime: docker") {
+		t.Fatalf("stdout = %q, want docker tool smoke summary", stdout.String())
+	}
+	transcript := assertCLITranscriptJSONLValid(t, filepath.Join(artifactsDir, "mcp-tool-transcript.jsonl"))
+	assertCLITranscriptRequestMethodCount(t, transcript, "tools/call", 1)
+	assertCLIFileContains(t, filepath.Join(artifactsDir, "mcp-tool-stderr.log"), "docker fake stderr")
+
+	args := readCLIDockerArgs(t, argsPath)
+	if !stringSliceContainsSequence(args, []string{"-e", "MCP_TOKEN"}) {
+		t.Fatalf("docker args = %#v, want MCP_TOKEN passthrough by name", args)
+	}
+	imageIndex := indexOfString(args, "deonclaw-runner:latest")
+	if imageIndex < 0 {
+		t.Fatalf("docker args = %#v, want image", args)
+	}
+	if !stringSliceContainsSequence(args[imageIndex+1:], []string{os.Args[0], "-test.run=TestCLIMCPFakeServerHelperProcess", "--", "fake"}) {
+		t.Fatalf("docker args tail = %#v, want fake server command after image", args[imageIndex+1:])
+	}
+	joinedArgs := strings.Join(args, " ")
+	if strings.Contains(joinedArgs, "sh -c") || strings.Contains(joinedArgs, "super-secret-value") {
+		t.Fatalf("docker args unsafe or leaked secret: %#v", args)
+	}
+	for _, name := range []string{"mcp-tool-smoke-summary.md", "mcp-tool-transcript.jsonl", "mcp-tool-stdout.log", "mcp-tool-stderr.log", "mcp-tool-result.json"} {
+		assertCLIFileNotContains(t, filepath.Join(artifactsDir, name), "super-secret-value")
+	}
+}
+
+func TestRunMCPToolSmokeRejectsToolNotAllowlisted(t *testing.T) {
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER", "1")
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", true, []string{"read"})
+	policyPath := writeCLIMCPToolPolicy(t, []string{"fake-stdio"}, []string{"other.tool"}, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "tool-smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--tool", "deonclaw.fake.echo",
+		"--arguments", `{"text":"hello"}`,
+		"--artifacts-dir", t.TempDir(),
+		"--policy", policyPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not allowlisted") {
+		t.Fatalf("stderr = %q, want allowlist rejection", stderr.String())
+	}
+}
+
+func TestRunMCPToolSmokeRejectsServerNotAllowlisted(t *testing.T) {
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER", "1")
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", true, []string{"read"})
+	policyPath := writeCLIMCPToolPolicy(t, []string{"other-server"}, []string{"deonclaw.fake.echo"}, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "tool-smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--tool", "deonclaw.fake.echo",
+		"--arguments", `{"text":"hello"}`,
+		"--artifacts-dir", t.TempDir(),
+		"--policy", policyPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "not allowlisted") {
+		t.Fatalf("stderr = %q, want server allowlist rejection", stderr.String())
+	}
+}
+
+func TestRunMCPToolSmokeRejectsInvalidArguments(t *testing.T) {
+	t.Setenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER", "1")
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", true, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "tool-smoke",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--tool", "deonclaw.fake.echo",
+		"--arguments", `{"text":`,
+		"--artifacts-dir", t.TempDir(),
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "arguments") {
+		t.Fatalf("stderr = %q, want invalid arguments rejection", stderr.String())
+	}
+}
+
 func TestCLIMCPFakeServerHelperProcess(t *testing.T) {
 	if os.Getenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER") != "1" {
 		return
@@ -6718,6 +6883,31 @@ func writeCLIMCPFakeConfig(t *testing.T, env []string, mode string, testOnly boo
 	return writeCLIMCPConfig(t, builder.String())
 }
 
+func writeCLIMCPToolPolicy(t *testing.T, servers []string, tools []string, capabilities []string) string {
+	t.Helper()
+	var builder strings.Builder
+	builder.WriteString("mcp_tool_policy:\n")
+	builder.WriteString("  allow_test_only: true\n")
+	builder.WriteString("  max_tool_calls: 1\n")
+	builder.WriteString("  allowed_servers:\n")
+	for _, server := range servers {
+		builder.WriteString("    - " + strconv.Quote(server) + "\n")
+	}
+	builder.WriteString("  allowed_tools:\n")
+	for _, tool := range tools {
+		builder.WriteString("    - " + strconv.Quote(tool) + "\n")
+	}
+	builder.WriteString("  allowed_capabilities:\n")
+	for _, capability := range capabilities {
+		builder.WriteString("    - " + strconv.Quote(capability) + "\n")
+	}
+	path := filepath.Join(t.TempDir(), "mcp-tool-policy.yaml")
+	if err := os.WriteFile(path, []byte(builder.String()), 0o600); err != nil {
+		t.Fatalf("WriteFile(tool policy) error = %v", err)
+	}
+	return path
+}
+
 func assertCLITranscriptJSONLValid(t *testing.T, path string) string {
 	t.Helper()
 	data, err := os.ReadFile(path)
@@ -6744,6 +6934,30 @@ func assertCLITranscriptJSONLValid(t *testing.T, path string) string {
 		}
 	}
 	return string(data)
+}
+
+func assertCLITranscriptRequestMethodCount(t *testing.T, content string, method string, want int) {
+	t.Helper()
+	lines := strings.Split(strings.TrimSpace(content), "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		var decoded struct {
+			Direction string `json:"direction"`
+			Method    string `json:"method"`
+		}
+		if err := json.Unmarshal([]byte(line), &decoded); err != nil {
+			t.Fatalf("transcript line is not valid JSON: %q error=%v", line, err)
+		}
+		if decoded.Direction == "request" && decoded.Method == method {
+			count++
+		}
+	}
+	if count != want {
+		t.Fatalf("request method %s count = %d, want %d in %q", method, count, want, content)
+	}
 }
 
 func readCLIDockerArgs(t *testing.T, path string) []string {

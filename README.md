@@ -85,6 +85,7 @@ Implemented:
 - OpenCode Docker worker runtime supported experimental
 - OpenCode Docker Z.AI smoke runtime
 - MCP registry config validation, list and plan foundation
+- MCP fake/test smoke and fake read-only tool-smoke
 - fallback policy schema validation only; no fallback execution or retries
 - memory proposal/lint/dry-run/approval/preflight/backup/materialize/apply/restore workflow
 - real memory apply for create/append/update/archive
@@ -94,7 +95,7 @@ Not implemented yet:
 
 - real fallback execution
 - Codex Docker worker runtime
-- MCP execution/manager
+- MCP execution/manager for real external MCP servers/tools
 - memory index/LanceDB
 - UI/dashboard
 

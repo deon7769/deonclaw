@@ -2,7 +2,7 @@
 
 Task 20.0 adds the Docker runtime foundation.
 
-DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, run a fake/test MCP smoke, and run an OpenCode Docker worker runtime path marked `supported_experimental`. Codex still runs through the existing local worker runtime.
+DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, run fake/test MCP smoke and fake read-only tool-smoke, and run an OpenCode Docker worker runtime path marked `supported_experimental`. Codex still runs through the existing local worker runtime.
 
 The OpenCode Docker Z.AI smoke has been validated, but production use still requires caution because the current OpenCode Docker prompt contract uses a prompt argument placeholder. The recorded command keeps `<prompt>`, but the real process args receive the raw prompt. A future wrapper may move this to stdin or another hardened transport.
 
@@ -108,6 +108,23 @@ deonctl mcp smoke \
 ~~~
 
 This executes Docker only for a registry entry marked `test_only: true`, `protocol: stdio`, `enabled: false`, and read-only capability. It sends `initialize`, `tools/list`, `shutdown`, and `exit`; it does not call MCP tools and does not start real MCP servers. Server env passthrough must be present before Docker starts, and values are never written to artifacts.
+
+MCP fake read-only tool smoke through Docker:
+
+~~~bash
+deonctl mcp tool-smoke \
+  --config configs/examples/mcp-fake.yaml \
+  --server fake-stdio \
+  --tool deonclaw.fake.echo \
+  --arguments '{"text":"hello"}' \
+  --artifacts-dir artifacts/mcp-tool-smoke \
+  --runtime docker \
+  --runtime-config configs/examples/runtime.yaml \
+  --workspace . \
+  --policy configs/examples/mcp-tool-policy.yaml
+~~~
+
+This uses the same Docker planner and execution path, still only for `test_only` fake stdio servers. It calls exactly one allowlisted fake read-only tool and does not enable real external MCP tool execution.
 
 Prompt delivery is worker-specific. A Docker worker plan must declare one of:
 
@@ -240,7 +257,7 @@ Current state:
 - Docker validation command execution implemented
 - controlled env passthrough by allowlisted name implemented
 - Docker worker execution scaffold implemented for fake/test workers
-- MCP Docker fake/test smoke implemented for `test_only` stdio servers
+- MCP Docker fake/test smoke and fake read-only tool-smoke implemented for `test_only` stdio servers
 - OpenCode Docker worker runtime supported experimental with prompt placeholder masking
 - OpenCode Docker Z.AI smoke validated with `configs/examples/runtime-opencode-zai-smoke.yaml`
 - Codex worker execution remains local

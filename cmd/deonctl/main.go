@@ -61,6 +61,7 @@ Usage:
   deonctl mcp docker-plan --config <mcp.yaml> --server <name> --runtime-config <runtime.yaml> --workspace <path> [--output-format text|json]
   deonctl mcp fake-server
   deonctl mcp smoke --config <mcp.yaml> --server <name> --artifacts-dir <dir> [--timeout-seconds 5] [--runtime local|docker] [--runtime-config <runtime.yaml>] [--workspace <path>]
+  deonctl mcp tool-smoke --config <mcp.yaml> --server <name> --tool <name> --arguments <json> --artifacts-dir <dir> [--timeout-seconds 5] [--runtime local|docker] [--runtime-config <runtime.yaml>] [--workspace <path>] [--policy <policy.yaml>]
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -322,6 +323,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runMCPSmoke(opts, stdout, stderr)
+		case "tool-smoke":
+			opts, err := parseMCPToolSmokeOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runMCPToolSmoke(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -1168,6 +1177,19 @@ type mcpSmokeOptions struct {
 	workspace         string
 }
 
+type mcpToolSmokeOptions struct {
+	configPath        string
+	server            string
+	tool              string
+	arguments         string
+	artifactsDir      string
+	timeoutSeconds    int
+	runtime           string
+	runtimeConfigPath string
+	workspace         string
+	policyPath        string
+}
+
 func parseMCPSmokeOptions(args []string) (mcpSmokeOptions, error) {
 	opts := mcpSmokeOptions{timeoutSeconds: 5, runtime: mcpsmoke.RuntimeLocal}
 	for i := 0; i < len(args); i++ {
@@ -1239,6 +1261,101 @@ func parseMCPSmokeOptions(args []string) (mcpSmokeOptions, error) {
 	return opts, nil
 }
 
+func parseMCPToolSmokeOptions(args []string) (mcpToolSmokeOptions, error) {
+	opts := mcpToolSmokeOptions{timeoutSeconds: 5, runtime: mcpsmoke.RuntimeLocal}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--server":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --server")
+			}
+			opts.server = args[i+1]
+			i++
+		case "--tool":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --tool")
+			}
+			opts.tool = args[i+1]
+			i++
+		case "--arguments":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --arguments")
+			}
+			opts.arguments = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		case "--timeout-seconds":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --timeout-seconds")
+			}
+			value, err := strconv.Atoi(args[i+1])
+			if err != nil || value <= 0 {
+				return mcpToolSmokeOptions{}, fmt.Errorf("--timeout-seconds must be a positive integer")
+			}
+			opts.timeoutSeconds = value
+			i++
+		case "--runtime":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --runtime")
+			}
+			opts.runtime = args[i+1]
+			i++
+		case "--runtime-config":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --runtime-config")
+			}
+			opts.runtimeConfigPath = args[i+1]
+			i++
+		case "--workspace":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --workspace")
+			}
+			opts.workspace = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return mcpToolSmokeOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		default:
+			return mcpToolSmokeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return mcpToolSmokeOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.server == "" {
+		return mcpToolSmokeOptions{}, fmt.Errorf("missing --server")
+	}
+	if opts.tool == "" {
+		return mcpToolSmokeOptions{}, fmt.Errorf("missing --tool")
+	}
+	if opts.arguments == "" {
+		return mcpToolSmokeOptions{}, fmt.Errorf("missing --arguments")
+	}
+	if opts.artifactsDir == "" {
+		return mcpToolSmokeOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	switch opts.runtime {
+	case mcpsmoke.RuntimeLocal, mcpsmoke.RuntimeDocker:
+	default:
+		return mcpToolSmokeOptions{}, fmt.Errorf("unsupported runtime %q", opts.runtime)
+	}
+	return opts, nil
+}
+
 func runMCPSmoke(opts mcpSmokeOptions, stdout io.Writer, stderr io.Writer) int {
 	cfg, err := mcpconfig.Load(opts.configPath)
 	if err != nil {
@@ -1269,6 +1386,56 @@ func runMCPSmoke(opts mcpSmokeOptions, stdout io.Writer, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "mcp smoke: fake/test smoke only")
 	fmt.Fprintf(stdout, "server: %s\n", result.Server)
+	fmt.Fprintf(stdout, "status: %s\n", result.Status)
+	fmt.Fprintf(stdout, "runtime: %s\n", result.Runtime)
+	fmt.Fprintf(stdout, "artifacts_dir: %s\n", result.ArtifactsDir)
+	fmt.Fprintf(stdout, "transcript: %s\n", result.TranscriptPath)
+	return 0
+}
+
+func runMCPToolSmoke(opts mcpToolSmokeOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := mcpconfig.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp tool-smoke failed: %v\n", err)
+		return 1
+	}
+	var runtimeCfg *runtimeconfig.Config
+	if opts.runtime == mcpsmoke.RuntimeDocker && opts.runtimeConfigPath != "" {
+		loaded, err := runtimeconfig.Load(opts.runtimeConfigPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "mcp tool-smoke failed: %v\n", err)
+			return 1
+		}
+		runtimeCfg = &loaded
+	}
+	var policy *mcpsmoke.ToolPolicy
+	if opts.policyPath != "" {
+		loaded, err := mcpsmoke.LoadToolPolicy(opts.policyPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "mcp tool-smoke failed: %v\n", err)
+			return 1
+		}
+		policy = &loaded
+	}
+	result, err := mcpsmoke.ToolSmoke(context.Background(), mcpsmoke.ToolOptions{
+		Config:        cfg,
+		Server:        opts.server,
+		Tool:          opts.tool,
+		Arguments:     []byte(opts.arguments),
+		ArtifactsDir:  opts.artifactsDir,
+		Timeout:       time.Duration(opts.timeoutSeconds) * time.Second,
+		Runtime:       opts.runtime,
+		RuntimeConfig: runtimeCfg,
+		Workspace:     opts.workspace,
+		Policy:        policy,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp tool-smoke failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "mcp tool-smoke: fake/test tool smoke only")
+	fmt.Fprintf(stdout, "server: %s\n", result.Server)
+	fmt.Fprintf(stdout, "tool: %s\n", result.Tool)
 	fmt.Fprintf(stdout, "status: %s\n", result.Status)
 	fmt.Fprintf(stdout, "runtime: %s\n", result.Runtime)
 	fmt.Fprintf(stdout, "artifacts_dir: %s\n", result.ArtifactsDir)
