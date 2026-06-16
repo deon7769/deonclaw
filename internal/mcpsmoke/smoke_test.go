@@ -573,6 +573,217 @@ func TestToolPolicyRejectsWriteExecAllowedCapabilities(t *testing.T) {
 	}
 }
 
+func TestDiscoverRejectsServerWithoutPolicy(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+
+	_, err := Discover(context.Background(), DiscoveryOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--policy") {
+		t.Fatalf("Discover() error = %v, want missing policy rejection", err)
+	}
+}
+
+func TestDiscoverRejectsWriteExecCapability(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	server := cfg.MCP.Servers["filesystem-readonly"]
+	server.Capabilities = []string{mcpconfig.CapabilityExec}
+	cfg.MCP.Servers["filesystem-readonly"] = server
+	policy := testDiscoveryPolicy()
+
+	_, err := Discover(context.Background(), DiscoveryOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "write or exec") {
+		t.Fatalf("Discover() error = %v, want write/exec rejection", err)
+	}
+}
+
+func TestDiscoverRejectsEnabledServer(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	server := cfg.MCP.Servers["filesystem-readonly"]
+	server.Enabled = true
+	cfg.MCP.Servers["filesystem-readonly"] = server
+	policy := testDiscoveryPolicy()
+
+	_, err := Discover(context.Background(), DiscoveryOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "enabled=false") {
+		t.Fatalf("Discover() error = %v, want enabled=false rejection", err)
+	}
+}
+
+func TestDiscoverRejectsRealServerLocalWhenDockerRequired(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	policy := testDiscoveryPolicy()
+
+	_, err := Discover(context.Background(), DiscoveryOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--runtime docker") {
+		t.Fatalf("Discover() error = %v, want docker-required rejection", err)
+	}
+}
+
+func TestDiscoverDockerWithFakeRealReadonlyServerGeneratesArtifacts(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	argsPath := installMCPFakeDocker(t, "fake", "docker fake stderr\n")
+	artifactsDir := filepath.Join(t.TempDir(), "artifacts")
+	cfg := mcpDiscoveryTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testDiscoveryPolicy()
+
+	result, err := Discover(context.Background(), DiscoveryOptions{
+		Config:         cfg,
+		Server:         "filesystem-readonly",
+		ArtifactsDir:   artifactsDir,
+		Timeout:        3 * time.Second,
+		Runtime:        RuntimeDocker,
+		RuntimeConfig:  &runtimeCfg,
+		Workspace:      ".",
+		Policy:         &policy,
+		StartedAtClock: fixedSmokeClock,
+	})
+	if err != nil {
+		t.Fatalf("Discover() error = %v", err)
+	}
+	if result.Status != StatusSucceeded || result.Runtime != RuntimeDocker || result.TestOnly || result.ToolCalls != 0 || result.ToolCount != 1 {
+		t.Fatalf("result = %#v, want successful real read-only discovery without tool calls", result)
+	}
+	for _, name := range []string{"mcp-discovery-summary.md", "mcp-discovery-transcript.jsonl", "mcp-discovery-stdout.log", "mcp-discovery-stderr.log", "mcp-discovery-result.json", "mcp-tools-list.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+	}
+	transcript := readSmokeArtifact(t, artifactsDir, "mcp-discovery-transcript.jsonl")
+	assertTranscriptJSONLValid(t, transcript)
+	assertTranscriptRequestMethodCount(t, transcript, "initialize", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "tools/list", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "shutdown", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "exit", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "tools/call", 0)
+
+	var toolsList ToolsListArtifact
+	if err := json.Unmarshal([]byte(readSmokeArtifact(t, artifactsDir, "mcp-tools-list.json")), &toolsList); err != nil {
+		t.Fatalf("mcp-tools-list.json invalid: %v", err)
+	}
+	if toolsList.ToolCount != 1 || !stringSliceContainsSequence(toolsList.ToolNames, []string{FakeEchoToolName}) || len(toolsList.Tools) != 1 || len(toolsList.Tools[0].InputSchema) == 0 {
+		t.Fatalf("tools list = %#v, want fake echo metadata with schema", toolsList)
+	}
+
+	args := readDockerArgs(t, argsPath)
+	if !stringSliceContainsSequence(args, []string{"-e", "MCP_TOKEN"}) {
+		t.Fatalf("docker args = %#v, want MCP_TOKEN passthrough by name", args)
+	}
+	imageIndex := indexOf(args, "deonclaw-runner:latest")
+	if imageIndex < 0 {
+		t.Fatalf("docker args = %#v, want runtime image", args)
+	}
+	if !stringSliceContainsSequence(args[imageIndex+1:], []string{os.Args[0], "-test.run=TestMCPFakeServerHelperProcess", "--", "fake"}) {
+		t.Fatalf("docker args tail = %#v, want server command after image", args[imageIndex+1:])
+	}
+	joinedArgs := strings.Join(args, " ")
+	if strings.Contains(joinedArgs, "sh -c") {
+		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+	allArtifacts := transcript +
+		readSmokeArtifact(t, artifactsDir, "mcp-discovery-summary.md") +
+		readSmokeArtifact(t, artifactsDir, "mcp-discovery-result.json") +
+		readSmokeArtifact(t, artifactsDir, "mcp-tools-list.json") +
+		readSmokeArtifact(t, artifactsDir, "mcp-discovery-stdout.log") +
+		readSmokeArtifact(t, artifactsDir, "mcp-discovery-stderr.log")
+	if strings.Contains(allArtifacts, "super-secret-value") || strings.Contains(joinedArgs, "super-secret-value") {
+		t.Fatalf("secret leaked; args=%#v artifacts=%q", args, allArtifacts)
+	}
+}
+
+func TestDiscoverDockerMissingServerEnvFailsBeforeDocker(t *testing.T) {
+	unsetEnvForSmokeTest(t, "MCP_TOKEN")
+	argsPath := installMCPFakeDocker(t, "fake", "")
+	cfg := mcpDiscoveryTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testDiscoveryPolicy()
+
+	_, err := Discover(context.Background(), DiscoveryOptions{
+		Config:        cfg,
+		Server:        "filesystem-readonly",
+		ArtifactsDir:  t.TempDir(),
+		Timeout:       time.Second,
+		Runtime:       RuntimeDocker,
+		RuntimeConfig: &runtimeCfg,
+		Workspace:     ".",
+		Policy:        &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "MCP_TOKEN") {
+		t.Fatalf("Discover() error = %v, want missing MCP_TOKEN", err)
+	}
+	assertSmokeFileEmptyOrMissing(t, argsPath)
+}
+
+func TestDiscoverDockerTimeoutFailsControlled(t *testing.T) {
+	_ = installMCPFakeDocker(t, "hang", "")
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testDiscoveryPolicy()
+
+	_, err := Discover(context.Background(), DiscoveryOptions{
+		Config:        cfg,
+		Server:        "filesystem-readonly",
+		ArtifactsDir:  t.TempDir(),
+		Timeout:       100 * time.Millisecond,
+		Runtime:       RuntimeDocker,
+		RuntimeConfig: &runtimeCfg,
+		Workspace:     ".",
+		Policy:        &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("Discover() error = %v, want timeout", err)
+	}
+}
+
+func TestLoadExampleDiscoveryPolicy(t *testing.T) {
+	policy, err := LoadDiscoveryPolicy(filepath.Join("..", "..", "configs", "examples", "mcp-discovery-policy.yaml"))
+	if err != nil {
+		t.Fatalf("LoadDiscoveryPolicy() error = %v", err)
+	}
+	if err := ValidateDiscoveryPolicy(policy); err != nil {
+		t.Fatalf("ValidateDiscoveryPolicy() error = %v", err)
+	}
+	if !stringSliceContainsSequence(policy.MCPDiscoveryPolicy.AllowedServers, []string{"filesystem-readonly"}) {
+		t.Fatalf("allowed servers = %#v, want filesystem-readonly", policy.MCPDiscoveryPolicy.AllowedServers)
+	}
+}
+
+func TestDiscoveryPolicyRejectsWriteExecAllowedCapabilities(t *testing.T) {
+	policy := testDiscoveryPolicy()
+	policy.MCPDiscoveryPolicy.AllowedCapabilities = []string{mcpconfig.CapabilityRead, mcpconfig.CapabilityWrite}
+
+	err := ValidateDiscoveryPolicy(policy)
+	if err == nil || !strings.Contains(err.Error(), "not permitted") {
+		t.Fatalf("ValidateDiscoveryPolicy() error = %v, want write/exec rejection", err)
+	}
+}
+
 func TestMCPFakeServerHelperProcess(t *testing.T) {
 	if os.Getenv("DEONCLAW_MCP_SMOKE_HELPER") != "1" {
 		return
@@ -605,6 +816,26 @@ func mcpSmokeTestConfig(t *testing.T, env []string, mode string) mcpconfig.Confi
 					Args:         []string{"-test.run=TestMCPFakeServerHelperProcess", "--", mode},
 					Enabled:      false,
 					TestOnly:     true,
+					Protocol:     mcpconfig.ProtocolStdio,
+					Trust:        mcpconfig.TrustLocal,
+					Capabilities: []string{mcpconfig.CapabilityRead},
+					Env:          mcpconfig.ServerEnv{Passthrough: env},
+				},
+			},
+		},
+	}
+}
+
+func mcpDiscoveryTestConfig(t *testing.T, env []string, mode string) mcpconfig.Config {
+	t.Helper()
+	return mcpconfig.Config{
+		MCP: mcpconfig.MCPConfig{
+			Servers: map[string]mcpconfig.ServerConfig{
+				"filesystem-readonly": {
+					Command:      os.Args[0],
+					Args:         []string{"-test.run=TestMCPFakeServerHelperProcess", "--", mode},
+					Enabled:      false,
+					TestOnly:     false,
 					Protocol:     mcpconfig.ProtocolStdio,
 					Trust:        mcpconfig.TrustLocal,
 					Capabilities: []string{mcpconfig.CapabilityRead},
@@ -717,6 +948,18 @@ func testToolPolicy() ToolPolicy {
 			AllowedServers:      []string{"fake-stdio"},
 			AllowedTools:        []string{FakeEchoToolName},
 			AllowedCapabilities: []string{mcpconfig.CapabilityRead},
+		},
+	}
+}
+
+func testDiscoveryPolicy() DiscoveryPolicy {
+	return DiscoveryPolicy{
+		MCPDiscoveryPolicy: MCPDiscoveryPolicy{
+			AllowRealReadonly:    true,
+			MaxToolCalls:         0,
+			AllowedServers:       []string{"filesystem-readonly"},
+			AllowedCapabilities:  []string{mcpconfig.CapabilityRead},
+			RequireDockerForReal: true,
 		},
 	}
 }

@@ -1,8 +1,8 @@
 # MCP Registry
 
-Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold.
+Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold. Task 21.4 adds a real read-only discovery smoke that lists tools only under a discovery policy.
 
-The registry records MCP server definitions so DeonClaw can validate and inspect them before any future execution layer exists. It does not start real MCP servers, call real external MCP tools, connect MCP to Codex or OpenCode, or participate in fallback execution.
+The registry records MCP server definitions so DeonClaw can validate and inspect them before any future execution layer exists. It can run fake/test smoke, fake/test tool smoke, and a policy-gated real read-only discovery smoke. It does not call real external MCP tools, connect MCP to Codex or OpenCode, or participate in fallback execution.
 
 ## Config
 
@@ -62,6 +62,12 @@ Safe fake tool policy example:
 
 ~~~bash
 configs/examples/mcp-tool-policy.yaml
+~~~
+
+Safe discovery policy example:
+
+~~~bash
+configs/examples/mcp-discovery-policy.yaml
 ~~~
 
 ## Secrets
@@ -284,6 +290,64 @@ Tool-smoke artifacts:
 - `mcp-tool-stderr.log`
 - `mcp-tool-result.json`
 
+Run a real read-only discovery smoke:
+
+~~~bash
+deonctl mcp discover \
+  --config configs/examples/mcp.yaml \
+  --server filesystem-readonly \
+  --artifacts-dir artifacts/mcp-discovery \
+  --runtime docker \
+  --runtime-config configs/examples/runtime.yaml \
+  --workspace . \
+  --policy configs/examples/mcp-discovery-policy.yaml
+~~~
+
+`mcp discover` is a read-only discovery path. It may start a real MCP server only to perform:
+
+- `initialize`
+- `tools/list`
+- `shutdown`
+- `exit`
+
+It never sends `tools/call`. Real tool calls remain unimplemented. Worker integration with Codex/OpenCode also remains unimplemented.
+
+For a non-test server (`test_only: false`), discovery requires:
+
+- discovery policy with `allow_real_readonly: true`
+- `max_tool_calls: 0`
+- server allowlisted in `allowed_servers`
+- read-only capabilities only
+- `enabled: false`
+- `protocol: stdio`
+- `--runtime docker` when `require_docker_for_real: true`
+
+Servers with `write` or `exec` capability are always refused. Required MCP env passthrough must be present before execution starts. Docker discovery uses the same validated Docker runtime planner, appends the server command after the image, passes env names only, preserves mount policy, avoids secret mounts, and does not use `sh -c`.
+
+Discovery policy scaffold:
+
+~~~yaml
+mcp_discovery_policy:
+  allow_real_readonly: true
+  max_tool_calls: 0
+  allowed_servers:
+    - filesystem-readonly
+  allowed_capabilities:
+    - read
+  require_docker_for_real: true
+~~~
+
+Discovery artifacts:
+
+- `mcp-discovery-summary.md`
+- `mcp-discovery-transcript.jsonl`
+- `mcp-discovery-stdout.log`
+- `mcp-discovery-stderr.log`
+- `mcp-discovery-result.json`
+- `mcp-tools-list.json`
+
+`mcp-tools-list.json` contains metadata from the `tools/list` response, including `tool_count`, tool names, tool descriptions, and input schema metadata with a schema size cap/truncation marker for large schemas.
+
 Run the built-in fake server directly:
 
 ~~~bash
@@ -294,11 +358,16 @@ deonctl mcp fake-server
 
 ## Boundary
 
-Docker runtime comes before MCP execution. The current registry is a static validation, inventory, diagnostic, risk, planning, fake/test-smoke, and fake read-only tool-smoke layer only.
+Docker runtime comes before MCP execution. The current registry is a static validation, inventory, diagnostic, risk, planning, fake/test smoke, fake read-only tool-smoke, and real read-only discovery layer only.
 
-Not implemented in Task 21.0, Task 21.1, Task 21.2, Task 21.2.1, or Task 21.3:
+Implemented smoke boundaries:
 
-- real MCP server execution
+- `mcp smoke`: fake initialize/tools-list only
+- `mcp tool-smoke`: fake read-only allowlisted `tools/call`
+- `mcp discover`: real read-only `tools/list` only
+
+Not implemented through Task 21.4:
+
 - real external MCP tool calls
 - MCP integration with Codex or OpenCode
 - fallback execution

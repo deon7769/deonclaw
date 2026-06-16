@@ -1,0 +1,8 @@
+mcp_discovery_policy:
+  allow_real_readonly: true
+  max_tool_calls: 0
+  allowed_servers:
+    - filesystem-readonly
+  allowed_capabilities:
+    - read
+  require_docker_for_real: true

@@ -28,6 +28,7 @@ const (
 
 	FakeEchoToolName      = "deonclaw.fake.echo"
 	MaxToolArgumentsBytes = 64 * 1024
+	MaxToolSchemaBytes    = 16 * 1024
 )
 
 type Options struct {
@@ -100,6 +101,42 @@ type ToolResult struct {
 	Warnings       []string        `json:"warnings,omitempty"`
 }
 
+type DiscoveryOptions struct {
+	Config         mcpconfig.Config
+	Server         string
+	ArtifactsDir   string
+	Timeout        time.Duration
+	Runtime        string
+	RuntimeConfig  *runtimeconfig.Config
+	Workspace      string
+	Policy         *DiscoveryPolicy
+	StartedAtClock func() time.Time
+}
+
+type DiscoveryResult struct {
+	Server         string   `json:"server"`
+	Status         string   `json:"status"`
+	Runtime        string   `json:"runtime"`
+	TestOnly       bool     `json:"test_only"`
+	Protocol       string   `json:"protocol"`
+	ToolCalls      int      `json:"tool_calls"`
+	Command        []string `json:"command"`
+	ArtifactsDir   string   `json:"artifacts_dir"`
+	SummaryPath    string   `json:"summary_path"`
+	TranscriptPath string   `json:"transcript_path"`
+	StdoutPath     string   `json:"stdout_path"`
+	StderrPath     string   `json:"stderr_path"`
+	ResultPath     string   `json:"result_path"`
+	ToolsListPath  string   `json:"tools_list_path"`
+	ToolCount      int      `json:"tool_count"`
+	ToolNames      []string `json:"tool_names,omitempty"`
+	StartedAt      string   `json:"started_at"`
+	FinishedAt     string   `json:"finished_at"`
+	DurationMS     int64    `json:"duration_ms"`
+	Error          string   `json:"error,omitempty"`
+	Warnings       []string `json:"warnings,omitempty"`
+}
+
 type ToolPolicy struct {
 	MCPToolPolicy MCPToolPolicy `yaml:"mcp_tool_policy" json:"mcp_tool_policy"`
 }
@@ -110,6 +147,40 @@ type MCPToolPolicy struct {
 	AllowedServers      []string `yaml:"allowed_servers,omitempty" json:"allowed_servers,omitempty"`
 	AllowedTools        []string `yaml:"allowed_tools,omitempty" json:"allowed_tools,omitempty"`
 	AllowedCapabilities []string `yaml:"allowed_capabilities,omitempty" json:"allowed_capabilities,omitempty"`
+}
+
+type DiscoveryPolicy struct {
+	MCPDiscoveryPolicy MCPDiscoveryPolicy `yaml:"mcp_discovery_policy" json:"mcp_discovery_policy"`
+}
+
+type MCPDiscoveryPolicy struct {
+	AllowRealReadonly    bool     `yaml:"allow_real_readonly" json:"allow_real_readonly"`
+	MaxToolCalls         int      `yaml:"max_tool_calls" json:"max_tool_calls"`
+	AllowedServers       []string `yaml:"allowed_servers,omitempty" json:"allowed_servers,omitempty"`
+	AllowedCapabilities  []string `yaml:"allowed_capabilities,omitempty" json:"allowed_capabilities,omitempty"`
+	RequireDockerForReal bool     `yaml:"require_docker_for_real" json:"require_docker_for_real"`
+}
+
+type ToolsListArtifact struct {
+	ToolCount  int                  `json:"tool_count"`
+	ToolNames  []string             `json:"tool_names"`
+	Tools      []DiscoveredToolMeta `json:"tools"`
+	Truncation ToolsListTruncation  `json:"truncation"`
+}
+
+type DiscoveredToolMeta struct {
+	Name                     string          `json:"name"`
+	Description              string          `json:"description,omitempty"`
+	InputSchema              json.RawMessage `json:"input_schema,omitempty"`
+	InputSchemaPreview       string          `json:"input_schema_preview,omitempty"`
+	InputSchemaTruncated     bool            `json:"input_schema_truncated,omitempty"`
+	InputSchemaOriginalBytes int             `json:"input_schema_original_bytes,omitempty"`
+	InputSchemaStoredBytes   int             `json:"input_schema_stored_bytes,omitempty"`
+}
+
+type ToolsListTruncation struct {
+	SchemaLimitBytes int  `json:"schema_limit_bytes"`
+	Applied          bool `json:"applied"`
 }
 
 type transcriptEntry struct {
@@ -415,6 +486,99 @@ func ToolSmoke(ctx context.Context, opts ToolOptions) (ToolResult, error) {
 	return result, nil
 }
 
+func Discover(ctx context.Context, opts DiscoveryOptions) (DiscoveryResult, error) {
+	startWall := time.Now()
+	clock := opts.StartedAtClock
+	if clock == nil {
+		clock = func() time.Time { return time.Now().UTC() }
+	}
+	startedAt := clock().UTC()
+	result := DiscoveryResult{
+		Server:       strings.TrimSpace(opts.Server),
+		Runtime:      normalizeRuntime(opts.Runtime),
+		Protocol:     mcpconfig.ProtocolStdio,
+		ArtifactsDir: opts.ArtifactsDir,
+		StartedAt:    startedAt.Format(time.RFC3339Nano),
+	}
+	if opts.Timeout <= 0 {
+		return result, errors.New("mcp discover timeout must be greater than zero")
+	}
+	if opts.ArtifactsDir == "" {
+		return result, errors.New("mcp discover requires artifacts dir")
+	}
+	if opts.Policy == nil {
+		return result, errors.New("mcp discover requires --policy")
+	}
+	policy := *opts.Policy
+	if err := ValidateDiscoveryPolicy(policy); err != nil {
+		return result, err
+	}
+	if _, err := mcpconfig.Validate(opts.Config); err != nil {
+		return result, err
+	}
+	server, err := selectSmokeServer(opts.Config, opts.Server)
+	if err != nil {
+		return result, err
+	}
+	if err := validateDiscoveryServer(policy, result.Server, server, result.Runtime); err != nil {
+		return result, err
+	}
+	if err := validateServerEnvPassthrough(server); err != nil {
+		return result, err
+	}
+	secretValues := discoveryRedactionValues(server, opts.RuntimeConfig)
+	result.Protocol = server.Protocol
+	result.TestOnly = server.TestOnly
+	serverCommand := append([]string{server.Command}, server.Args...)
+	runCommand := append([]string(nil), serverCommand...)
+	switch result.Runtime {
+	case RuntimeLocal:
+	case RuntimeDocker:
+		if opts.RuntimeConfig == nil {
+			return result, errors.New("mcp discover runtime docker requires --runtime-config")
+		}
+		plan, err := mcpconfig.PlanDockerLaunch(opts.Config, opts.Server, *opts.RuntimeConfig, opts.Workspace)
+		if err != nil {
+			return result, err
+		}
+		runCommand = append([]string(nil), plan.Command...)
+		result.Warnings = append(result.Warnings, plan.Warnings...)
+	default:
+		return result, fmt.Errorf("mcp discover runtime %q is not supported", result.Runtime)
+	}
+	result.Command = append([]string(nil), runCommand...)
+
+	if err := os.MkdirAll(opts.ArtifactsDir, 0o755); err != nil {
+		return result, fmt.Errorf("create mcp discover artifacts dir: %w", err)
+	}
+	result.SummaryPath = filepath.Join(opts.ArtifactsDir, "mcp-discovery-summary.md")
+	result.TranscriptPath = filepath.Join(opts.ArtifactsDir, "mcp-discovery-transcript.jsonl")
+	result.StdoutPath = filepath.Join(opts.ArtifactsDir, "mcp-discovery-stdout.log")
+	result.StderrPath = filepath.Join(opts.ArtifactsDir, "mcp-discovery-stderr.log")
+	result.ResultPath = filepath.Join(opts.ArtifactsDir, "mcp-discovery-result.json")
+	result.ToolsListPath = filepath.Join(opts.ArtifactsDir, "mcp-tools-list.json")
+
+	transcript, rawStdout, rawStderr, toolsListRaw, runErr := runCommandDiscovery(ctx, runCommand, opts.Timeout, clock)
+	toolsListArtifact := buildToolsListArtifact(toolsListRaw)
+	result.ToolCount = toolsListArtifact.ToolCount
+	result.ToolNames = append([]string(nil), toolsListArtifact.ToolNames...)
+	finishedAt := clock().UTC()
+	result.FinishedAt = finishedAt.Format(time.RFC3339Nano)
+	result.DurationMS = time.Since(startWall).Milliseconds()
+	if runErr != nil {
+		result.Status = StatusFailed
+		result.Error = runErr.Error()
+		_ = writeDiscoveryArtifacts(result, toolsListArtifact, transcript, rawStdout, rawStderr, secretValues)
+		return result, runErr
+	}
+	result.Status = StatusSucceeded
+	result.ToolCalls = 0
+	if err := writeDiscoveryArtifacts(result, toolsListArtifact, transcript, rawStdout, rawStderr, secretValues); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
 func LoadToolPolicy(path string) (ToolPolicy, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -470,6 +634,46 @@ func ValidateToolPolicy(policy ToolPolicy) error {
 	return errors.Join(errs...)
 }
 
+func LoadDiscoveryPolicy(path string) (DiscoveryPolicy, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return DiscoveryPolicy{}, fmt.Errorf("read MCP discovery policy %q: %w", path, err)
+	}
+	var policy DiscoveryPolicy
+	if err := yaml.Unmarshal(data, &policy); err != nil {
+		return DiscoveryPolicy{}, fmt.Errorf("parse MCP discovery policy yaml: %w", err)
+	}
+	normalizeDiscoveryPolicy(&policy)
+	return policy, nil
+}
+
+func ValidateDiscoveryPolicy(policy DiscoveryPolicy) error {
+	var errs []error
+	p := policy.MCPDiscoveryPolicy
+	if !p.AllowRealReadonly {
+		errs = append(errs, errors.New("mcp_discovery_policy.allow_real_readonly must be true"))
+	}
+	if p.MaxToolCalls != 0 {
+		errs = append(errs, errors.New("mcp_discovery_policy.max_tool_calls must be 0"))
+	}
+	if len(p.AllowedServers) == 0 {
+		errs = append(errs, errors.New("mcp_discovery_policy.allowed_servers must not be empty"))
+	}
+	if len(p.AllowedCapabilities) == 0 {
+		errs = append(errs, errors.New("mcp_discovery_policy.allowed_capabilities must not be empty"))
+	}
+	for _, capability := range p.AllowedCapabilities {
+		switch capability {
+		case mcpconfig.CapabilityRead:
+		case mcpconfig.CapabilityWrite, mcpconfig.CapabilityExec:
+			errs = append(errs, fmt.Errorf("mcp_discovery_policy.allowed_capabilities %q is not permitted", capability))
+		default:
+			errs = append(errs, fmt.Errorf("mcp_discovery_policy.allowed_capabilities %q is not supported", capability))
+		}
+	}
+	return errors.Join(errs...)
+}
+
 func selectSmokeServer(cfg mcpconfig.Config, name string) (mcpconfig.ServerConfig, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -494,6 +698,43 @@ func validateSmokeServer(server mcpconfig.ServerConfig) error {
 	}
 	if hasCapability(server.Capabilities, mcpconfig.CapabilityWrite) || hasCapability(server.Capabilities, mcpconfig.CapabilityExec) {
 		return errors.New("mcp smoke refuses servers with write or exec capability")
+	}
+	return nil
+}
+
+func validateDiscoveryServer(policy DiscoveryPolicy, serverName string, server mcpconfig.ServerConfig, runtime string) error {
+	p := policy.MCPDiscoveryPolicy
+	if server.Enabled {
+		return errors.New("mcp discover requires enabled=false")
+	}
+	if server.Protocol != mcpconfig.ProtocolStdio {
+		return fmt.Errorf("mcp discover requires protocol=%s", mcpconfig.ProtocolStdio)
+	}
+	if len(p.AllowedServers) > 0 && !hasString(p.AllowedServers, serverName) {
+		return fmt.Errorf("mcp discover server %q is not allowlisted", serverName)
+	}
+	if len(server.Capabilities) == 0 {
+		return errors.New("mcp discover requires read capability")
+	}
+	for _, capability := range server.Capabilities {
+		switch capability {
+		case mcpconfig.CapabilityRead:
+			if len(p.AllowedCapabilities) > 0 && !hasString(p.AllowedCapabilities, capability) {
+				return fmt.Errorf("mcp discover capability %q is not allowlisted", capability)
+			}
+		case mcpconfig.CapabilityWrite, mcpconfig.CapabilityExec:
+			return errors.New("mcp discover refuses servers with write or exec capability")
+		default:
+			return fmt.Errorf("mcp discover capability %q is not supported", capability)
+		}
+	}
+	if !server.TestOnly {
+		if !p.AllowRealReadonly {
+			return errors.New("mcp discover real read-only servers require allow_real_readonly=true")
+		}
+		if p.RequireDockerForReal && runtime != RuntimeDocker {
+			return errors.New("mcp discover requires --runtime docker for real read-only servers")
+		}
 	}
 	return nil
 }
@@ -647,6 +888,137 @@ func runCommandSmoke(ctx context.Context, command []string, timeout time.Duratio
 		return transcript, stdout.Bytes(), stderr.String(), fmt.Errorf("mcp smoke process exited non-zero: %w", waitErr)
 	}
 	return transcript, stdout.Bytes(), stderr.String(), nil
+}
+
+func runCommandDiscovery(ctx context.Context, command []string, timeout time.Duration, clock func() time.Time) ([]transcriptEntry, []byte, string, json.RawMessage, error) {
+	smokeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+		return nil, nil, "", nil, errors.New("mcp discover command must not be empty")
+	}
+	cmd := exec.CommandContext(smokeCtx, command[0], command[1:]...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, "", nil, err
+	}
+
+	var stderr bytes.Buffer
+	stderrDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&stderr, stderrPipe)
+		close(stderrDone)
+	}()
+
+	scanner := bufio.NewScanner(stdoutPipe)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+	writer := bufio.NewWriter(stdin)
+	var stdout bytes.Buffer
+	var transcript []transcriptEntry
+
+	send := func(id int, method string, params any) (rpcMessage, error) {
+		request := rpcMessage{
+			JSONRPC: "2.0",
+			ID:      mustRawJSON(id),
+			Method:  method,
+			Params:  mustRawJSON(params),
+		}
+		payload := mustRawJSON(request)
+		transcript = append(transcript, transcriptEntry{
+			Direction: "request",
+			Method:    method,
+			ID:        request.ID,
+			Timestamp: clock().UTC().Format(time.RFC3339Nano),
+			Payload:   payload,
+		})
+		if _, err := writer.Write(append(payload, '\n')); err != nil {
+			return rpcMessage{}, err
+		}
+		if err := writer.Flush(); err != nil {
+			return rpcMessage{}, err
+		}
+		if !scanner.Scan() {
+			if smokeCtx.Err() != nil {
+				return rpcMessage{}, fmt.Errorf("mcp discover timed out waiting for %s response", method)
+			}
+			if err := scanner.Err(); err != nil {
+				return rpcMessage{}, err
+			}
+			return rpcMessage{}, fmt.Errorf("mcp discover server closed stdout before %s response", method)
+		}
+		line := append([]byte(nil), bytes.TrimSpace(scanner.Bytes())...)
+		stdout.Write(line)
+		stdout.WriteByte('\n')
+		var response rpcMessage
+		if err := json.Unmarshal(line, &response); err != nil {
+			return rpcMessage{}, fmt.Errorf("parse %s response: %w", method, err)
+		}
+		transcript = append(transcript, transcriptEntry{
+			Direction: "response",
+			Method:    method,
+			ID:        response.ID,
+			Timestamp: clock().UTC().Format(time.RFC3339Nano),
+			Payload:   append(json.RawMessage(nil), line...),
+		})
+		if response.Error != nil {
+			return response, fmt.Errorf("mcp discover %s failed: %s", method, response.Error.Message)
+		}
+		return response, nil
+	}
+
+	var toolsList json.RawMessage
+	runErr := func() error {
+		if _, err := send(1, "initialize", map[string]any{}); err != nil {
+			return err
+		}
+		response, err := send(2, "tools/list", map[string]any{})
+		if err != nil {
+			return err
+		}
+		toolsList = append(json.RawMessage(nil), response.Result...)
+		if _, err := send(3, "shutdown", map[string]any{}); err != nil {
+			return err
+		}
+		return nil
+	}()
+
+	exitNotification := rpcMessage{JSONRPC: "2.0", Method: "exit"}
+	exitPayload := mustRawJSON(exitNotification)
+	transcript = append(transcript, transcriptEntry{
+		Direction: "request",
+		Method:    "exit",
+		Timestamp: clock().UTC().Format(time.RFC3339Nano),
+		Payload:   exitPayload,
+	})
+	if _, err := writer.Write(append(exitPayload, '\n')); err != nil && runErr == nil {
+		runErr = err
+	}
+	if err := writer.Flush(); err != nil && runErr == nil {
+		runErr = err
+	}
+	_ = stdin.Close()
+	waitErr := cmd.Wait()
+	<-stderrDone
+	if smokeCtx.Err() != nil {
+		return transcript, stdout.Bytes(), stderr.String(), toolsList, errors.New("mcp discover timed out")
+	}
+	if runErr != nil {
+		return transcript, stdout.Bytes(), stderr.String(), toolsList, runErr
+	}
+	if waitErr != nil {
+		return transcript, stdout.Bytes(), stderr.String(), toolsList, fmt.Errorf("mcp discover process exited non-zero: %w", waitErr)
+	}
+	return transcript, stdout.Bytes(), stderr.String(), toolsList, nil
 }
 
 func runCommandToolSmoke(ctx context.Context, command []string, timeout time.Duration, clock func() time.Time, tool string, arguments json.RawMessage) ([]transcriptEntry, []byte, string, json.RawMessage, error) {
@@ -838,6 +1210,37 @@ func writeToolArtifacts(result ToolResult, transcript []transcriptEntry, stdout 
 	return os.WriteFile(result.ResultPath, append(data, '\n'), 0o600)
 }
 
+func writeDiscoveryArtifacts(result DiscoveryResult, toolsList ToolsListArtifact, transcript []transcriptEntry, stdout []byte, stderr string, redactions []string) error {
+	if err := os.WriteFile(result.SummaryPath, redactBytes(discoverySummary(result), redactions), 0o600); err != nil {
+		return err
+	}
+	transcriptJSONL, err := transcriptJSONL(transcript)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.TranscriptPath, redactBytes(transcriptJSONL, redactions), 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.StdoutPath, redactBytes(stdout, redactions), 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.StderrPath, redactBytes([]byte(stderr), redactions), 0o600); err != nil {
+		return err
+	}
+	resultData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.ResultPath, append(redactBytes(resultData, redactions), '\n'), 0o600); err != nil {
+		return err
+	}
+	toolsData, err := json.MarshalIndent(toolsList, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(result.ToolsListPath, append(redactBytes(toolsData, redactions), '\n'), 0o600)
+}
+
 func smokeSummary(result Result) []byte {
 	var builder strings.Builder
 	builder.WriteString("# MCP Smoke\n\n")
@@ -863,6 +1266,25 @@ func toolSummary(result ToolResult) []byte {
 	builder.WriteString("Protocol: " + result.Protocol + "\n")
 	builder.WriteString("Tool: " + result.Tool + "\n")
 	builder.WriteString(fmt.Sprintf("Tool calls: %d\n", result.ToolCalls))
+	if result.Error != "" {
+		builder.WriteString("Error: " + result.Error + "\n")
+	}
+	return []byte(builder.String())
+}
+
+func discoverySummary(result DiscoveryResult) []byte {
+	var builder strings.Builder
+	builder.WriteString("# MCP Discovery Smoke\n\n")
+	builder.WriteString("Mode: read-only discovery only\n")
+	builder.WriteString("Server: " + result.Server + "\n")
+	builder.WriteString("Status: " + result.Status + "\n")
+	builder.WriteString("Runtime: " + result.Runtime + "\n")
+	builder.WriteString("Protocol: " + result.Protocol + "\n")
+	builder.WriteString(fmt.Sprintf("Tool calls: %d\n", result.ToolCalls))
+	builder.WriteString(fmt.Sprintf("Tool count: %d\n", result.ToolCount))
+	if len(result.ToolNames) > 0 {
+		builder.WriteString("Tools: " + strings.Join(result.ToolNames, ",") + "\n")
+	}
 	if result.Error != "" {
 		builder.WriteString("Error: " + result.Error + "\n")
 	}
@@ -906,6 +1328,49 @@ func validateToolArguments(raw []byte) (json.RawMessage, error) {
 	return append(json.RawMessage(nil), raw...), nil
 }
 
+func buildToolsListArtifact(raw json.RawMessage) ToolsListArtifact {
+	artifact := ToolsListArtifact{
+		ToolNames:  []string{},
+		Tools:      []DiscoveredToolMeta{},
+		Truncation: ToolsListTruncation{SchemaLimitBytes: MaxToolSchemaBytes},
+	}
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return artifact
+	}
+	var decoded struct {
+		Tools []struct {
+			Name        string          `json:"name"`
+			Description string          `json:"description"`
+			InputSchema json.RawMessage `json:"inputSchema"`
+		} `json:"tools"`
+	}
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return artifact
+	}
+	artifact.ToolCount = len(decoded.Tools)
+	for _, tool := range decoded.Tools {
+		meta := DiscoveredToolMeta{
+			Name:        tool.Name,
+			Description: tool.Description,
+		}
+		if len(tool.InputSchema) > 0 {
+			meta.InputSchemaOriginalBytes = len(tool.InputSchema)
+			if len(tool.InputSchema) > MaxToolSchemaBytes {
+				meta.InputSchemaPreview = string(tool.InputSchema[:MaxToolSchemaBytes])
+				meta.InputSchemaStoredBytes = MaxToolSchemaBytes
+				meta.InputSchemaTruncated = true
+				artifact.Truncation.Applied = true
+			} else {
+				meta.InputSchema = append(json.RawMessage(nil), tool.InputSchema...)
+				meta.InputSchemaStoredBytes = len(tool.InputSchema)
+			}
+		}
+		artifact.ToolNames = append(artifact.ToolNames, tool.Name)
+		artifact.Tools = append(artifact.Tools, meta)
+	}
+	return artifact
+}
+
 func toolListed(result json.RawMessage, name string) bool {
 	var decoded struct {
 		Tools []struct {
@@ -936,6 +1401,16 @@ func normalizeToolPolicy(policy *ToolPolicy) {
 	}
 }
 
+func normalizeDiscoveryPolicy(policy *DiscoveryPolicy) {
+	p := &policy.MCPDiscoveryPolicy
+	for i := range p.AllowedServers {
+		p.AllowedServers[i] = strings.TrimSpace(p.AllowedServers[i])
+	}
+	for i := range p.AllowedCapabilities {
+		p.AllowedCapabilities[i] = strings.TrimSpace(p.AllowedCapabilities[i])
+	}
+}
+
 func hasCapability(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
@@ -957,6 +1432,39 @@ func hasString(values []string, want string) bool {
 func envIsSet(name string) bool {
 	value, ok := os.LookupEnv(name)
 	return ok && value != ""
+}
+
+func discoveryRedactionValues(server mcpconfig.ServerConfig, runtimeCfg *runtimeconfig.Config) []string {
+	var names []string
+	names = append(names, server.Env.Passthrough...)
+	if runtimeCfg != nil {
+		names = append(names, runtimeCfg.Runtime.Docker.Env.Passthrough...)
+	}
+	values := make([]string, 0, len(names))
+	seen := map[string]bool{}
+	for _, name := range names {
+		value, ok := os.LookupEnv(name)
+		if !ok || value == "" || seen[value] {
+			continue
+		}
+		seen[value] = true
+		values = append(values, value)
+	}
+	return values
+}
+
+func redactBytes(data []byte, values []string) []byte {
+	if len(data) == 0 || len(values) == 0 {
+		return data
+	}
+	redacted := append([]byte(nil), data...)
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		redacted = bytes.ReplaceAll(redacted, []byte(value), []byte("[redacted]"))
+	}
+	return redacted
 }
 
 func mustRawJSON(value any) json.RawMessage {

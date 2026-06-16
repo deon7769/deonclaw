@@ -6,6 +6,8 @@ mcp:
         - "@modelcontextprotocol/server-filesystem"
         - "."
       enabled: false
+      test_only: false
+      protocol: stdio
       trust: local
       capabilities:
         - read

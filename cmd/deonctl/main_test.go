@@ -1245,6 +1245,89 @@ func TestRunMCPToolSmokeRejectsInvalidArguments(t *testing.T) {
 	}
 }
 
+func TestRunMCPDiscoverRequiresPolicy(t *testing.T) {
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"read"})
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{"mcp", "discover", "--config", configPath, "--server", "fake-stdio", "--artifacts-dir", t.TempDir()}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("run() exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --policy") {
+		t.Fatalf("stderr = %q, want missing policy rejection", stderr.String())
+	}
+}
+
+func TestRunMCPDiscoverDockerWithFakeDockerGeneratesArtifacts(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	argsPath := installCLIMCPFakeDocker(t, "fake", "docker fake stderr\n")
+	tempDir := t.TempDir()
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", false, []string{"read"})
+	policyPath := writeCLIMCPDiscoveryPolicy(t, []string{"fake-stdio"}, []string{"read"}, true)
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "discover",
+		"--config", configPath,
+		"--server", "fake-stdio",
+		"--artifacts-dir", artifactsDir,
+		"--timeout-seconds", "3",
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+		"--policy", policyPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "read-only tools/list only") || !strings.Contains(stdout.String(), "runtime: docker") || !strings.Contains(stdout.String(), "tool_count: 1") {
+		t.Fatalf("stdout = %q, want discovery summary", stdout.String())
+	}
+	for _, name := range []string{"mcp-discovery-summary.md", "mcp-discovery-transcript.jsonl", "mcp-discovery-stdout.log", "mcp-discovery-stderr.log", "mcp-discovery-result.json", "mcp-tools-list.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+	}
+	transcript := assertCLITranscriptJSONLValid(t, filepath.Join(artifactsDir, "mcp-discovery-transcript.jsonl"))
+	assertCLITranscriptRequestMethodCount(t, transcript, "initialize", 1)
+	assertCLITranscriptRequestMethodCount(t, transcript, "tools/list", 1)
+	assertCLITranscriptRequestMethodCount(t, transcript, "shutdown", 1)
+	assertCLITranscriptRequestMethodCount(t, transcript, "exit", 1)
+	assertCLITranscriptRequestMethodCount(t, transcript, "tools/call", 0)
+	var toolsList struct {
+		ToolCount int      `json:"tool_count"`
+		ToolNames []string `json:"tool_names"`
+	}
+	if err := json.Unmarshal(mustReadCLIFile(t, filepath.Join(artifactsDir, "mcp-tools-list.json")), &toolsList); err != nil {
+		t.Fatalf("mcp-tools-list.json invalid: %v", err)
+	}
+	if toolsList.ToolCount != 1 || !stringSliceContainsSequence(toolsList.ToolNames, []string{"deonclaw.fake.echo"}) {
+		t.Fatalf("tools list = %#v, want fake echo metadata", toolsList)
+	}
+	args := readCLIDockerArgs(t, argsPath)
+	if !stringSliceContainsSequence(args, []string{"-e", "MCP_TOKEN"}) {
+		t.Fatalf("docker args = %#v, want MCP_TOKEN passthrough by name", args)
+	}
+	imageIndex := indexOfString(args, "deonclaw-runner:latest")
+	if imageIndex < 0 {
+		t.Fatalf("docker args = %#v, want image", args)
+	}
+	if !stringSliceContainsSequence(args[imageIndex+1:], []string{os.Args[0], "-test.run=TestCLIMCPFakeServerHelperProcess", "--", "fake"}) {
+		t.Fatalf("docker args tail = %#v, want fake server command after image", args[imageIndex+1:])
+	}
+	joinedArgs := strings.Join(args, " ")
+	if strings.Contains(joinedArgs, "sh -c") || strings.Contains(joinedArgs, "super-secret-value") {
+		t.Fatalf("docker args unsafe or leaked secret: %#v", args)
+	}
+	for _, name := range []string{"mcp-discovery-summary.md", "mcp-discovery-transcript.jsonl", "mcp-discovery-stdout.log", "mcp-discovery-stderr.log", "mcp-discovery-result.json", "mcp-tools-list.json"} {
+		assertCLIFileNotContains(t, filepath.Join(artifactsDir, name), "super-secret-value")
+	}
+}
+
 func TestCLIMCPFakeServerHelperProcess(t *testing.T) {
 	if os.Getenv("DEONCLAW_CLI_MCP_FAKE_SERVER_HELPER") != "1" {
 		return
@@ -6904,6 +6987,28 @@ func writeCLIMCPToolPolicy(t *testing.T, servers []string, tools []string, capab
 	path := filepath.Join(t.TempDir(), "mcp-tool-policy.yaml")
 	if err := os.WriteFile(path, []byte(builder.String()), 0o600); err != nil {
 		t.Fatalf("WriteFile(tool policy) error = %v", err)
+	}
+	return path
+}
+
+func writeCLIMCPDiscoveryPolicy(t *testing.T, servers []string, capabilities []string, requireDocker bool) string {
+	t.Helper()
+	var builder strings.Builder
+	builder.WriteString("mcp_discovery_policy:\n")
+	builder.WriteString("  allow_real_readonly: true\n")
+	builder.WriteString("  max_tool_calls: 0\n")
+	builder.WriteString("  allowed_servers:\n")
+	for _, server := range servers {
+		builder.WriteString("    - " + strconv.Quote(server) + "\n")
+	}
+	builder.WriteString("  allowed_capabilities:\n")
+	for _, capability := range capabilities {
+		builder.WriteString("    - " + strconv.Quote(capability) + "\n")
+	}
+	builder.WriteString(fmt.Sprintf("  require_docker_for_real: %t\n", requireDocker))
+	path := filepath.Join(t.TempDir(), "mcp-discovery-policy.yaml")
+	if err := os.WriteFile(path, []byte(builder.String()), 0o600); err != nil {
+		t.Fatalf("WriteFile(discovery policy) error = %v", err)
 	}
 	return path
 }

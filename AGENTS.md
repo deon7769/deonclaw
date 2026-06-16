@@ -71,6 +71,7 @@ Implemented:
 - MCP registry config validation, list and plan foundation
 - MCP fake/test stdio smoke with transcript artifacts, locally and through Docker
 - MCP fake read-only tool-smoke with policy scaffold, locally and through Docker
+- MCP real read-only discovery smoke with policy scaffold, Docker-gated for real servers
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -80,7 +81,7 @@ Not implemented yet:
 
 - real fallback execution/retry
 - Codex Docker worker execution
-- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke and fake read-only tool-smoke only
+- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, and real read-only discovery only
 - memory index/LanceDB
 - UI/dashboard
 
