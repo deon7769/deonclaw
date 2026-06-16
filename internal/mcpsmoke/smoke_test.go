@@ -784,6 +784,282 @@ func TestDiscoveryPolicyRejectsWriteExecAllowedCapabilities(t *testing.T) {
 	}
 }
 
+func TestCallSmokeRejectsServerWithoutPolicy(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+
+	_, err := CallSmoke(context.Background(), CallOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--policy") {
+		t.Fatalf("CallSmoke() error = %v, want missing policy rejection", err)
+	}
+}
+
+func TestCallSmokeRejectsRealServerLocalWhenDockerRequired(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	policy := testCallPolicy()
+
+	_, err := CallSmoke(context.Background(), CallOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeLocal,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "--runtime docker") {
+		t.Fatalf("CallSmoke() error = %v, want docker-required rejection", err)
+	}
+}
+
+func TestCallSmokeRejectsWriteExecCapability(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	server := cfg.MCP.Servers["filesystem-readonly"]
+	server.Capabilities = []string{mcpconfig.CapabilityWrite}
+	cfg.MCP.Servers["filesystem-readonly"] = server
+	policy := testCallPolicy()
+
+	_, err := CallSmoke(context.Background(), CallOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "write or exec") {
+		t.Fatalf("CallSmoke() error = %v, want write/exec rejection", err)
+	}
+}
+
+func TestCallSmokeRejectsToolNotAllowlisted(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	policy := testCallPolicy()
+	policy.MCPCallPolicy.AllowedTools = []string{"other.tool"}
+
+	_, err := CallSmoke(context.Background(), CallOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not allowlisted") {
+		t.Fatalf("CallSmoke() error = %v, want tool allowlist rejection", err)
+	}
+}
+
+func TestCallSmokeRejectsServerNotAllowlisted(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	policy := testCallPolicy()
+	policy.MCPCallPolicy.AllowedServers = []string{"other-server"}
+
+	_, err := CallSmoke(context.Background(), CallOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"hello"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "not allowlisted") {
+		t.Fatalf("CallSmoke() error = %v, want server allowlist rejection", err)
+	}
+}
+
+func TestCallSmokeDockerWithFakeRealReadonlyServerGeneratesArtifacts(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	argsPath := installMCPFakeDocker(t, "fake", "docker fake stderr super-secret-value\n")
+	artifactsDir := filepath.Join(t.TempDir(), "artifacts")
+	cfg := mcpDiscoveryTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testCallPolicy()
+
+	result, err := CallSmoke(context.Background(), CallOptions{
+		Config:         cfg,
+		Server:         "filesystem-readonly",
+		Tool:           FakeEchoToolName,
+		Arguments:      []byte(`{"text":"hello real"}`),
+		ArtifactsDir:   artifactsDir,
+		Timeout:        3 * time.Second,
+		Runtime:        RuntimeDocker,
+		RuntimeConfig:  &runtimeCfg,
+		Workspace:      ".",
+		Policy:         &policy,
+		StartedAtClock: fixedSmokeClock,
+	})
+	if err != nil {
+		t.Fatalf("CallSmoke() error = %v", err)
+	}
+	if result.Status != StatusSucceeded || result.Runtime != RuntimeDocker || result.TestOnly || result.ToolCalls != 1 || result.ResponseTruncated {
+		t.Fatalf("result = %#v, want successful real read-only call smoke", result)
+	}
+	for _, name := range []string{"mcp-call-smoke-summary.md", "mcp-call-transcript.jsonl", "mcp-call-result.json", "mcp-call-stdout.log", "mcp-call-stderr.log", "mcp-call-response.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+	}
+	transcript := readSmokeArtifact(t, artifactsDir, "mcp-call-transcript.jsonl")
+	assertTranscriptJSONLValid(t, transcript)
+	assertTranscriptRequestMethodCount(t, transcript, "initialize", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "tools/list", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "tools/call", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "shutdown", 1)
+	assertTranscriptRequestMethodCount(t, transcript, "exit", 1)
+
+	var response CallResponseArtifact
+	if err := json.Unmarshal([]byte(readSmokeArtifact(t, artifactsDir, "mcp-call-response.json")), &response); err != nil {
+		t.Fatalf("mcp-call-response.json invalid: %v", err)
+	}
+	if response.Tool != FakeEchoToolName || response.ResponseTruncated || !strings.Contains(string(response.Response), "hello real") {
+		t.Fatalf("response = %#v, want untruncated fake echo response", response)
+	}
+
+	args := readDockerArgs(t, argsPath)
+	if !stringSliceContainsSequence(args, []string{"-e", "MCP_TOKEN"}) {
+		t.Fatalf("docker args = %#v, want MCP_TOKEN passthrough by name", args)
+	}
+	imageIndex := indexOf(args, "deonclaw-runner:latest")
+	if imageIndex < 0 {
+		t.Fatalf("docker args = %#v, want runtime image", args)
+	}
+	if !stringSliceContainsSequence(args[imageIndex+1:], []string{os.Args[0], "-test.run=TestMCPFakeServerHelperProcess", "--", "fake"}) {
+		t.Fatalf("docker args tail = %#v, want server command after image", args[imageIndex+1:])
+	}
+	joinedArgs := strings.Join(args, " ")
+	if strings.Contains(joinedArgs, "sh -c") {
+		t.Fatalf("docker args = %#v, must not use implicit shell", args)
+	}
+	allArtifacts := transcript +
+		readSmokeArtifact(t, artifactsDir, "mcp-call-smoke-summary.md") +
+		readSmokeArtifact(t, artifactsDir, "mcp-call-result.json") +
+		readSmokeArtifact(t, artifactsDir, "mcp-call-response.json") +
+		readSmokeArtifact(t, artifactsDir, "mcp-call-stdout.log") +
+		readSmokeArtifact(t, artifactsDir, "mcp-call-stderr.log")
+	if strings.Contains(allArtifacts, "super-secret-value") || strings.Contains(joinedArgs, "super-secret-value") {
+		t.Fatalf("secret leaked; args=%#v artifacts=%q", args, allArtifacts)
+	}
+}
+
+func TestCallSmokeDockerMissingServerEnvFailsBeforeDocker(t *testing.T) {
+	unsetEnvForSmokeTest(t, "MCP_TOKEN")
+	argsPath := installMCPFakeDocker(t, "fake", "")
+	cfg := mcpDiscoveryTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testCallPolicy()
+
+	_, err := CallSmoke(context.Background(), CallOptions{
+		Config:        cfg,
+		Server:        "filesystem-readonly",
+		Tool:          FakeEchoToolName,
+		Arguments:     []byte(`{"text":"hello"}`),
+		ArtifactsDir:  t.TempDir(),
+		Timeout:       time.Second,
+		Runtime:       RuntimeDocker,
+		RuntimeConfig: &runtimeCfg,
+		Workspace:     ".",
+		Policy:        &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "MCP_TOKEN") {
+		t.Fatalf("CallSmoke() error = %v, want missing MCP_TOKEN", err)
+	}
+	assertSmokeFileEmptyOrMissing(t, argsPath)
+}
+
+func TestCallSmokeRejectsOversizedArguments(t *testing.T) {
+	cfg := mcpDiscoveryTestConfig(t, nil, "fake")
+	policy := testCallPolicy()
+	policy.MCPCallPolicy.MaxArgumentsBytes = 16
+
+	_, err := CallSmoke(context.Background(), CallOptions{
+		Config:       cfg,
+		Server:       "filesystem-readonly",
+		Tool:         FakeEchoToolName,
+		Arguments:    []byte(`{"text":"this is too large"}`),
+		ArtifactsDir: t.TempDir(),
+		Timeout:      time.Second,
+		Runtime:      RuntimeDocker,
+		Policy:       &policy,
+	})
+	if err == nil || !strings.Contains(err.Error(), "too large") {
+		t.Fatalf("CallSmoke() error = %v, want oversized arguments rejection", err)
+	}
+}
+
+func TestCallSmokeTruncatesLargeResponse(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	artifactsDir := filepath.Join(t.TempDir(), "artifacts")
+	_ = installMCPFakeDocker(t, "fake", "")
+	cfg := mcpDiscoveryTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testCallPolicy()
+	policy.MCPCallPolicy.MaxResponseBytes = 24
+
+	result, err := CallSmoke(context.Background(), CallOptions{
+		Config:        cfg,
+		Server:        "filesystem-readonly",
+		Tool:          FakeEchoToolName,
+		Arguments:     []byte(`{"text":"hello truncation"}`),
+		ArtifactsDir:  artifactsDir,
+		Timeout:       3 * time.Second,
+		Runtime:       RuntimeDocker,
+		RuntimeConfig: &runtimeCfg,
+		Workspace:     ".",
+		Policy:        &policy,
+	})
+	if err != nil {
+		t.Fatalf("CallSmoke() error = %v", err)
+	}
+	if !result.ResponseTruncated {
+		t.Fatalf("result = %#v, want truncated response", result)
+	}
+	var response CallResponseArtifact
+	if err := json.Unmarshal([]byte(readSmokeArtifact(t, artifactsDir, "mcp-call-response.json")), &response); err != nil {
+		t.Fatalf("mcp-call-response.json invalid: %v", err)
+	}
+	if !response.ResponseTruncated || response.ResponseStoredBytes != 24 || response.ResponseOriginalBytes <= response.ResponseStoredBytes || response.ResponsePreview == "" {
+		t.Fatalf("response = %#v, want truncation metadata", response)
+	}
+}
+
+func TestLoadExampleCallPolicy(t *testing.T) {
+	policy, err := LoadCallPolicy(filepath.Join("..", "..", "configs", "examples", "mcp-call-policy.yaml"))
+	if err != nil {
+		t.Fatalf("LoadCallPolicy() error = %v", err)
+	}
+	if err := ValidateCallPolicy(policy); err != nil {
+		t.Fatalf("ValidateCallPolicy() error = %v", err)
+	}
+	if policy.MCPCallPolicy.MaxArgumentsBytes != MaxToolArgumentsBytes || policy.MCPCallPolicy.MaxResponseBytes != DefaultMaxResponseBytes {
+		t.Fatalf("policy = %#v, want default documented byte limits", policy.MCPCallPolicy)
+	}
+}
+
+func TestCallPolicyRejectsWriteExecAllowedCapabilities(t *testing.T) {
+	policy := testCallPolicy()
+	policy.MCPCallPolicy.AllowedCapabilities = []string{mcpconfig.CapabilityRead, mcpconfig.CapabilityExec}
+
+	err := ValidateCallPolicy(policy)
+	if err == nil || !strings.Contains(err.Error(), "not permitted") {
+		t.Fatalf("ValidateCallPolicy() error = %v, want write/exec rejection", err)
+	}
+}
+
 func TestMCPFakeServerHelperProcess(t *testing.T) {
 	if os.Getenv("DEONCLAW_MCP_SMOKE_HELPER") != "1" {
 		return
@@ -960,6 +1236,21 @@ func testDiscoveryPolicy() DiscoveryPolicy {
 			AllowedServers:       []string{"filesystem-readonly"},
 			AllowedCapabilities:  []string{mcpconfig.CapabilityRead},
 			RequireDockerForReal: true,
+		},
+	}
+}
+
+func testCallPolicy() CallPolicy {
+	return CallPolicy{
+		MCPCallPolicy: MCPCallPolicy{
+			AllowRealReadonly:    true,
+			RequireDockerForReal: true,
+			MaxToolCalls:         1,
+			AllowedServers:       []string{"filesystem-readonly"},
+			AllowedTools:         []string{FakeEchoToolName},
+			AllowedCapabilities:  []string{mcpconfig.CapabilityRead},
+			MaxArgumentsBytes:    MaxToolArgumentsBytes,
+			MaxResponseBytes:     DefaultMaxResponseBytes,
 		},
 	}
 }

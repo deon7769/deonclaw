@@ -1,8 +1,8 @@
 # MCP Registry
 
-Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold. Task 21.4 adds a real read-only discovery smoke that lists tools only under a discovery policy.
+Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold. Task 21.4 adds a real read-only discovery smoke that lists tools only under a discovery policy. Task 21.5 adds a policy-gated real read-only call smoke with exactly one tool call.
 
-The registry records MCP server definitions so DeonClaw can validate and inspect them before any future execution layer exists. It can run fake/test smoke, fake/test tool smoke, and a policy-gated real read-only discovery smoke. It does not call real external MCP tools, connect MCP to Codex or OpenCode, or participate in fallback execution.
+The registry records MCP server definitions so DeonClaw can validate and inspect them before any future execution layer exists. It can run fake/test smoke, fake/test tool smoke, policy-gated real read-only discovery, and one policy-gated real read-only call smoke. It does not connect MCP to Codex or OpenCode, does not automatically dispatch tools for agents, and does not participate in fallback execution.
 
 ## Config
 
@@ -68,6 +68,12 @@ Safe discovery policy example:
 
 ~~~bash
 configs/examples/mcp-discovery-policy.yaml
+~~~
+
+Safe call policy example:
+
+~~~bash
+configs/examples/mcp-call-policy.yaml
 ~~~
 
 ## Secrets
@@ -348,6 +354,72 @@ Discovery artifacts:
 
 `mcp-tools-list.json` contains metadata from the `tools/list` response, including `tool_count`, tool names, tool descriptions, and input schema metadata with a schema size cap/truncation marker for large schemas.
 
+Run one real read-only tool call smoke:
+
+~~~bash
+deonctl mcp call-smoke \
+  --config configs/examples/mcp.yaml \
+  --server filesystem-readonly \
+  --tool <tool-name> \
+  --arguments '{"key":"value"}' \
+  --artifacts-dir artifacts/mcp-call-smoke \
+  --runtime docker \
+  --runtime-config configs/examples/runtime.yaml \
+  --workspace . \
+  --policy configs/examples/mcp-call-policy.yaml
+~~~
+
+`mcp call-smoke` is a policy-gated read-only call smoke. It may start a real MCP server only to perform:
+
+- `initialize`
+- `tools/list`
+- exactly one `tools/call`
+- `shutdown`
+- `exit`
+
+It first validates that the requested tool is listed by `tools/list`. It does not connect MCP to Codex/OpenCode, does not automatically execute tools for an agent, and does not participate in fallback execution.
+
+For a non-test server (`test_only: false`), call-smoke requires:
+
+- call policy with `allow_real_readonly: true`
+- `max_tool_calls: 1`
+- server allowlisted in `allowed_servers`
+- tool allowlisted in `allowed_tools`
+- read-only capabilities only
+- `enabled: false`
+- `protocol: stdio`
+- `--runtime docker` when `require_docker_for_real: true`
+
+Servers with `write` or `exec` capability are always refused. Required MCP env passthrough must be present before execution starts. Docker call-smoke uses the same validated Docker runtime planner, appends the server command after the image, passes env names only, preserves mount policy, avoids secret mounts, and does not use `sh -c`.
+
+Call policy scaffold:
+
+~~~yaml
+mcp_call_policy:
+  allow_real_readonly: true
+  require_docker_for_real: true
+  max_tool_calls: 1
+  allowed_servers:
+    - filesystem-readonly
+  allowed_tools:
+    - deonclaw.fake.echo
+  allowed_capabilities:
+    - read
+  max_arguments_bytes: 65536
+  max_response_bytes: 1048576
+~~~
+
+Arguments must be valid JSON objects and fit within `max_arguments_bytes`. Response artifacts are capped by `max_response_bytes`; oversized responses are written with a preview plus truncation metadata instead of storing the full response. Env passthrough values are redacted from call-smoke artifacts.
+
+Call-smoke artifacts:
+
+- `mcp-call-smoke-summary.md`
+- `mcp-call-transcript.jsonl`
+- `mcp-call-result.json`
+- `mcp-call-stdout.log`
+- `mcp-call-stderr.log`
+- `mcp-call-response.json`
+
 Run the built-in fake server directly:
 
 ~~~bash
@@ -358,18 +430,19 @@ deonctl mcp fake-server
 
 ## Boundary
 
-Docker runtime comes before MCP execution. The current registry is a static validation, inventory, diagnostic, risk, planning, fake/test smoke, fake read-only tool-smoke, and real read-only discovery layer only.
+Docker runtime comes before MCP execution. The current registry is a static validation, inventory, diagnostic, risk, planning, fake/test smoke, fake read-only tool-smoke, real read-only discovery, and one-call real read-only call-smoke layer only.
 
 Implemented smoke boundaries:
 
 - `mcp smoke`: fake initialize/tools-list only
 - `mcp tool-smoke`: fake read-only allowlisted `tools/call`
 - `mcp discover`: real read-only `tools/list` only
+- `mcp call-smoke`: one real read-only allowlisted `tools/call`
 
-Not implemented through Task 21.4:
+Not implemented through Task 21.5:
 
-- real external MCP tool calls
 - MCP integration with Codex or OpenCode
+- automatic MCP tool dispatch by workers or agents
 - fallback execution
 - LanceDB or memory index
 - UI/dashboard

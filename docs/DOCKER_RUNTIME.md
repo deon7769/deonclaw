@@ -2,7 +2,7 @@
 
 Task 20.0 adds the Docker runtime foundation.
 
-DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, run fake/test MCP smoke, fake read-only tool-smoke, real read-only MCP discovery, and run an OpenCode Docker worker runtime path marked `supported_experimental`. Codex still runs through the existing local worker runtime.
+DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, run fake/test MCP smoke, fake read-only tool-smoke, real read-only MCP discovery, real read-only MCP call-smoke, and run an OpenCode Docker worker runtime path marked `supported_experimental`. Codex still runs through the existing local worker runtime.
 
 The OpenCode Docker Z.AI smoke has been validated, but production use still requires caution because the current OpenCode Docker prompt contract uses a prompt argument placeholder. The recorded command keeps `<prompt>`, but the real process args receive the raw prompt. A future wrapper may move this to stdin or another hardened transport.
 
@@ -141,6 +141,23 @@ deonctl mcp discover \
 
 This uses the same Docker planner and execution path for policy-allowlisted real read-only servers. It sends only `initialize`, `tools/list`, `shutdown`, and `exit`; it never sends `tools/call`. When discovery policy requires Docker for real servers, local runtime is refused before execution. MCP env passthrough is name-only and must be set before Docker starts.
 
+MCP real read-only call smoke through Docker:
+
+~~~bash
+deonctl mcp call-smoke \
+  --config configs/examples/mcp.yaml \
+  --server filesystem-readonly \
+  --tool <tool-name> \
+  --arguments '{"key":"value"}' \
+  --artifacts-dir artifacts/mcp-call-smoke \
+  --runtime docker \
+  --runtime-config configs/examples/runtime.yaml \
+  --workspace . \
+  --policy configs/examples/mcp-call-policy.yaml
+~~~
+
+This uses the same Docker planner and execution path for policy-allowlisted real read-only servers. It sends `initialize`, `tools/list`, exactly one `tools/call`, `shutdown`, and `exit`. It is a smoke test only: no Codex/OpenCode worker integration, no automatic tool dispatch, and no fallback execution. Server env passthrough is name-only and must be set before Docker starts; artifacts redact env passthrough values.
+
 Prompt delivery is worker-specific. A Docker worker plan must declare one of:
 
 - `prompt_delivery: stdin`: the runner writes the prompt to process stdin.
@@ -274,6 +291,7 @@ Current state:
 - Docker worker execution scaffold implemented for fake/test workers
 - MCP Docker fake/test smoke and fake read-only tool-smoke implemented for `test_only` stdio servers
 - MCP Docker real read-only discovery implemented for policy-allowlisted stdio servers, tools-list only
+- MCP Docker real read-only call-smoke implemented for policy-allowlisted stdio servers, exactly one tool call
 - OpenCode Docker worker runtime supported experimental with prompt placeholder masking
 - OpenCode Docker Z.AI smoke validated with `configs/examples/runtime-opencode-zai-smoke.yaml`
 - Codex worker execution remains local

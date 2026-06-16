@@ -1,0 +1,12 @@
+mcp_call_policy:
+  allow_real_readonly: true
+  require_docker_for_real: true
+  max_tool_calls: 1
+  allowed_servers:
+    - filesystem-readonly
+  allowed_tools:
+    - deonclaw.fake.echo
+  allowed_capabilities:
+    - read
+  max_arguments_bytes: 65536
+  max_response_bytes: 1048576

@@ -26,9 +26,10 @@ const (
 	StatusSucceeded = "succeeded"
 	StatusFailed    = "failed"
 
-	FakeEchoToolName      = "deonclaw.fake.echo"
-	MaxToolArgumentsBytes = 64 * 1024
-	MaxToolSchemaBytes    = 16 * 1024
+	FakeEchoToolName        = "deonclaw.fake.echo"
+	MaxToolArgumentsBytes   = 64 * 1024
+	MaxToolSchemaBytes      = 16 * 1024
+	DefaultMaxResponseBytes = 1024 * 1024
 )
 
 type Options struct {
@@ -137,6 +138,46 @@ type DiscoveryResult struct {
 	Warnings       []string `json:"warnings,omitempty"`
 }
 
+type CallOptions struct {
+	Config         mcpconfig.Config
+	Server         string
+	Tool           string
+	Arguments      []byte
+	ArtifactsDir   string
+	Timeout        time.Duration
+	Runtime        string
+	RuntimeConfig  *runtimeconfig.Config
+	Workspace      string
+	Policy         *CallPolicy
+	StartedAtClock func() time.Time
+}
+
+type CallResult struct {
+	Server            string   `json:"server"`
+	Status            string   `json:"status"`
+	Runtime           string   `json:"runtime"`
+	TestOnly          bool     `json:"test_only"`
+	Protocol          string   `json:"protocol"`
+	Tool              string   `json:"tool"`
+	ToolCalls         int      `json:"tool_calls"`
+	Command           []string `json:"command"`
+	ArtifactsDir      string   `json:"artifacts_dir"`
+	SummaryPath       string   `json:"summary_path"`
+	TranscriptPath    string   `json:"transcript_path"`
+	StdoutPath        string   `json:"stdout_path"`
+	StderrPath        string   `json:"stderr_path"`
+	ResultPath        string   `json:"result_path"`
+	ResponsePath      string   `json:"response_path"`
+	ResponseBytes     int      `json:"response_bytes"`
+	MaxResponseBytes  int      `json:"max_response_bytes"`
+	ResponseTruncated bool     `json:"response_truncated"`
+	StartedAt         string   `json:"started_at"`
+	FinishedAt        string   `json:"finished_at"`
+	DurationMS        int64    `json:"duration_ms"`
+	Error             string   `json:"error,omitempty"`
+	Warnings          []string `json:"warnings,omitempty"`
+}
+
 type ToolPolicy struct {
 	MCPToolPolicy MCPToolPolicy `yaml:"mcp_tool_policy" json:"mcp_tool_policy"`
 }
@@ -159,6 +200,31 @@ type MCPDiscoveryPolicy struct {
 	AllowedServers       []string `yaml:"allowed_servers,omitempty" json:"allowed_servers,omitempty"`
 	AllowedCapabilities  []string `yaml:"allowed_capabilities,omitempty" json:"allowed_capabilities,omitempty"`
 	RequireDockerForReal bool     `yaml:"require_docker_for_real" json:"require_docker_for_real"`
+}
+
+type CallPolicy struct {
+	MCPCallPolicy MCPCallPolicy `yaml:"mcp_call_policy" json:"mcp_call_policy"`
+}
+
+type MCPCallPolicy struct {
+	AllowRealReadonly    bool     `yaml:"allow_real_readonly" json:"allow_real_readonly"`
+	RequireDockerForReal bool     `yaml:"require_docker_for_real" json:"require_docker_for_real"`
+	MaxToolCalls         int      `yaml:"max_tool_calls" json:"max_tool_calls"`
+	AllowedServers       []string `yaml:"allowed_servers,omitempty" json:"allowed_servers,omitempty"`
+	AllowedTools         []string `yaml:"allowed_tools,omitempty" json:"allowed_tools,omitempty"`
+	AllowedCapabilities  []string `yaml:"allowed_capabilities,omitempty" json:"allowed_capabilities,omitempty"`
+	MaxArgumentsBytes    int      `yaml:"max_arguments_bytes" json:"max_arguments_bytes"`
+	MaxResponseBytes     int      `yaml:"max_response_bytes" json:"max_response_bytes"`
+}
+
+type CallResponseArtifact struct {
+	Tool                  string          `json:"tool"`
+	Response              json.RawMessage `json:"response,omitempty"`
+	ResponsePreview       string          `json:"response_preview,omitempty"`
+	ResponseTruncated     bool            `json:"response_truncated"`
+	ResponseOriginalBytes int             `json:"response_original_bytes"`
+	ResponseStoredBytes   int             `json:"response_stored_bytes"`
+	MaxResponseBytes      int             `json:"max_response_bytes"`
 }
 
 type ToolsListArtifact struct {
@@ -579,6 +645,108 @@ func Discover(ctx context.Context, opts DiscoveryOptions) (DiscoveryResult, erro
 	return result, nil
 }
 
+func CallSmoke(ctx context.Context, opts CallOptions) (CallResult, error) {
+	startWall := time.Now()
+	clock := opts.StartedAtClock
+	if clock == nil {
+		clock = func() time.Time { return time.Now().UTC() }
+	}
+	startedAt := clock().UTC()
+	result := CallResult{
+		Server:       strings.TrimSpace(opts.Server),
+		Runtime:      normalizeRuntime(opts.Runtime),
+		Protocol:     mcpconfig.ProtocolStdio,
+		Tool:         strings.TrimSpace(opts.Tool),
+		ArtifactsDir: opts.ArtifactsDir,
+		StartedAt:    startedAt.Format(time.RFC3339Nano),
+	}
+	if opts.Timeout <= 0 {
+		return result, errors.New("mcp call-smoke timeout must be greater than zero")
+	}
+	if opts.ArtifactsDir == "" {
+		return result, errors.New("mcp call-smoke requires artifacts dir")
+	}
+	if result.Tool == "" {
+		return result, errors.New("mcp call-smoke requires --tool")
+	}
+	if opts.Policy == nil {
+		return result, errors.New("mcp call-smoke requires --policy")
+	}
+	policy := *opts.Policy
+	if err := ValidateCallPolicy(policy); err != nil {
+		return result, err
+	}
+	arguments, err := validateCallArguments(opts.Arguments, policy.MCPCallPolicy.MaxArgumentsBytes)
+	if err != nil {
+		return result, err
+	}
+	if _, err := mcpconfig.Validate(opts.Config); err != nil {
+		return result, err
+	}
+	server, err := selectSmokeServer(opts.Config, opts.Server)
+	if err != nil {
+		return result, err
+	}
+	if err := validateCallServer(policy, result.Server, server, result.Tool, result.Runtime); err != nil {
+		return result, err
+	}
+	if err := validateServerEnvPassthrough(server); err != nil {
+		return result, err
+	}
+	secretValues := discoveryRedactionValues(server, opts.RuntimeConfig)
+	result.Protocol = server.Protocol
+	result.TestOnly = server.TestOnly
+	result.MaxResponseBytes = policy.MCPCallPolicy.MaxResponseBytes
+	serverCommand := append([]string{server.Command}, server.Args...)
+	runCommand := append([]string(nil), serverCommand...)
+	switch result.Runtime {
+	case RuntimeLocal:
+	case RuntimeDocker:
+		if opts.RuntimeConfig == nil {
+			return result, errors.New("mcp call-smoke runtime docker requires --runtime-config")
+		}
+		plan, err := mcpconfig.PlanDockerLaunch(opts.Config, opts.Server, *opts.RuntimeConfig, opts.Workspace)
+		if err != nil {
+			return result, err
+		}
+		runCommand = append([]string(nil), plan.Command...)
+		result.Warnings = append(result.Warnings, plan.Warnings...)
+	default:
+		return result, fmt.Errorf("mcp call-smoke runtime %q is not supported", result.Runtime)
+	}
+	result.Command = append([]string(nil), runCommand...)
+
+	if err := os.MkdirAll(opts.ArtifactsDir, 0o755); err != nil {
+		return result, fmt.Errorf("create mcp call-smoke artifacts dir: %w", err)
+	}
+	result.SummaryPath = filepath.Join(opts.ArtifactsDir, "mcp-call-smoke-summary.md")
+	result.TranscriptPath = filepath.Join(opts.ArtifactsDir, "mcp-call-transcript.jsonl")
+	result.StdoutPath = filepath.Join(opts.ArtifactsDir, "mcp-call-stdout.log")
+	result.StderrPath = filepath.Join(opts.ArtifactsDir, "mcp-call-stderr.log")
+	result.ResultPath = filepath.Join(opts.ArtifactsDir, "mcp-call-result.json")
+	result.ResponsePath = filepath.Join(opts.ArtifactsDir, "mcp-call-response.json")
+
+	transcript, rawStdout, rawStderr, toolResponse, runErr := runCommandCallSmoke(ctx, runCommand, opts.Timeout, clock, result.Tool, arguments)
+	responseArtifact := buildCallResponseArtifact(result.Tool, toolResponse, policy.MCPCallPolicy.MaxResponseBytes)
+	result.ResponseBytes = responseArtifact.ResponseOriginalBytes
+	result.ResponseTruncated = responseArtifact.ResponseTruncated
+	finishedAt := clock().UTC()
+	result.FinishedAt = finishedAt.Format(time.RFC3339Nano)
+	result.DurationMS = time.Since(startWall).Milliseconds()
+	if runErr != nil {
+		result.Status = StatusFailed
+		result.Error = runErr.Error()
+		_ = writeCallArtifacts(result, responseArtifact, transcript, rawStdout, rawStderr, secretValues)
+		return result, runErr
+	}
+	result.Status = StatusSucceeded
+	result.ToolCalls = 1
+	if err := writeCallArtifacts(result, responseArtifact, transcript, rawStdout, rawStderr, secretValues); err != nil {
+		return result, err
+	}
+	return result, nil
+}
+
 func LoadToolPolicy(path string) (ToolPolicy, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -674,6 +842,55 @@ func ValidateDiscoveryPolicy(policy DiscoveryPolicy) error {
 	return errors.Join(errs...)
 }
 
+func LoadCallPolicy(path string) (CallPolicy, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return CallPolicy{}, fmt.Errorf("read MCP call policy %q: %w", path, err)
+	}
+	var policy CallPolicy
+	if err := yaml.Unmarshal(data, &policy); err != nil {
+		return CallPolicy{}, fmt.Errorf("parse MCP call policy yaml: %w", err)
+	}
+	normalizeCallPolicy(&policy)
+	return policy, nil
+}
+
+func ValidateCallPolicy(policy CallPolicy) error {
+	var errs []error
+	p := policy.MCPCallPolicy
+	if !p.AllowRealReadonly {
+		errs = append(errs, errors.New("mcp_call_policy.allow_real_readonly must be true"))
+	}
+	if p.MaxToolCalls != 1 {
+		errs = append(errs, errors.New("mcp_call_policy.max_tool_calls must be 1"))
+	}
+	if len(p.AllowedServers) == 0 {
+		errs = append(errs, errors.New("mcp_call_policy.allowed_servers must not be empty"))
+	}
+	if len(p.AllowedTools) == 0 {
+		errs = append(errs, errors.New("mcp_call_policy.allowed_tools must not be empty"))
+	}
+	if len(p.AllowedCapabilities) == 0 {
+		errs = append(errs, errors.New("mcp_call_policy.allowed_capabilities must not be empty"))
+	}
+	for _, capability := range p.AllowedCapabilities {
+		switch capability {
+		case mcpconfig.CapabilityRead:
+		case mcpconfig.CapabilityWrite, mcpconfig.CapabilityExec:
+			errs = append(errs, fmt.Errorf("mcp_call_policy.allowed_capabilities %q is not permitted", capability))
+		default:
+			errs = append(errs, fmt.Errorf("mcp_call_policy.allowed_capabilities %q is not supported", capability))
+		}
+	}
+	if p.MaxArgumentsBytes < 1 {
+		errs = append(errs, errors.New("mcp_call_policy.max_arguments_bytes must be >= 1"))
+	}
+	if p.MaxResponseBytes < 1 {
+		errs = append(errs, errors.New("mcp_call_policy.max_response_bytes must be >= 1"))
+	}
+	return errors.Join(errs...)
+}
+
 func selectSmokeServer(cfg mcpconfig.Config, name string) (mcpconfig.ServerConfig, error) {
 	name = strings.TrimSpace(name)
 	if name == "" {
@@ -734,6 +951,46 @@ func validateDiscoveryServer(policy DiscoveryPolicy, serverName string, server m
 		}
 		if p.RequireDockerForReal && runtime != RuntimeDocker {
 			return errors.New("mcp discover requires --runtime docker for real read-only servers")
+		}
+	}
+	return nil
+}
+
+func validateCallServer(policy CallPolicy, serverName string, server mcpconfig.ServerConfig, tool string, runtime string) error {
+	p := policy.MCPCallPolicy
+	if server.Enabled {
+		return errors.New("mcp call-smoke requires enabled=false")
+	}
+	if server.Protocol != mcpconfig.ProtocolStdio {
+		return fmt.Errorf("mcp call-smoke requires protocol=%s", mcpconfig.ProtocolStdio)
+	}
+	if len(p.AllowedServers) > 0 && !hasString(p.AllowedServers, serverName) {
+		return fmt.Errorf("mcp call-smoke server %q is not allowlisted", serverName)
+	}
+	if len(p.AllowedTools) > 0 && !hasString(p.AllowedTools, tool) {
+		return fmt.Errorf("mcp call-smoke tool %q is not allowlisted", tool)
+	}
+	if len(server.Capabilities) == 0 {
+		return errors.New("mcp call-smoke requires read capability")
+	}
+	for _, capability := range server.Capabilities {
+		switch capability {
+		case mcpconfig.CapabilityRead:
+			if len(p.AllowedCapabilities) > 0 && !hasString(p.AllowedCapabilities, capability) {
+				return fmt.Errorf("mcp call-smoke capability %q is not allowlisted", capability)
+			}
+		case mcpconfig.CapabilityWrite, mcpconfig.CapabilityExec:
+			return errors.New("mcp call-smoke refuses servers with write or exec capability")
+		default:
+			return fmt.Errorf("mcp call-smoke capability %q is not supported", capability)
+		}
+	}
+	if !server.TestOnly {
+		if !p.AllowRealReadonly {
+			return errors.New("mcp call-smoke real read-only servers require allow_real_readonly=true")
+		}
+		if p.RequireDockerForReal && runtime != RuntimeDocker {
+			return errors.New("mcp call-smoke requires --runtime docker for real read-only servers")
 		}
 	}
 	return nil
@@ -1162,6 +1419,147 @@ func runCommandToolSmoke(ctx context.Context, command []string, timeout time.Dur
 	return transcript, stdout.Bytes(), stderr.String(), toolResponse, nil
 }
 
+func runCommandCallSmoke(ctx context.Context, command []string, timeout time.Duration, clock func() time.Time, tool string, arguments json.RawMessage) ([]transcriptEntry, []byte, string, json.RawMessage, error) {
+	smokeCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if len(command) == 0 || strings.TrimSpace(command[0]) == "" {
+		return nil, nil, "", nil, errors.New("mcp call-smoke command must not be empty")
+	}
+	cmd := exec.CommandContext(smokeCtx, command[0], command[1:]...)
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	stdoutPipe, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	stderrPipe, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, nil, "", nil, err
+	}
+	if err := cmd.Start(); err != nil {
+		return nil, nil, "", nil, err
+	}
+
+	var stderr bytes.Buffer
+	stderrDone := make(chan struct{})
+	go func() {
+		_, _ = io.Copy(&stderr, stderrPipe)
+		close(stderrDone)
+	}()
+
+	scanner := bufio.NewScanner(stdoutPipe)
+	scanner.Buffer(make([]byte, 64*1024), 10*1024*1024)
+	writer := bufio.NewWriter(stdin)
+	var stdout bytes.Buffer
+	var transcript []transcriptEntry
+
+	send := func(id int, method string, params any) (rpcMessage, error) {
+		request := rpcMessage{
+			JSONRPC: "2.0",
+			ID:      mustRawJSON(id),
+			Method:  method,
+			Params:  mustRawJSON(params),
+		}
+		payload := mustRawJSON(request)
+		transcript = append(transcript, transcriptEntry{
+			Direction: "request",
+			Method:    method,
+			ID:        request.ID,
+			Timestamp: clock().UTC().Format(time.RFC3339Nano),
+			Payload:   payload,
+		})
+		if _, err := writer.Write(append(payload, '\n')); err != nil {
+			return rpcMessage{}, err
+		}
+		if err := writer.Flush(); err != nil {
+			return rpcMessage{}, err
+		}
+		if !scanner.Scan() {
+			if smokeCtx.Err() != nil {
+				return rpcMessage{}, fmt.Errorf("mcp call-smoke timed out waiting for %s response", method)
+			}
+			if err := scanner.Err(); err != nil {
+				return rpcMessage{}, err
+			}
+			return rpcMessage{}, fmt.Errorf("mcp call-smoke server closed stdout before %s response", method)
+		}
+		line := append([]byte(nil), bytes.TrimSpace(scanner.Bytes())...)
+		stdout.Write(line)
+		stdout.WriteByte('\n')
+		var response rpcMessage
+		if err := json.Unmarshal(line, &response); err != nil {
+			return rpcMessage{}, fmt.Errorf("parse %s response: %w", method, err)
+		}
+		transcript = append(transcript, transcriptEntry{
+			Direction: "response",
+			Method:    method,
+			ID:        response.ID,
+			Timestamp: clock().UTC().Format(time.RFC3339Nano),
+			Payload:   append(json.RawMessage(nil), line...),
+		})
+		if response.Error != nil {
+			return response, fmt.Errorf("mcp call-smoke %s failed: %s", method, response.Error.Message)
+		}
+		return response, nil
+	}
+
+	var toolResponse json.RawMessage
+	runErr := func() error {
+		if _, err := send(1, "initialize", map[string]any{}); err != nil {
+			return err
+		}
+		toolsList, err := send(2, "tools/list", map[string]any{})
+		if err != nil {
+			return err
+		}
+		if !toolListed(toolsList.Result, tool) {
+			return fmt.Errorf("mcp call-smoke tool %q was not listed by server", tool)
+		}
+		call, err := send(3, "tools/call", map[string]any{
+			"name":      tool,
+			"arguments": arguments,
+		})
+		if err != nil {
+			return err
+		}
+		toolResponse = append(json.RawMessage(nil), call.Result...)
+		if _, err := send(4, "shutdown", map[string]any{}); err != nil {
+			return err
+		}
+		return nil
+	}()
+
+	exitNotification := rpcMessage{JSONRPC: "2.0", Method: "exit"}
+	exitPayload := mustRawJSON(exitNotification)
+	transcript = append(transcript, transcriptEntry{
+		Direction: "request",
+		Method:    "exit",
+		Timestamp: clock().UTC().Format(time.RFC3339Nano),
+		Payload:   exitPayload,
+	})
+	if _, err := writer.Write(append(exitPayload, '\n')); err != nil && runErr == nil {
+		runErr = err
+	}
+	if err := writer.Flush(); err != nil && runErr == nil {
+		runErr = err
+	}
+	_ = stdin.Close()
+	waitErr := cmd.Wait()
+	<-stderrDone
+	if smokeCtx.Err() != nil {
+		return transcript, stdout.Bytes(), stderr.String(), toolResponse, errors.New("mcp call-smoke timed out")
+	}
+	if runErr != nil {
+		return transcript, stdout.Bytes(), stderr.String(), toolResponse, runErr
+	}
+	if waitErr != nil {
+		return transcript, stdout.Bytes(), stderr.String(), toolResponse, fmt.Errorf("mcp call-smoke process exited non-zero: %w", waitErr)
+	}
+	return transcript, stdout.Bytes(), stderr.String(), toolResponse, nil
+}
+
 func writeSmokeArtifacts(result Result, transcript []transcriptEntry, stdout []byte, stderr string) error {
 	if err := os.WriteFile(result.SummaryPath, smokeSummary(result), 0o600); err != nil {
 		return err
@@ -1241,6 +1639,37 @@ func writeDiscoveryArtifacts(result DiscoveryResult, toolsList ToolsListArtifact
 	return os.WriteFile(result.ToolsListPath, append(redactBytes(toolsData, redactions), '\n'), 0o600)
 }
 
+func writeCallArtifacts(result CallResult, response CallResponseArtifact, transcript []transcriptEntry, stdout []byte, stderr string, redactions []string) error {
+	if err := os.WriteFile(result.SummaryPath, redactBytes(callSummary(result), redactions), 0o600); err != nil {
+		return err
+	}
+	transcriptJSONL, err := transcriptJSONL(transcript)
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.TranscriptPath, redactBytes(transcriptJSONL, redactions), 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.StdoutPath, redactBytes(stdout, redactions), 0o600); err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.StderrPath, redactBytes([]byte(stderr), redactions), 0o600); err != nil {
+		return err
+	}
+	resultData, err := json.MarshalIndent(result, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(result.ResultPath, append(redactBytes(resultData, redactions), '\n'), 0o600); err != nil {
+		return err
+	}
+	responseData, err := json.MarshalIndent(response, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(result.ResponsePath, append(redactBytes(responseData, redactions), '\n'), 0o600)
+}
+
 func smokeSummary(result Result) []byte {
 	var builder strings.Builder
 	builder.WriteString("# MCP Smoke\n\n")
@@ -1266,6 +1695,25 @@ func toolSummary(result ToolResult) []byte {
 	builder.WriteString("Protocol: " + result.Protocol + "\n")
 	builder.WriteString("Tool: " + result.Tool + "\n")
 	builder.WriteString(fmt.Sprintf("Tool calls: %d\n", result.ToolCalls))
+	if result.Error != "" {
+		builder.WriteString("Error: " + result.Error + "\n")
+	}
+	return []byte(builder.String())
+}
+
+func callSummary(result CallResult) []byte {
+	var builder strings.Builder
+	builder.WriteString("# MCP Call Smoke\n\n")
+	builder.WriteString("Mode: read-only call smoke only; no worker integration\n")
+	builder.WriteString("Server: " + result.Server + "\n")
+	builder.WriteString("Status: " + result.Status + "\n")
+	builder.WriteString("Runtime: " + result.Runtime + "\n")
+	builder.WriteString("Protocol: " + result.Protocol + "\n")
+	builder.WriteString("Tool: " + result.Tool + "\n")
+	builder.WriteString(fmt.Sprintf("Tool calls: %d\n", result.ToolCalls))
+	builder.WriteString(fmt.Sprintf("Response bytes: %d\n", result.ResponseBytes))
+	builder.WriteString(fmt.Sprintf("Max response bytes: %d\n", result.MaxResponseBytes))
+	builder.WriteString(fmt.Sprintf("Response truncated: %t\n", result.ResponseTruncated))
 	if result.Error != "" {
 		builder.WriteString("Error: " + result.Error + "\n")
 	}
@@ -1328,6 +1776,27 @@ func validateToolArguments(raw []byte) (json.RawMessage, error) {
 	return append(json.RawMessage(nil), raw...), nil
 }
 
+func validateCallArguments(raw []byte, maxBytes int) (json.RawMessage, error) {
+	raw = bytes.TrimSpace(raw)
+	if len(raw) == 0 {
+		return nil, errors.New("mcp call-smoke requires --arguments")
+	}
+	if maxBytes < 1 {
+		return nil, errors.New("mcp call-smoke max arguments bytes must be >= 1")
+	}
+	if len(raw) > maxBytes {
+		return nil, fmt.Errorf("mcp call-smoke arguments too large: %d bytes exceeds %d", len(raw), maxBytes)
+	}
+	var object map[string]any
+	if err := json.Unmarshal(raw, &object); err != nil {
+		return nil, fmt.Errorf("mcp call-smoke arguments must be valid JSON object: %w", err)
+	}
+	if object == nil {
+		return nil, errors.New("mcp call-smoke arguments must be a JSON object")
+	}
+	return append(json.RawMessage(nil), raw...), nil
+}
+
 func buildToolsListArtifact(raw json.RawMessage) ToolsListArtifact {
 	artifact := ToolsListArtifact{
 		ToolNames:  []string{},
@@ -1371,6 +1840,26 @@ func buildToolsListArtifact(raw json.RawMessage) ToolsListArtifact {
 	return artifact
 }
 
+func buildCallResponseArtifact(tool string, raw json.RawMessage, maxBytes int) CallResponseArtifact {
+	if maxBytes < 1 {
+		maxBytes = DefaultMaxResponseBytes
+	}
+	artifact := CallResponseArtifact{
+		Tool:                  tool,
+		ResponseOriginalBytes: len(raw),
+		MaxResponseBytes:      maxBytes,
+	}
+	if len(raw) > maxBytes {
+		artifact.ResponsePreview = string(raw[:maxBytes])
+		artifact.ResponseStoredBytes = maxBytes
+		artifact.ResponseTruncated = true
+		return artifact
+	}
+	artifact.Response = append(json.RawMessage(nil), raw...)
+	artifact.ResponseStoredBytes = len(raw)
+	return artifact
+}
+
 func toolListed(result json.RawMessage, name string) bool {
 	var decoded struct {
 		Tools []struct {
@@ -1390,6 +1879,19 @@ func toolListed(result json.RawMessage, name string) bool {
 
 func normalizeToolPolicy(policy *ToolPolicy) {
 	p := &policy.MCPToolPolicy
+	for i := range p.AllowedServers {
+		p.AllowedServers[i] = strings.TrimSpace(p.AllowedServers[i])
+	}
+	for i := range p.AllowedTools {
+		p.AllowedTools[i] = strings.TrimSpace(p.AllowedTools[i])
+	}
+	for i := range p.AllowedCapabilities {
+		p.AllowedCapabilities[i] = strings.TrimSpace(p.AllowedCapabilities[i])
+	}
+}
+
+func normalizeCallPolicy(policy *CallPolicy) {
+	p := &policy.MCPCallPolicy
 	for i := range p.AllowedServers {
 		p.AllowedServers[i] = strings.TrimSpace(p.AllowedServers[i])
 	}
