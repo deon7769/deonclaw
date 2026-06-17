@@ -97,6 +97,7 @@ Implemented:
 - LanceDB real local write smoke (`memory lancedb write-smoke`) via Python adapter, without retrieval or runner integration
 - LanceDB structural readback doctor/report (`memory lancedb doctor/report`) over write-smoke databases, without search or runner integration
 - LanceDB controlled vector search smoke (`memory lancedb search-smoke`) with explicit query vector or chunk_id, without natural-language retrieval, provider APIs, or runner integration
+- LanceDB search-smoke result QA/report (`memory lancedb search-report`) over search artifacts, without new search or runner integration
 
 Not implemented yet:
 

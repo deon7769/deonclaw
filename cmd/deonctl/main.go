@@ -106,6 +106,7 @@ Usage:
   deonctl memory lancedb doctor --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
   deonctl memory lancedb report --manifest <lancedb-write-smoke-manifest.json> --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
   deonctl memory lancedb search-smoke --policy <lancedb-policy-write-smoke.yaml> (--query-vector <json-array>|--query-chunk-id <chunk-id>) --top-k <n> --artifacts-dir <dir> --confirm-search-smoke
+  deonctl memory lancedb search-report --result <lancedb-search-smoke-result.json> --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -663,6 +664,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryLanceDBSearchSmoke(opts, stdout, stderr)
+			case "search-report":
+				opts, err := parseMemoryLanceDBSearchReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBSearchReport(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -4065,6 +4074,77 @@ func runMemoryLanceDBSearchSmoke(opts memoryLanceDBSearchSmokeOptions, stdout io
 	fmt.Fprintf(stdout, "result_count: %d\n", result.Summary.ResultCount)
 	fmt.Fprintf(stdout, "retrieval_performed: %t\n", result.Summary.RetrievalPerformed)
 	fmt.Fprintf(stdout, "runner_integration: %t\n", result.Summary.RunnerIntegration)
+	return 0
+}
+
+type memoryLanceDBSearchReportOptions struct {
+	resultPath   string
+	policyPath   string
+	outputFormat string
+}
+
+func parseMemoryLanceDBSearchReportOptions(args []string) (memoryLanceDBSearchReportOptions, error) {
+	opts := memoryLanceDBSearchReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--result":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchReportOptions{}, fmt.Errorf("missing value for --result")
+			}
+			opts.resultPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchReportOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryLanceDBSearchReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.resultPath == "" {
+		return memoryLanceDBSearchReportOptions{}, fmt.Errorf("missing --result")
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBSearchReportOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryLanceDBSearchReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMemoryLanceDBSearchReport(opts memoryLanceDBSearchReportOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := lancedbpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb search-report failed: %v\n", err)
+		return 1
+	}
+	result, err := lancedbpolicy.SearchReport(opts.resultPath, cfg, lancedbpolicy.SearchReportOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb search-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = lancedbpolicy.WriteSearchReportJSON(result, stdout)
+	default:
+		err = lancedbpolicy.WriteSearchReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb search-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
 	return 0
 }
 

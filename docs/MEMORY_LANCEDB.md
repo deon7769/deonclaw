@@ -1,6 +1,6 @@
 # Memory LanceDB
 
-Task 22.4 adds LanceDB write policy validation and a plan-only dry run over existing embedding vector artifacts. Task 22.4.1 hardens the embedding report gate and adds fake-write artifact smoke. Task 22.5 adds controlled real local LanceDB write smoke via a Python adapter. Task 22.6 adds structural readback doctor/report over write-smoke databases. Task 22.7 adds controlled vector search smoke with an explicit query vector or existing chunk row — not natural-language retrieval and not runner integration.
+Task 22.4 adds LanceDB write policy validation and a plan-only dry run over existing embedding vector artifacts. Task 22.4.1 hardens the embedding report gate and adds fake-write artifact smoke. Task 22.5 adds controlled real local LanceDB write smoke via a Python adapter. Task 22.6 adds structural readback doctor/report over write-smoke databases. Task 22.7 adds controlled vector search smoke with an explicit query vector or existing chunk row. Task 22.7.1 adds search-smoke result QA/report — not natural-language retrieval and not runner integration.
 
 ## Scope
 
@@ -8,7 +8,7 @@ Implemented now:
 
 - `lancedb-policy.yaml` loading and validation
 - modes: `plan_only`, `fake_write`, and `write_smoke`
-- `validate`, `plan`, `fake-write`, `write-smoke`, `doctor`, `report`, and `search-smoke` CLI commands
+- `validate`, `plan`, `fake-write`, `write-smoke`, `doctor`, `report`, `search-smoke`, and `search-report` CLI commands
 - embedding manifest and vector artifact loading
 - hardened `embeddingpolicy.Report` (provider/model consistency)
 - `embeddingpolicy.Report` consistency gate when `chunks_path` is configured
@@ -19,6 +19,7 @@ Implemented now:
 - write-smoke manifest, rows summary, and log artifacts
 - structural readback doctor/report through `scripts/lancedb_readback.py` (no search)
 - controlled vector search smoke through `scripts/lancedb_search_smoke.py` (explicit vector or chunk_id only; no natural-language retrieval)
+- search-smoke result QA/report over `lancedb-search-smoke-result.json` (no new search)
 
 Not implemented yet:
 
@@ -199,6 +200,18 @@ deonctl memory lancedb search-smoke \
   --confirm-search-smoke
 ~~~
 
+Search-smoke result QA/report:
+
+~~~bash
+deonctl memory lancedb search-report \
+  --result artifacts/lancedb-search-smoke-result.json \
+  --policy configs/examples/lancedb-policy-write-smoke.yaml
+deonctl memory lancedb search-report \
+  --result artifacts/lancedb-search-smoke-result.json \
+  --policy configs/examples/lancedb-policy-write-smoke.yaml \
+  --output-format json
+~~~
+
 ### Command roles
 
 | Command | Purpose |
@@ -210,6 +223,7 @@ deonctl memory lancedb search-smoke \
 | `doctor` | Structural readback over an existing write-smoke database/table (no search) |
 | `report` | Cross-check write-smoke manifest against policy + readback metadata |
 | `search-smoke` | Controlled top-k vector search using `--query-vector` or `--query-chunk-id` after doctor passes |
+| `search-report` | Validate `lancedb-search-smoke-result.json` contract before any future context attachment |
 
 `write-smoke` requires:
 
@@ -252,6 +266,8 @@ It writes:
 
 Stdout and artifacts never include full vectors or chunk text.
 
+`search-report` validates a prior `search-smoke` result artifact without running a new search. It checks summary flags (`retrieval_performed: true`, `runner_integration: false`), `top_k`/`result_count` bounds, `query_mode`, ranked hit shape, forbidden payload fields (`vector`, `text`, `chunk_text`, `content`, `embedding`), and optional policy cross-checks for `database_path`/`table`. Output includes `status`, distance bounds, `unique_chunk_ids`, `invalid_results`, and `warnings` — never full vectors or chunk text.
+
 ## Adapters
 
 Go uses `internal/lancedbpolicy` adapter interfaces:
@@ -276,4 +292,4 @@ There is no Go LanceDB SDK dependency.
 
 ## Boundary
 
-Tasks 22.0–22.1 own chunk build and QA. Tasks 22.2–22.3.1 own embedding policy, fake vectors, and vector report. Tasks 22.4–22.5 own LanceDB write planning, fake-write artifact smoke, and real local write smoke. Task 22.6 owns structural readback doctor/report. Task 22.7 owns controlled vector search smoke with explicit query vectors or chunk rows — not natural-language retrieval and not runner integration. See also docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_INDEX.md.
+Tasks 22.0–22.1 own chunk build and QA. Tasks 22.2–22.3.1 own embedding policy, fake vectors, and vector report. Tasks 22.4–22.5 own LanceDB write planning, fake-write artifact smoke, and real local write smoke. Task 22.6 owns structural readback doctor/report. Task 22.7 owns controlled vector search smoke with explicit query vectors or chunk rows. Task 22.7.1 owns search-smoke result QA/report — not natural-language retrieval and not runner integration. See also docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_INDEX.md.

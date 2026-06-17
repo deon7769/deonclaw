@@ -186,8 +186,9 @@ A future task may transform these chunks into vectors or wire retrieval into the
 | 22.5 | LanceDB real local write smoke (`memory lancedb write-smoke`), no retrieval |
 | 22.6 | LanceDB readback doctor/report (`memory lancedb doctor/report`), no search |
 | 22.7 | LanceDB controlled vector search smoke (`memory lancedb search-smoke`), explicit vector/chunk_id only; no natural-language retrieval or runner integration |
+| 22.7.1 | LanceDB search-smoke result QA/report (`memory lancedb search-report`), no new search or runner integration |
 
-22.3.1 validates fake vector artifacts read-only. Task 22.4 plans LanceDB writes from validated embedding artifacts. Task 22.4.1 emits fake row/manifest artifacts for table-shape smoke. Task 22.5 writes a real local LanceDB table via a Python adapter. Task 22.6 validates write-smoke databases structurally via doctor/report. Task 22.7 runs controlled top-k vector search with an explicit query vector or existing chunk row after doctor passes — not natural-language retrieval and not runner integration. See docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_LANCEDB.md.
+22.3.1 validates fake vector artifacts read-only. Task 22.4 plans LanceDB writes from validated embedding artifacts. Task 22.4.1 emits fake row/manifest artifacts for table-shape smoke. Task 22.5 writes a real local LanceDB table via a Python adapter. Task 22.6 validates write-smoke databases structurally via doctor/report. Task 22.7 runs controlled top-k vector search with an explicit query vector or existing chunk row after doctor passes. Task 22.7.1 validates search-smoke result artifacts before any future context attachment — not natural-language retrieval and not runner integration. See docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_LANCEDB.md.
 
 ## Boundary
 
