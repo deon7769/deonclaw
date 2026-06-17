@@ -472,3 +472,26 @@ func readChunksJSONL(t *testing.T, path string) []memoryindex.Chunk {
 	}
 	return chunks
 }
+
+func writeChunksJSONL(t *testing.T, path string, chunks []memoryindex.Chunk) error {
+	t.Helper()
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	writer := bufio.NewWriter(file)
+	for _, chunk := range chunks {
+		line, err := json.Marshal(chunk)
+		if err != nil {
+			return err
+		}
+		if _, err := writer.Write(line); err != nil {
+			return err
+		}
+		if err := writer.WriteByte('\n'); err != nil {
+			return err
+		}
+	}
+	return writer.Flush()
+}

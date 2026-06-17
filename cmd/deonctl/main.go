@@ -90,6 +90,8 @@ Usage:
   deonctl memory index validate --config <memory-index.yaml>
   deonctl memory index plan --config <memory-index.yaml> [--output-format text|json]
   deonctl memory index build --config <memory-index.yaml> --artifacts-dir <dir>
+  deonctl memory index doctor --config <memory-index.yaml> [--output-format text|json]
+  deonctl memory index report --manifest <memory-index-manifest.json> --chunks <memory-index-chunks.jsonl> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -515,6 +517,22 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryIndexBuild(opts, stdout, stderr)
+			case "doctor":
+				opts, err := parseMemoryIndexPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryIndexDoctor(opts, stdout, stderr)
+			case "report":
+				opts, err := parseMemoryIndexReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryIndexReport(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3106,6 +3124,99 @@ func runMemoryIndexBuild(opts memoryIndexBuildOptions, stdout io.Writer, stderr 
 	fmt.Fprintf(stdout, "source_count: %d\n", result.Manifest.SourceCount)
 	fmt.Fprintf(stdout, "chunk_count: %d\n", result.Manifest.ChunkCount)
 	fmt.Fprintf(stdout, "skipped_count: %d\n", result.Manifest.SkippedCount)
+	return 0
+}
+
+func runMemoryIndexDoctor(opts memoryIndexPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := memoryindex.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index doctor failed: %v\n", err)
+		return 1
+	}
+	result, err := memoryindex.Doctor(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index doctor failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = memoryindex.WriteDoctorJSON(result, stdout)
+	default:
+		err = memoryindex.WriteDoctorText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index doctor failed: %v\n", err)
+		return 1
+	}
+	if result.Status == memoryindex.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type memoryIndexReportOptions struct {
+	manifestPath string
+	chunksPath   string
+	outputFormat string
+}
+
+func parseMemoryIndexReportOptions(args []string) (memoryIndexReportOptions, error) {
+	opts := memoryIndexReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--manifest":
+			if i+1 >= len(args) {
+				return memoryIndexReportOptions{}, fmt.Errorf("missing value for --manifest")
+			}
+			opts.manifestPath = args[i+1]
+			i++
+		case "--chunks":
+			if i+1 >= len(args) {
+				return memoryIndexReportOptions{}, fmt.Errorf("missing value for --chunks")
+			}
+			opts.chunksPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryIndexReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryIndexReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.manifestPath == "" {
+		return memoryIndexReportOptions{}, fmt.Errorf("missing --manifest")
+	}
+	if opts.chunksPath == "" {
+		return memoryIndexReportOptions{}, fmt.Errorf("missing --chunks")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryIndexReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMemoryIndexReport(opts memoryIndexReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := memoryindex.Report(opts.manifestPath, opts.chunksPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = memoryindex.WriteReportJSON(result, stdout)
+	default:
+		err = memoryindex.WriteReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == memoryindex.StatusFailed {
+		return 1
+	}
 	return 0
 }
 

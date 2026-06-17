@@ -8,7 +8,7 @@ Implemented now:
 
 - `memory-index.yaml` config loading and validation
 - read-only scanning of configured memory roots
-- `validate`, `plan`, and `build` CLI commands
+- `validate`, `plan`, `build`, `doctor`, and `report` CLI commands
 - `memory-index-manifest.json`
 - `memory-index-chunks.jsonl`
 
@@ -70,6 +70,16 @@ Validation rules:
 
 ## CLI
 
+Command roles:
+
+| Command | Purpose |
+|---------|---------|
+| `validate` | Schema and output path validation |
+| `plan` | List candidate source files per domain |
+| `build` | Generate manifest and chunks JSONL |
+| `doctor` | Pre-build diagnostics (scan, estimates, warnings) |
+| `report` | Post-build QA over manifest and chunks |
+
 Validate config and filesystem roots:
 
 ~~~bash
@@ -89,6 +99,25 @@ Build auditable index artifacts:
 deonctl memory index build --config configs/examples/memory-index.yaml --artifacts-dir artifacts
 ~~~
 
+Pre-build diagnostics without writing chunks:
+
+~~~bash
+deonctl memory index doctor --config configs/examples/memory-index.yaml
+deonctl memory index doctor --config configs/examples/memory-index.yaml --output-format json
+~~~
+
+Post-build QA over generated artifacts:
+
+~~~bash
+deonctl memory index report \
+  --manifest artifacts/memory-index-manifest.json \
+  --chunks artifacts/memory-index-chunks.jsonl
+deonctl memory index report \
+  --manifest artifacts/memory-index-manifest.json \
+  --chunks artifacts/memory-index-chunks.jsonl \
+  --output-format json
+~~~
+
 `plan` reports candidate file counts per domain and skipped paths (`skipped_count`, plus `skipped_symlinks`, `skipped_secret_paths`, and `skipped_excluded` when available).
 
 `build` writes manifest and chunks under `--artifacts-dir` using the configured relative output paths:
@@ -97,6 +126,10 @@ deonctl memory index build --config configs/examples/memory-index.yaml --artifac
 - `memory-index-chunks.jsonl` (default)
 
 Relative paths may include subdirectories (for example `indexes/manifest.json`); absolute output paths are rejected.
+
+`doctor` reports domains, roots, `root_exists`, source and skipped counts, estimated chunks per domain, largest files (top 10), and warnings. It scans read-only and never follows symlinks.
+
+`report` validates manifest/chunks consistency (`chunk_count`, unique chunk IDs, `text_sha256`, `source_sha256`, domain membership) and prints aggregate stats only — not raw chunk text.
 
 ## Chunk contract
 
