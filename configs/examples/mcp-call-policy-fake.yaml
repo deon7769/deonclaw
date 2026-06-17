@@ -1,13 +1,12 @@
-# Real read-only call-smoke policy template.
-# Replace allowed_tools with a tool name observed through `deonctl mcp discover`.
+# Fake/test call-smoke policy for the built-in deonclaw.fake.echo tool.
 mcp_call_policy:
   allow_real_readonly: true
   require_docker_for_real: true
   max_tool_calls: 1
   allowed_servers:
-    - filesystem-readonly
+    - fake-stdio
   allowed_tools:
-    - "<replace-with-read-only-tool-name>"
+    - deonclaw.fake.echo
   allowed_capabilities:
     - read
   max_arguments_bytes: 65536

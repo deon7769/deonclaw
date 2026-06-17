@@ -70,10 +70,16 @@ Safe discovery policy example:
 configs/examples/mcp-discovery-policy.yaml
 ~~~
 
-Safe call policy example:
+Safe real call policy template:
 
 ~~~bash
 configs/examples/mcp-call-policy.yaml
+~~~
+
+Safe fake call policy example:
+
+~~~bash
+configs/examples/mcp-call-policy-fake.yaml
 ~~~
 
 ## Secrets
@@ -369,6 +375,8 @@ deonctl mcp call-smoke \
   --policy configs/examples/mcp-call-policy.yaml
 ~~~
 
+Use `mcp discover` first, then replace the real call policy template's `allowed_tools` placeholder with the explicit read-only tool name returned by that server. The fake echo tool policy is separate and lives in `configs/examples/mcp-call-policy-fake.yaml`.
+
 `mcp call-smoke` is a policy-gated read-only call smoke. It may start a real MCP server only to perform:
 
 - `initialize`
@@ -402,14 +410,16 @@ mcp_call_policy:
   allowed_servers:
     - filesystem-readonly
   allowed_tools:
-    - deonclaw.fake.echo
+    - "<replace-with-read-only-tool-name>"
   allowed_capabilities:
     - read
   max_arguments_bytes: 65536
   max_response_bytes: 1048576
 ~~~
 
-Arguments must be valid JSON objects and fit within `max_arguments_bytes`. Response artifacts are capped by `max_response_bytes`; oversized responses are written with a preview plus truncation metadata instead of storing the full response. Env passthrough values are redacted from call-smoke artifacts.
+The real call policy template intentionally does not suggest `deonclaw.fake.echo` for `filesystem-readonly`. Fake echo call-smoke examples use `configs/examples/mcp-call-policy-fake.yaml` with `fake-stdio`.
+
+Arguments must be valid JSON objects and fit within `max_arguments_bytes`. Response artifacts are capped by `max_response_bytes`; oversized responses are written with a preview plus truncation metadata instead of storing the full response. Env passthrough values are redacted from call-smoke artifacts, then each call-smoke artifact is scanned for unredacted passthrough values before it is written.
 
 Call-smoke artifacts:
 
@@ -419,6 +429,8 @@ Call-smoke artifacts:
 - `mcp-call-stdout.log`
 - `mcp-call-stderr.log`
 - `mcp-call-response.json`
+
+The call summary records `tool_call_count` and `response_truncated` explicitly.
 
 Run the built-in fake server directly:
 

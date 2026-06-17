@@ -156,7 +156,7 @@ deonctl mcp call-smoke \
   --policy configs/examples/mcp-call-policy.yaml
 ~~~
 
-This uses the same Docker planner and execution path for policy-allowlisted real read-only servers. It sends `initialize`, `tools/list`, exactly one `tools/call`, `shutdown`, and `exit`. It is a smoke test only: no Codex/OpenCode worker integration, no automatic tool dispatch, and no fallback execution. Server env passthrough is name-only and must be set before Docker starts; artifacts redact env passthrough values.
+This uses the same Docker planner and execution path for policy-allowlisted real read-only servers. It sends `initialize`, `tools/list`, exactly one `tools/call`, `shutdown`, and `exit`. It is a smoke test only: no Codex/OpenCode worker integration, no automatic tool dispatch, and no fallback execution. Server env passthrough is name-only and must be set before Docker starts; artifacts redact env passthrough values and run a leak scan before writing. The real call policy template must be edited with a tool name from `mcp discover`; fake echo policy lives separately at `configs/examples/mcp-call-policy-fake.yaml`.
 
 Prompt delivery is worker-specific. A Docker worker plan must declare one of:
 

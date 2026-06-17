@@ -1640,34 +1640,42 @@ func writeDiscoveryArtifacts(result DiscoveryResult, toolsList ToolsListArtifact
 }
 
 func writeCallArtifacts(result CallResult, response CallResponseArtifact, transcript []transcriptEntry, stdout []byte, stderr string, redactions []string) error {
-	if err := os.WriteFile(result.SummaryPath, redactBytes(callSummary(result), redactions), 0o600); err != nil {
+	if err := writeRedactedCallArtifact(result.SummaryPath, "mcp-call-smoke-summary.md", callSummary(result), redactions); err != nil {
 		return err
 	}
 	transcriptJSONL, err := transcriptJSONL(transcript)
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(result.TranscriptPath, redactBytes(transcriptJSONL, redactions), 0o600); err != nil {
+	if err := writeRedactedCallArtifact(result.TranscriptPath, "mcp-call-transcript.jsonl", transcriptJSONL, redactions); err != nil {
 		return err
 	}
-	if err := os.WriteFile(result.StdoutPath, redactBytes(stdout, redactions), 0o600); err != nil {
+	if err := writeRedactedCallArtifact(result.StdoutPath, "mcp-call-stdout.log", stdout, redactions); err != nil {
 		return err
 	}
-	if err := os.WriteFile(result.StderrPath, redactBytes([]byte(stderr), redactions), 0o600); err != nil {
+	if err := writeRedactedCallArtifact(result.StderrPath, "mcp-call-stderr.log", []byte(stderr), redactions); err != nil {
 		return err
 	}
 	resultData, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
 		return err
 	}
-	if err := os.WriteFile(result.ResultPath, append(redactBytes(resultData, redactions), '\n'), 0o600); err != nil {
+	if err := writeRedactedCallArtifact(result.ResultPath, "mcp-call-result.json", append(resultData, '\n'), redactions); err != nil {
 		return err
 	}
 	responseData, err := json.MarshalIndent(response, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(result.ResponsePath, append(redactBytes(responseData, redactions), '\n'), 0o600)
+	return writeRedactedCallArtifact(result.ResponsePath, "mcp-call-response.json", append(responseData, '\n'), redactions)
+}
+
+func writeRedactedCallArtifact(path string, label string, data []byte, redactions []string) error {
+	redacted := redactBytes(data, redactions)
+	if err := scanRedactionLeaks(label, redacted, redactions); err != nil {
+		return err
+	}
+	return os.WriteFile(path, redacted, 0o600)
 }
 
 func smokeSummary(result Result) []byte {
@@ -1711,9 +1719,11 @@ func callSummary(result CallResult) []byte {
 	builder.WriteString("Protocol: " + result.Protocol + "\n")
 	builder.WriteString("Tool: " + result.Tool + "\n")
 	builder.WriteString(fmt.Sprintf("Tool calls: %d\n", result.ToolCalls))
+	builder.WriteString(fmt.Sprintf("tool_call_count: %d\n", result.ToolCalls))
 	builder.WriteString(fmt.Sprintf("Response bytes: %d\n", result.ResponseBytes))
 	builder.WriteString(fmt.Sprintf("Max response bytes: %d\n", result.MaxResponseBytes))
 	builder.WriteString(fmt.Sprintf("Response truncated: %t\n", result.ResponseTruncated))
+	builder.WriteString(fmt.Sprintf("response_truncated: %t\n", result.ResponseTruncated))
 	if result.Error != "" {
 		builder.WriteString("Error: " + result.Error + "\n")
 	}
@@ -1967,6 +1977,18 @@ func redactBytes(data []byte, values []string) []byte {
 		redacted = bytes.ReplaceAll(redacted, []byte(value), []byte("[redacted]"))
 	}
 	return redacted
+}
+
+func scanRedactionLeaks(label string, data []byte, values []string) error {
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if bytes.Contains(data, []byte(value)) {
+			return fmt.Errorf("%s contains unredacted env passthrough value", label)
+		}
+	}
+	return nil
 }
 
 func mustRawJSON(value any) json.RawMessage {

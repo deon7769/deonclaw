@@ -72,7 +72,7 @@ Implemented:
 - MCP fake/test stdio smoke with transcript artifacts, locally and through Docker
 - MCP fake read-only tool-smoke with policy scaffold, locally and through Docker
 - MCP real read-only discovery smoke with policy scaffold, Docker-gated for real servers
-- MCP real read-only call-smoke with explicit policy and one Docker-gated tool call
+- MCP real read-only call-smoke with explicit policy, split fake/real policy examples, artifact leak scanning, and one Docker-gated tool call
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

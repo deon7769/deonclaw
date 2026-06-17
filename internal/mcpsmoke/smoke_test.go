@@ -914,6 +914,10 @@ func TestCallSmokeDockerWithFakeRealReadonlyServerGeneratesArtifacts(t *testing.
 			t.Fatalf("artifact %s stat error = %v", name, err)
 		}
 	}
+	summary := readSmokeArtifact(t, artifactsDir, "mcp-call-smoke-summary.md")
+	if !strings.Contains(summary, "tool_call_count: 1") || !strings.Contains(summary, "response_truncated: false") {
+		t.Fatalf("summary = %q, want tool_call_count and response_truncated fields", summary)
+	}
 	transcript := readSmokeArtifact(t, artifactsDir, "mcp-call-transcript.jsonl")
 	assertTranscriptJSONLValid(t, transcript)
 	assertTranscriptRequestMethodCount(t, transcript, "initialize", 1)
@@ -946,13 +950,59 @@ func TestCallSmokeDockerWithFakeRealReadonlyServerGeneratesArtifacts(t *testing.
 		t.Fatalf("docker args = %#v, must not use implicit shell", args)
 	}
 	allArtifacts := transcript +
-		readSmokeArtifact(t, artifactsDir, "mcp-call-smoke-summary.md") +
+		summary +
 		readSmokeArtifact(t, artifactsDir, "mcp-call-result.json") +
 		readSmokeArtifact(t, artifactsDir, "mcp-call-response.json") +
 		readSmokeArtifact(t, artifactsDir, "mcp-call-stdout.log") +
 		readSmokeArtifact(t, artifactsDir, "mcp-call-stderr.log")
 	if strings.Contains(allArtifacts, "super-secret-value") || strings.Contains(joinedArgs, "super-secret-value") {
 		t.Fatalf("secret leaked; args=%#v artifacts=%q", args, allArtifacts)
+	}
+}
+
+func TestCallSmokeRedactsEnvValueLeakedByToolResponse(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	artifactsDir := filepath.Join(t.TempDir(), "artifacts")
+	_ = installMCPFakeDocker(t, "fake", "")
+	cfg := mcpDiscoveryTestConfig(t, []string{"MCP_TOKEN"}, "fake")
+	runtimeCfg := dockerSmokeRuntimeConfig(nil)
+	policy := testCallPolicy()
+
+	result, err := CallSmoke(context.Background(), CallOptions{
+		Config:        cfg,
+		Server:        "filesystem-readonly",
+		Tool:          FakeEchoToolName,
+		Arguments:     []byte(`{"text":"super-secret-value"}`),
+		ArtifactsDir:  artifactsDir,
+		Timeout:       3 * time.Second,
+		Runtime:       RuntimeDocker,
+		RuntimeConfig: &runtimeCfg,
+		Workspace:     ".",
+		Policy:        &policy,
+	})
+	if err != nil {
+		t.Fatalf("CallSmoke() error = %v", err)
+	}
+	if result.Status != StatusSucceeded || result.ToolCalls != 1 {
+		t.Fatalf("result = %#v, want successful call smoke", result)
+	}
+
+	responseArtifact := readSmokeArtifact(t, artifactsDir, "mcp-call-response.json")
+	if strings.Contains(responseArtifact, "super-secret-value") || !strings.Contains(responseArtifact, "[redacted]") {
+		t.Fatalf("response artifact = %q, want env value redacted", responseArtifact)
+	}
+	for _, name := range []string{
+		"mcp-call-smoke-summary.md",
+		"mcp-call-transcript.jsonl",
+		"mcp-call-result.json",
+		"mcp-call-stdout.log",
+		"mcp-call-stderr.log",
+		"mcp-call-response.json",
+	} {
+		content := readSmokeArtifact(t, artifactsDir, name)
+		if strings.Contains(content, "super-secret-value") {
+			t.Fatalf("%s leaked env value: %q", name, content)
+		}
 	}
 }
 
@@ -1035,6 +1085,10 @@ func TestCallSmokeTruncatesLargeResponse(t *testing.T) {
 	if !response.ResponseTruncated || response.ResponseStoredBytes != 24 || response.ResponseOriginalBytes <= response.ResponseStoredBytes || response.ResponsePreview == "" {
 		t.Fatalf("response = %#v, want truncation metadata", response)
 	}
+	summary := readSmokeArtifact(t, artifactsDir, "mcp-call-smoke-summary.md")
+	if !strings.Contains(summary, "tool_call_count: 1") || !strings.Contains(summary, "response_truncated: true") {
+		t.Fatalf("summary = %q, want truncation metadata", summary)
+	}
 }
 
 func TestLoadExampleCallPolicy(t *testing.T) {
@@ -1048,6 +1102,24 @@ func TestLoadExampleCallPolicy(t *testing.T) {
 	if policy.MCPCallPolicy.MaxArgumentsBytes != MaxToolArgumentsBytes || policy.MCPCallPolicy.MaxResponseBytes != DefaultMaxResponseBytes {
 		t.Fatalf("policy = %#v, want default documented byte limits", policy.MCPCallPolicy)
 	}
+	if stringSliceContainsSequence(policy.MCPCallPolicy.AllowedTools, []string{FakeEchoToolName}) {
+		t.Fatalf("real call policy allowed tools = %#v, must not suggest fake echo", policy.MCPCallPolicy.AllowedTools)
+	}
+	if !stringSliceContainsSequence(policy.MCPCallPolicy.AllowedServers, []string{"filesystem-readonly"}) {
+		t.Fatalf("real call policy allowed servers = %#v, want filesystem-readonly", policy.MCPCallPolicy.AllowedServers)
+	}
+
+	fakePolicy, err := LoadCallPolicy(filepath.Join("..", "..", "configs", "examples", "mcp-call-policy-fake.yaml"))
+	if err != nil {
+		t.Fatalf("LoadCallPolicy(fake) error = %v", err)
+	}
+	if err := ValidateCallPolicy(fakePolicy); err != nil {
+		t.Fatalf("ValidateCallPolicy(fake) error = %v", err)
+	}
+	if !stringSliceContainsSequence(fakePolicy.MCPCallPolicy.AllowedServers, []string{"fake-stdio"}) ||
+		!stringSliceContainsSequence(fakePolicy.MCPCallPolicy.AllowedTools, []string{FakeEchoToolName}) {
+		t.Fatalf("fake policy = %#v, want fake-stdio and fake echo", fakePolicy.MCPCallPolicy)
+	}
 }
 
 func TestCallPolicyRejectsWriteExecAllowedCapabilities(t *testing.T) {
@@ -1057,6 +1129,16 @@ func TestCallPolicyRejectsWriteExecAllowedCapabilities(t *testing.T) {
 	err := ValidateCallPolicy(policy)
 	if err == nil || !strings.Contains(err.Error(), "not permitted") {
 		t.Fatalf("ValidateCallPolicy() error = %v, want write/exec rejection", err)
+	}
+}
+
+func TestScanRedactionLeaksRejectsUnredactedValue(t *testing.T) {
+	err := scanRedactionLeaks("mcp-call-response.json", []byte("leaked super-secret-value"), []string{"super-secret-value"})
+	if err == nil {
+		t.Fatalf("scanRedactionLeaks() error = nil, want leak rejection")
+	}
+	if strings.Contains(err.Error(), "super-secret-value") {
+		t.Fatalf("scanRedactionLeaks() error = %q, must not include secret value", err.Error())
 	}
 }
 
