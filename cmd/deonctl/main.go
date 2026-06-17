@@ -27,6 +27,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/mcpproposalqueue"
 	"github.com/deon7769/deonclaw/internal/mcpsmoke"
 	"github.com/deon7769/deonclaw/internal/memory"
+	"github.com/deon7769/deonclaw/internal/memoryindex"
 	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runreport"
 	"github.com/deon7769/deonclaw/internal/runs"
@@ -86,6 +87,9 @@ Usage:
   deonctl memory proposal restore --backup-plan <path> --backup-result <path> --dry-run --output <path>
   deonctl memory proposal restore-execute --backup-plan <path> --backup-result <path> --restore-preview <path> --output <path> --confirm-restore
   deonctl memory proposal apply-execute --proposal <path> --approval <path> --policy <path> --backup-plan <path> --backup-result <path> --output <path> --confirm-apply
+  deonctl memory index validate --config <memory-index.yaml>
+  deonctl memory index plan --config <memory-index.yaml> [--output-format text|json]
+  deonctl memory index build --config <memory-index.yaml> --artifacts-dir <dir>
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -476,91 +480,135 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			return 2
 		}
 	case "memory":
-		if len(args) < 3 || args[1] != "proposal" {
+		if len(args) < 2 {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
-		switch args[2] {
-		case "new":
-			opts, err := parseMemoryProposalNewOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
+		switch args[1] {
+		case "index":
+			if len(args) < 3 {
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
-			return runMemoryProposalNew(opts, stdout, stderr)
-		case "lint":
-			opts, err := parseMemoryProposalLintOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
+			switch args[2] {
+			case "validate":
+				opts, err := parseMemoryIndexConfigOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryIndexValidate(opts, stdout, stderr)
+			case "plan":
+				opts, err := parseMemoryIndexPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryIndexPlan(opts, stdout, stderr)
+			case "build":
+				opts, err := parseMemoryIndexBuildOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryIndexBuild(opts, stdout, stderr)
+			default:
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
-			return runMemoryProposalLint(opts, stdout, stderr)
-		case "apply":
-			opts, err := parseMemoryProposalApplyOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
+		case "proposal":
+			if len(args) < 3 {
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
-			return runMemoryProposalApply(opts, stdout, stderr)
-		case "approve":
-			opts, err := parseMemoryProposalApproveOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
+			switch args[2] {
+			case "new":
+				opts, err := parseMemoryProposalNewOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalNew(opts, stdout, stderr)
+			case "lint":
+				opts, err := parseMemoryProposalLintOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalLint(opts, stdout, stderr)
+			case "apply":
+				opts, err := parseMemoryProposalApplyOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalApply(opts, stdout, stderr)
+			case "approve":
+				opts, err := parseMemoryProposalApproveOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalApprove(opts, stdout, stderr)
+			case "apply-preflight":
+				opts, err := parseMemoryProposalApplyPreflightOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalApplyPreflight(opts, stdout, stderr)
+			case "backup-plan":
+				opts, err := parseMemoryProposalBackupPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalBackupPlan(opts, stdout, stderr)
+			case "backup-materialize":
+				opts, err := parseMemoryProposalBackupMaterializeOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalBackupMaterialize(opts, stdout, stderr)
+			case "restore":
+				opts, err := parseMemoryProposalRestoreOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalRestore(opts, stdout, stderr)
+			case "restore-execute":
+				opts, err := parseMemoryProposalRestoreExecuteOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalRestoreExecute(opts, stdout, stderr)
+			case "apply-execute":
+				opts, err := parseMemoryProposalApplyExecuteOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryProposalApplyExecute(opts, stdout, stderr)
+			default:
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
-			return runMemoryProposalApprove(opts, stdout, stderr)
-		case "apply-preflight":
-			opts, err := parseMemoryProposalApplyPreflightOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
-			return runMemoryProposalApplyPreflight(opts, stdout, stderr)
-		case "backup-plan":
-			opts, err := parseMemoryProposalBackupPlanOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
-			return runMemoryProposalBackupPlan(opts, stdout, stderr)
-		case "backup-materialize":
-			opts, err := parseMemoryProposalBackupMaterializeOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
-			return runMemoryProposalBackupMaterialize(opts, stdout, stderr)
-		case "restore":
-			opts, err := parseMemoryProposalRestoreOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
-			return runMemoryProposalRestore(opts, stdout, stderr)
-		case "restore-execute":
-			opts, err := parseMemoryProposalRestoreExecuteOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
-			return runMemoryProposalRestoreExecute(opts, stdout, stderr)
-		case "apply-execute":
-			opts, err := parseMemoryProposalApplyExecuteOptions(args[3:])
-			if err != nil {
-				fmt.Fprintf(stderr, "error: %v\n", err)
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
-			return runMemoryProposalApplyExecute(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -2903,6 +2951,161 @@ func runMCPToolSmoke(opts mcpToolSmokeOptions, stdout io.Writer, stderr io.Write
 	fmt.Fprintf(stdout, "runtime: %s\n", result.Runtime)
 	fmt.Fprintf(stdout, "artifacts_dir: %s\n", result.ArtifactsDir)
 	fmt.Fprintf(stdout, "transcript: %s\n", result.TranscriptPath)
+	return 0
+}
+
+type memoryIndexConfigOptions struct {
+	configPath string
+}
+
+func parseMemoryIndexConfigOptions(args []string) (memoryIndexConfigOptions, error) {
+	var opts memoryIndexConfigOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return memoryIndexConfigOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		default:
+			return memoryIndexConfigOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return memoryIndexConfigOptions{}, fmt.Errorf("missing --config")
+	}
+	return opts, nil
+}
+
+type memoryIndexPlanOptions struct {
+	configPath   string
+	outputFormat string
+}
+
+func parseMemoryIndexPlanOptions(args []string) (memoryIndexPlanOptions, error) {
+	opts := memoryIndexPlanOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return memoryIndexPlanOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryIndexPlanOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryIndexPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return memoryIndexPlanOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryIndexPlanOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+type memoryIndexBuildOptions struct {
+	configPath   string
+	artifactsDir string
+}
+
+func parseMemoryIndexBuildOptions(args []string) (memoryIndexBuildOptions, error) {
+	var opts memoryIndexBuildOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return memoryIndexBuildOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return memoryIndexBuildOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		default:
+			return memoryIndexBuildOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return memoryIndexBuildOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.artifactsDir == "" {
+		return memoryIndexBuildOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	return opts, nil
+}
+
+func runMemoryIndexValidate(opts memoryIndexConfigOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := memoryindex.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index validate failed: %v\n", err)
+		return 1
+	}
+	if err := memoryindex.Validate(cfg); err != nil {
+		fmt.Fprintf(stderr, "memory index validate failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory index validate: ok")
+	return 0
+}
+
+func runMemoryIndexPlan(opts memoryIndexPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := memoryindex.Load(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index plan failed: %v\n", err)
+		return 1
+	}
+	plan, err := memoryindex.Plan(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index plan failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = memoryindex.WritePlanJSON(plan, stdout)
+	default:
+		err = memoryindex.WritePlanText(plan, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index plan failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runMemoryIndexBuild(opts memoryIndexBuildOptions, stdout io.Writer, stderr io.Writer) int {
+	configBytes, err := os.ReadFile(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index build failed: %v\n", err)
+		return 1
+	}
+	cfg, err := memoryindex.Parse(configBytes)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index build failed: %v\n", err)
+		return 1
+	}
+	result, err := memoryindex.Build(cfg, opts.artifactsDir, configBytes)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory index build failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory index build: ok")
+	fmt.Fprintf(stdout, "manifest: %s\n", result.Manifest.ManifestPath)
+	fmt.Fprintf(stdout, "chunks: %s\n", result.Manifest.ChunksPath)
+	fmt.Fprintf(stdout, "source_count: %d\n", result.Manifest.SourceCount)
+	fmt.Fprintf(stdout, "chunk_count: %d\n", result.Manifest.ChunkCount)
+	fmt.Fprintf(stdout, "skipped_count: %d\n", result.Manifest.SkippedCount)
 	return 0
 }
 

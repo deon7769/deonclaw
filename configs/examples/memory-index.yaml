@@ -1,0 +1,25 @@
+memory_index:
+  domains:
+    - mysecondbrain
+    - escalasoft_brain
+  sources:
+    - domain: mysecondbrain
+      root: memory/mysecondbrain
+      include:
+        - "**/*.md"
+      exclude:
+        - "**/.archive/**"
+        - "**/secrets/**"
+    - domain: escalasoft_brain
+      root: memory/escalasoft_brain
+      include:
+        - "**/*.md"
+      exclude:
+        - "**/.archive/**"
+        - "**/secrets/**"
+  chunking:
+    max_chars: 2000
+    overlap_chars: 200
+  output:
+    manifest: memory-index-manifest.json
+    chunks: memory-index-chunks.jsonl

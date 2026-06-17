@@ -90,13 +90,14 @@ Implemented:
 - memory proposal/lint/dry-run/approval/preflight/backup/materialize/apply/restore workflow
 - real memory apply for create/append/update/archive
 - real restore execution
+- memory index foundation (`memory index validate/plan/build`) with auditable chunks, without runner retrieval or LanceDB writes
 
 Not implemented yet:
 
 - real fallback execution
 - Codex Docker worker runtime
 - MCP execution/manager for automatic real external MCP tool orchestration
-- memory index/LanceDB
+- memory index retrieval/LanceDB in runner
 - UI/dashboard
 
 ## Quick command map
