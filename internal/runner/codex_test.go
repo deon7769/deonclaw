@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,15 +14,18 @@ import (
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/lancedbpolicy"
 	"github.com/deon7769/deonclaw/internal/mcpapproval"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/policy"
+	"github.com/deon7769/deonclaw/internal/retrievalcontext"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
 	"github.com/deon7769/deonclaw/internal/runtimeconfig"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workers"
+	"gopkg.in/yaml.v3"
 )
 
 func TestCaptureGitDiffIncludesStagedAndUnstagedChanges(t *testing.T) {
@@ -522,6 +526,184 @@ func TestCodexRunnerRunRejectsInvalidMCPContextBeforeWorker(t *testing.T) {
 				t.Fatalf("stderr = %q, want MCP context failure containing %q", stderr.String(), tt.wantErr)
 			}
 		})
+	}
+}
+
+func TestCodexRunnerRunWithLanceDBRetrievalContextAttachment(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	resultPath, reportPath, policyPath := writeRunnerLanceDBRetrievalFixtures(t, runnerValidSearchEnvelope())
+	taskPath := writeTaskFileWithRetrievalContext(t, "codex", []tasks.RetrievalContextAttachment{{
+		Kind:       retrievalcontext.KindLanceDBSearchReport,
+		Path:       resultPath,
+		ReportPath: reportPath,
+		Policy:     policyPath,
+		MaxResults: 5,
+	}})
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-lancedb-retrieval-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if len(spec.Task.RetrievalContext.Attachments) != 0 {
+						t.Fatalf("worker received retrieval context config: %#v", spec.Task.RetrievalContext.Attachments)
+					}
+					if len(spec.Task.MCPContext.Attachments) != 0 {
+						t.Fatalf("worker received MCP context config: %#v", spec.Task.MCPContext.Attachments)
+					}
+					if !strings.Contains(spec.Prompt, "Retrieved context metadata only") ||
+						!strings.Contains(spec.Prompt, "chunk-a") ||
+						!strings.Contains(spec.Prompt, "notes/a.md") {
+						t.Fatalf("prompt = %q, want passive retrieval metadata", spec.Prompt)
+					}
+					for _, forbidden := range []string{"SECRET-CHUNK-TEXT", `"vector":`, "chunk_text:", `"text":`, `"content":`, `"embedding":`} {
+						if strings.Contains(spec.Prompt, forbidden) {
+							t.Fatalf("prompt leaked forbidden payload %q", forbidden)
+						}
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     taskPath,
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-lancedb-retrieval-context-001")
+	retrievalMD := filepath.Join(runDir, "retrieval-context.md")
+	retrievalJSON := filepath.Join(runDir, "retrieval-context.json")
+	assertFileContains(t, retrievalMD, "Retrieved context metadata only")
+	assertFileContains(t, retrievalMD, "chunk-a")
+	assertFileNotContains(t, retrievalMD, "SECRET-CHUNK-TEXT")
+	assertFileContains(t, retrievalJSON, `"chunk_id": "chunk-a"`)
+	assertFileNotContains(t, retrievalJSON, `"vector":`)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Retrieval context hits: 1")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	if trace["retrieval_context_attached"] != true {
+		t.Fatalf("trace retrieval_context_attached = %v, want true", trace["retrieval_context_attached"])
+	}
+	if trace["retrieval_context_count"] != float64(1) {
+		t.Fatalf("trace retrieval_context_count = %v, want 1", trace["retrieval_context_count"])
+	}
+	if trace["retrieval_context_status"] != "ok" {
+		t.Fatalf("trace retrieval_context_status = %v, want ok", trace["retrieval_context_status"])
+	}
+	assertTraceNonEmptyString(t, trace, "retrieval_context_sha256")
+}
+
+func TestCodexRunnerRunRejectsInvalidRetrievalContextBeforeWorker(t *testing.T) {
+	tests := []struct {
+		name    string
+		mutate  func(*runnerSearchEnvelopeFixture)
+		wantErr string
+	}{
+		{
+			name: "retrieval_performed false",
+			mutate: func(envelope *runnerSearchEnvelopeFixture) {
+				envelope.Summary.RetrievalPerformed = false
+			},
+			wantErr: "search-report",
+		},
+		{
+			name: "forbidden text field",
+			mutate: func(envelope *runnerSearchEnvelopeFixture) {
+				raw := runnerMarshalSearchHit(lancedbpolicy.SearchHit{
+					Rank: 1, ChunkID: "chunk-a", VectorID: "vec-a", Distance: 0.1,
+				})
+				var object map[string]any
+				_ = json.Unmarshal(raw, &object)
+				object["content"] = "SECRET-CHUNK-TEXT"
+				raw, _ = json.Marshal(object)
+				envelope.Search.Results = []json.RawMessage{raw}
+			},
+			wantErr: "search-report",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			envelope := runnerValidSearchEnvelope()
+			resultPath, reportPath, policyPath := writeRunnerLanceDBRetrievalFixtures(t, envelope)
+			if tt.mutate != nil {
+				tt.mutate(&envelope)
+				resultBytes, err := json.MarshalIndent(envelope, "", "  ")
+				if err != nil {
+					t.Fatalf("Marshal() error = %v", err)
+				}
+				resultBytes = append(resultBytes, '\n')
+				if err := os.WriteFile(resultPath, resultBytes, 0o644); err != nil {
+					t.Fatalf("WriteFile() error = %v", err)
+				}
+			}
+			taskPath := writeTaskFileWithRetrievalContext(t, "codex", []tasks.RetrievalContextAttachment{{
+				Kind:       retrievalcontext.KindLanceDBSearchReport,
+				Path:       resultPath,
+				ReportPath: reportPath,
+				Policy:     policyPath,
+				MaxResults: 5,
+			}})
+			workerCalled := false
+			runner := testCodexRunner(t, testCodexRunnerOptions{
+				RunID: "run-invalid-retrieval-context-001",
+				WorkerFactory: func() workers.Worker {
+					return fakeWorker{
+						runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+							workerCalled = true
+							return &workers.RunResult{}, nil
+						},
+					}
+				},
+			})
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := runner.Run(context.Background(), CodexRunOptions{
+				TaskPath:     taskPath,
+				StorePath:    filepath.Join(tempDir, "deonclaw.db"),
+				ArtifactsDir: filepath.Join(tempDir, "artifacts"),
+			}, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("Run() exit code = %d, want 1", code)
+			}
+			if workerCalled {
+				t.Fatal("worker was called for invalid retrieval context")
+			}
+			if !strings.Contains(stderr.String(), "retrieval context failed") || !strings.Contains(stderr.String(), tt.wantErr) {
+				t.Fatalf("stderr = %q, want retrieval context failure containing %q", stderr.String(), tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateRejectsInvalidRetrievalContextMaxResults(t *testing.T) {
+	task := &tasks.Task{
+		ID: "retrieval-task", Title: "t", Domain: "general", Worker: "codex", Goal: "g", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."},
+		Memory:    tasks.MemorySpec{Scope: "none"},
+		RetrievalContext: tasks.RetrievalContextSpec{Attachments: []tasks.RetrievalContextAttachment{{
+			Kind: "lancedb_search_report", Path: "a.json", ReportPath: "b.json", Policy: "p.yaml", MaxResults: 0,
+		}}},
+		ForbiddenPaths:   []string{"secrets/**"},
+		ExpectedOutputs:  []string{"artifacts/summary.md"},
+		DefinitionOfDone: []string{"done"},
+	}
+	if err := tasks.Validate(task); err == nil || !strings.Contains(err.Error(), "max_results") {
+		t.Fatalf("Validate() error = %v, want max_results validation failure", err)
 	}
 }
 
@@ -2430,6 +2612,133 @@ definition_of_done:
   - MCP context is attached passively
 `)
 	return writeTaskFileContent(t, builder.String())
+}
+
+func writeTaskFileWithRetrievalContext(t *testing.T, worker string, attachments []tasks.RetrievalContextAttachment) string {
+	t.Helper()
+	var builder strings.Builder
+	builder.WriteString(`id: retrieval-context-task-001
+title: "Retrieval context task"
+domain: general
+worker: ` + worker + `
+goal: "Use attached LanceDB retrieval metadata passively"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+retrieval_context:
+  attachments:
+`)
+	for _, attachment := range attachments {
+		builder.WriteString("    - kind: " + attachment.Kind + "\n")
+		builder.WriteString("      path: " + filepath.ToSlash(attachment.Path) + "\n")
+		builder.WriteString("      report_path: " + filepath.ToSlash(attachment.ReportPath) + "\n")
+		builder.WriteString("      policy: " + filepath.ToSlash(attachment.Policy) + "\n")
+		builder.WriteString("      max_results: " + fmt.Sprintf("%d", attachment.MaxResults) + "\n")
+	}
+	builder.WriteString(`allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - Retrieval context is attached passively
+`)
+	return writeTaskFileContent(t, builder.String())
+}
+
+type runnerSearchEnvelopeFixture struct {
+	GeneratedAt string `json:"generated_at"`
+	Search      struct {
+		Status    string            `json:"status"`
+		QueryMode string            `json:"query_mode"`
+		TopK      int               `json:"top_k"`
+		Results   []json.RawMessage `json:"results"`
+	} `json:"search"`
+	Summary lancedbpolicy.SearchSmokeSummary `json:"summary"`
+}
+
+func runnerValidSearchEnvelope() runnerSearchEnvelopeFixture {
+	envelope := runnerSearchEnvelopeFixture{GeneratedAt: "2026-01-01T00:00:00Z"}
+	envelope.Search.Status = lancedbpolicy.StatusOK
+	envelope.Search.QueryMode = "vector"
+	envelope.Search.TopK = 5
+	envelope.Search.Results = []json.RawMessage{runnerMarshalSearchHit(lancedbpolicy.SearchHit{
+		Rank: 1, ChunkID: "chunk-a", VectorID: "vec-a", Distance: 0.12, Domain: "general",
+		SourcePath: "notes/a.md", SourceSHA256: "sha-source", TextSHA256: "sha-text",
+		EmbeddingModel: "deterministic-hash-v1", Provider: "local",
+	})}
+	envelope.Summary = lancedbpolicy.SearchSmokeSummary{
+		QueryMode: "vector", TopK: 5, ResultCount: 1,
+		DatabasePath: "artifacts/lancedb-smoke", Table: "memory_vectors",
+		RetrievalPerformed: true, RunnerIntegration: false,
+	}
+	return envelope
+}
+
+func runnerMarshalSearchHit(hit lancedbpolicy.SearchHit) json.RawMessage {
+	raw, err := json.Marshal(hit)
+	if err != nil {
+		panic(err)
+	}
+	return raw
+}
+
+func writeRunnerLanceDBRetrievalFixtures(t *testing.T, envelope runnerSearchEnvelopeFixture) (string, string, string) {
+	t.Helper()
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "lancedb-policy.yaml")
+	resultPath := filepath.Join(dir, "lancedb-search-smoke-result.json")
+	reportPath := filepath.Join(dir, "lancedb-search-report.json")
+
+	cfg := lancedbpolicy.Config{LanceDBPolicy: lancedbpolicy.Policy{
+		Input: lancedbpolicy.InputConfig{
+			EmbeddingManifest: "artifacts/memory-embedding-manifest.json",
+			VectorsPath:       "artifacts/memory-index-vectors.jsonl",
+		},
+		Database: lancedbpolicy.DatabaseConfig{Path: "artifacts/lancedb-smoke", Table: "memory_vectors"},
+		Schema: lancedbpolicy.SchemaConfig{
+			VectorColumn:  "vector",
+			TextRefColumn: "chunk_id",
+			MetadataColumns: []string{
+				"domain", "source_path", "source_sha256", "text_sha256", "embedding_model", "provider",
+			},
+		},
+		Limits: lancedbpolicy.LimitsConfig{MaxVectors: 10000, ExpectedDimensions: 16},
+		Mode:   lancedbpolicy.ModeWriteSmoke,
+	}}
+	policyBytes, err := yaml.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if err := os.WriteFile(policyPath, policyBytes, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	resultBytes, err := json.MarshalIndent(envelope, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	resultBytes = append(resultBytes, '\n')
+	if err := os.WriteFile(resultPath, resultBytes, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	report, err := lancedbpolicy.SearchReport(resultPath, cfg, lancedbpolicy.SearchReportOptions{})
+	if err != nil {
+		t.Fatalf("SearchReport() error = %v", err)
+	}
+	reportBytes, err := json.MarshalIndent(report, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	reportBytes = append(reportBytes, '\n')
+	if err := os.WriteFile(reportPath, reportBytes, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return resultPath, reportPath, policyPath
 }
 
 func writeTaskFileWithMCPProposalPolicy(t *testing.T, worker string, configPath string, policyPath string, runtimeConfigPath string, requirePreflight bool) string {

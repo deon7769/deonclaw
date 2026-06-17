@@ -14,6 +14,7 @@ type Task struct {
 	Validation        ValidationSpec        `yaml:"validation" json:"validation"`
 	MCPContext        MCPContextSpec        `yaml:"mcp_context,omitempty" json:"mcp_context,omitempty"`
 	MCPProposalPolicy MCPProposalPolicySpec `yaml:"mcp_proposal_policy,omitempty" json:"mcp_proposal_policy,omitempty"`
+	RetrievalContext  RetrievalContextSpec  `yaml:"retrieval_context,omitempty" json:"retrieval_context,omitempty"`
 	AllowedPaths      []string              `yaml:"allowed_paths" json:"allowed_paths"`
 	ForbiddenPaths    []string              `yaml:"forbidden_paths" json:"forbidden_paths"`
 	ExpectedOutputs   []string              `yaml:"expected_outputs" json:"expected_outputs"`
@@ -70,4 +71,17 @@ type MCPProposalPolicySpec struct {
 	Policy           string `yaml:"policy,omitempty" json:"policy,omitempty"`
 	RuntimeConfig    string `yaml:"runtime_config,omitempty" json:"runtime_config,omitempty"`
 	RequirePreflight bool   `yaml:"require_preflight,omitempty" json:"require_preflight,omitempty"`
+}
+
+type RetrievalContextSpec struct {
+	Attachments []RetrievalContextAttachment `yaml:"attachments,omitempty" json:"attachments,omitempty"`
+}
+
+type RetrievalContextAttachment struct {
+	Name       string `yaml:"name,omitempty" json:"name,omitempty"`
+	Kind       string `yaml:"kind" json:"kind"`
+	Path       string `yaml:"path" json:"path"`
+	ReportPath string `yaml:"report_path" json:"report_path"`
+	Policy     string `yaml:"policy" json:"policy"`
+	MaxResults int    `yaml:"max_results" json:"max_results"`
 }

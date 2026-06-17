@@ -33,63 +33,71 @@ var requiredExecutionTraceEvents = []string{
 }
 
 type executionTraceOptions struct {
-	RunID               string
-	WorkerName          string
-	Task                *tasks.Task
-	Result              *workers.RunResult
-	Status              runs.RunStatus
-	StartedAt           time.Time
-	FinishedAt          time.Time
-	Prompt              string
-	ContextPackMarkdown []byte
-	MCPContextMarkdown  []byte
-	MemoryPolicyPath    string
-	RuntimeConfigPath   string
-	MCPToolProposal     mcpToolProposalCheck
-	EnvRequirements     []workerconfig.EnvRequirementCheck
-	WorkerRuntime       string
-	Validation          ValidationResult
-	ValidationRuntime   string
-	PolicyOK            bool
-	ChangedPathCount    int
-	Cleanup             workspaceCleanup
-	Timeline            []executionTraceEvent
+	RunID                    string
+	WorkerName               string
+	Task                     *tasks.Task
+	Result                   *workers.RunResult
+	Status                   runs.RunStatus
+	StartedAt                time.Time
+	FinishedAt               time.Time
+	Prompt                   string
+	ContextPackMarkdown      []byte
+	MCPContextMarkdown       []byte
+	RetrievalContextMarkdown []byte
+	RetrievalContextAttached bool
+	RetrievalContextCount    int
+	RetrievalContextStatus   string
+	MemoryPolicyPath         string
+	RuntimeConfigPath        string
+	MCPToolProposal          mcpToolProposalCheck
+	EnvRequirements          []workerconfig.EnvRequirementCheck
+	WorkerRuntime            string
+	Validation               ValidationResult
+	ValidationRuntime        string
+	PolicyOK                 bool
+	ChangedPathCount         int
+	Cleanup                  workspaceCleanup
+	Timeline                 []executionTraceEvent
 }
 
 type executionTrace struct {
-	RunID                 string                             `json:"run_id"`
-	TaskID                string                             `json:"task_id"`
-	Worker                string                             `json:"worker"`
-	ModelProfile          string                             `json:"model_profile"`
-	ModelStrategy         string                             `json:"model_strategy,omitempty"`
-	SelectedModelProfile  string                             `json:"selected_model_profile,omitempty"`
-	Provider              string                             `json:"provider"`
-	Model                 string                             `json:"model"`
-	ModelArg              string                             `json:"model_arg"`
-	CommandDisplay        string                             `json:"command_display"`
-	PromptSHA256          string                             `json:"prompt_sha256"`
-	ContextPackSHA256     string                             `json:"context_pack_sha256,omitempty"`
-	MCPContextSHA256      string                             `json:"mcp_context_sha256,omitempty"`
-	MCPToolProposalStatus string                             `json:"mcp_tool_proposal_status"`
-	MCPToolProposalSHA256 string                             `json:"mcp_tool_proposal_sha256,omitempty"`
-	MemoryPolicySHA256    string                             `json:"memory_policy_sha256,omitempty"`
-	RuntimeConfigSHA256   string                             `json:"runtime_config_sha256,omitempty"`
-	EnvRequirements       []workerconfig.EnvRequirementCheck `json:"env_requirements"`
-	WorkerRuntime         string                             `json:"worker_runtime"`
-	StartedAt             string                             `json:"started_at"`
-	FinishedAt            string                             `json:"finished_at"`
-	DurationMS            int64                              `json:"duration_ms"`
-	Status                string                             `json:"status"`
-	StdoutFormat          string                             `json:"stdout_format"`
-	ParsedEvents          int                                `json:"parsed_events"`
-	ParseWarnings         int                                `json:"parse_warnings"`
-	ValidationStatus      string                             `json:"validation_status"`
-	ValidationRuntime     string                             `json:"validation_runtime"`
-	PolicyStatus          string                             `json:"policy_status"`
-	ChangedPathsCount     int                                `json:"changed_paths_count"`
-	CleanupAction         string                             `json:"cleanup_action"`
-	CleanupReason         string                             `json:"cleanup_reason"`
-	Timeline              []executionTraceEvent              `json:"timeline"`
+	RunID                    string                             `json:"run_id"`
+	TaskID                   string                             `json:"task_id"`
+	Worker                   string                             `json:"worker"`
+	ModelProfile             string                             `json:"model_profile"`
+	ModelStrategy            string                             `json:"model_strategy,omitempty"`
+	SelectedModelProfile     string                             `json:"selected_model_profile,omitempty"`
+	Provider                 string                             `json:"provider"`
+	Model                    string                             `json:"model"`
+	ModelArg                 string                             `json:"model_arg"`
+	CommandDisplay           string                             `json:"command_display"`
+	PromptSHA256             string                             `json:"prompt_sha256"`
+	ContextPackSHA256        string                             `json:"context_pack_sha256,omitempty"`
+	MCPContextSHA256         string                             `json:"mcp_context_sha256,omitempty"`
+	RetrievalContextAttached bool                               `json:"retrieval_context_attached"`
+	RetrievalContextCount    int                                `json:"retrieval_context_count"`
+	RetrievalContextSHA256   string                             `json:"retrieval_context_sha256,omitempty"`
+	RetrievalContextStatus   string                             `json:"retrieval_context_status"`
+	MCPToolProposalStatus    string                             `json:"mcp_tool_proposal_status"`
+	MCPToolProposalSHA256    string                             `json:"mcp_tool_proposal_sha256,omitempty"`
+	MemoryPolicySHA256       string                             `json:"memory_policy_sha256,omitempty"`
+	RuntimeConfigSHA256      string                             `json:"runtime_config_sha256,omitempty"`
+	EnvRequirements          []workerconfig.EnvRequirementCheck `json:"env_requirements"`
+	WorkerRuntime            string                             `json:"worker_runtime"`
+	StartedAt                string                             `json:"started_at"`
+	FinishedAt               string                             `json:"finished_at"`
+	DurationMS               int64                              `json:"duration_ms"`
+	Status                   string                             `json:"status"`
+	StdoutFormat             string                             `json:"stdout_format"`
+	ParsedEvents             int                                `json:"parsed_events"`
+	ParseWarnings            int                                `json:"parse_warnings"`
+	ValidationStatus         string                             `json:"validation_status"`
+	ValidationRuntime        string                             `json:"validation_runtime"`
+	PolicyStatus             string                             `json:"policy_status"`
+	ChangedPathsCount        int                                `json:"changed_paths_count"`
+	CleanupAction            string                             `json:"cleanup_action"`
+	CleanupReason            string                             `json:"cleanup_reason"`
+	Timeline                 []executionTraceEvent              `json:"timeline"`
 }
 
 type executionTraceEvent struct {
@@ -200,6 +208,15 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 	}
 	if len(opts.MCPContextMarkdown) > 0 {
 		trace.MCPContextSHA256 = sha256Hex(opts.MCPContextMarkdown)
+	}
+	trace.RetrievalContextAttached = opts.RetrievalContextAttached
+	trace.RetrievalContextCount = opts.RetrievalContextCount
+	trace.RetrievalContextStatus = strings.TrimSpace(opts.RetrievalContextStatus)
+	if trace.RetrievalContextStatus == "" {
+		trace.RetrievalContextStatus = "skipped"
+	}
+	if len(opts.RetrievalContextMarkdown) > 0 {
+		trace.RetrievalContextSHA256 = sha256Hex(opts.RetrievalContextMarkdown)
 	}
 	if hash := fileSHA256IfReadable(opts.MemoryPolicyPath); hash != "" {
 		trace.MemoryPolicySHA256 = hash

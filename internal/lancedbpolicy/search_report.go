@@ -62,6 +62,18 @@ func LoadSearchSmokeResult(path string) (SearchSmokeResult, error) {
 	return payload, nil
 }
 
+func LoadSearchReportArtifact(path string) (SearchReportResult, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return SearchReportResult{}, fmt.Errorf("read search-report artifact %q: %w", path, err)
+	}
+	var report SearchReportResult
+	if err := json.Unmarshal(data, &report); err != nil {
+		return SearchReportResult{}, fmt.Errorf("parse search-report artifact %q: %w", path, err)
+	}
+	return report, nil
+}
+
 func loadSearchSmokeResultEnvelope(path string) (searchSmokeResultEnvelope, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

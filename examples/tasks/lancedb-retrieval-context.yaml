@@ -1,0 +1,27 @@
+id: lancedb-retrieval-context-001
+title: "LanceDB retrieval context attachment example"
+domain: general
+worker: codex
+goal: "Use the attached LanceDB search metadata as passive context only."
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+retrieval_context:
+  attachments:
+    - kind: lancedb_search_report
+      path: artifacts/lancedb-search-smoke-result.json
+      report_path: artifacts/lancedb-search-report.json
+      policy: configs/examples/lancedb-policy-write-smoke.yaml
+      max_results: 5
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - Worker received retrieval metadata summaries only
+  - No LanceDB search was executed by the runner
+  - No chunk source text was injected

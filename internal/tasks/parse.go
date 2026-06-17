@@ -54,6 +54,13 @@ func normalize(task *Task) {
 		task.MCPContext.Attachments[i].Kind = strings.TrimSpace(task.MCPContext.Attachments[i].Kind)
 		task.MCPContext.Attachments[i].Path = strings.TrimSpace(task.MCPContext.Attachments[i].Path)
 	}
+	for i := range task.RetrievalContext.Attachments {
+		task.RetrievalContext.Attachments[i].Name = strings.TrimSpace(task.RetrievalContext.Attachments[i].Name)
+		task.RetrievalContext.Attachments[i].Kind = strings.TrimSpace(task.RetrievalContext.Attachments[i].Kind)
+		task.RetrievalContext.Attachments[i].Path = strings.TrimSpace(task.RetrievalContext.Attachments[i].Path)
+		task.RetrievalContext.Attachments[i].ReportPath = strings.TrimSpace(task.RetrievalContext.Attachments[i].ReportPath)
+		task.RetrievalContext.Attachments[i].Policy = strings.TrimSpace(task.RetrievalContext.Attachments[i].Policy)
+	}
 	task.MCPProposalPolicy.Config = strings.TrimSpace(task.MCPProposalPolicy.Config)
 	task.MCPProposalPolicy.Policy = strings.TrimSpace(task.MCPProposalPolicy.Policy)
 	task.MCPProposalPolicy.RuntimeConfig = strings.TrimSpace(task.MCPProposalPolicy.RuntimeConfig)

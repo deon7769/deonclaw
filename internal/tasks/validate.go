@@ -109,6 +109,24 @@ func Validate(task *Task) error {
 			errs = append(errs, fmt.Errorf("%s.path is required", prefix))
 		}
 	}
+	for i, attachment := range task.RetrievalContext.Attachments {
+		prefix := fmt.Sprintf("retrieval_context.attachments[%d]", i)
+		if strings.TrimSpace(attachment.Kind) != "lancedb_search_report" {
+			errs = append(errs, fmt.Errorf("%s.kind %q is not supported", prefix, attachment.Kind))
+		}
+		if strings.TrimSpace(attachment.Path) == "" {
+			errs = append(errs, fmt.Errorf("%s.path is required", prefix))
+		}
+		if strings.TrimSpace(attachment.ReportPath) == "" {
+			errs = append(errs, fmt.Errorf("%s.report_path is required", prefix))
+		}
+		if strings.TrimSpace(attachment.Policy) == "" {
+			errs = append(errs, fmt.Errorf("%s.policy is required", prefix))
+		}
+		if attachment.MaxResults <= 0 || attachment.MaxResults > 20 {
+			errs = append(errs, fmt.Errorf("%s.max_results must be > 0 and <= 20", prefix))
+		}
+	}
 	if usesMCPProposalPolicy(task.MCPProposalPolicy) {
 		if strings.TrimSpace(task.MCPProposalPolicy.Config) == "" {
 			errs = append(errs, errors.New("mcp_proposal_policy.config is required when mcp_proposal_policy is configured"))

@@ -98,13 +98,14 @@ Implemented:
 - LanceDB structural readback doctor/report (`memory lancedb doctor/report`) over write-smoke databases, without search or runner integration
 - LanceDB controlled vector search smoke (`memory lancedb search-smoke`) with explicit query vector or chunk_id, without natural-language retrieval, provider APIs, or runner integration
 - LanceDB search-smoke result QA/report (`memory lancedb search-report`) over search artifacts, without new search or runner integration
+- passive LanceDB retrieval context attachment in runner (`retrieval_context` on tasks), without runner search or chunk text injection
 
 Not implemented yet:
 
 - real fallback execution
 - Codex Docker worker runtime
 - MCP execution/manager for automatic real external MCP tool orchestration
-- memory index retrieval/LanceDB natural-language search in runner
+- memory index retrieval/LanceDB natural-language search or active search in runner
 - UI/dashboard
 
 ## Quick command map

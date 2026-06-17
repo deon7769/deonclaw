@@ -17,6 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/mcpcontext"
 	"github.com/deon7769/deonclaw/internal/policy"
+	"github.com/deon7769/deonclaw/internal/retrievalcontext"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
 	"github.com/deon7769/deonclaw/internal/runtimeconfig"
@@ -143,7 +144,30 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	} else {
 		timeline.MarkStatus("mcp_context_loaded", "skipped")
 	}
-	prompt = buildRunnerPrompt(task.Goal, contextPackMarkdown, mcpContextMarkdown)
+	var retrievalContextMarkdown []byte
+	var retrievalContextJSON []byte
+	var retrievalContextCount int
+	var retrievalContextStatus string
+	if len(task.RetrievalContext.Attachments) > 0 {
+		retrievalContext, err := retrievalcontext.Load(task.RetrievalContext)
+		if err != nil {
+			fmt.Fprintf(stderr, "retrieval context failed: %v\n", err)
+			return 1
+		}
+		retrievalContextMarkdown = retrievalContext.Markdown()
+		retrievalContextJSON, err = retrievalContext.JSON()
+		if err != nil {
+			fmt.Fprintf(stderr, "retrieval context failed: %v\n", err)
+			return 1
+		}
+		retrievalContextCount = retrievalContext.Count()
+		retrievalContextStatus = retrievalContext.Status
+		timeline.Mark("retrieval_context_loaded")
+	} else {
+		retrievalContextStatus = "skipped"
+		timeline.MarkStatus("retrieval_context_loaded", "skipped")
+	}
+	prompt = buildRunnerPrompt(task.Goal, contextPackMarkdown, mcpContextMarkdown, retrievalContextMarkdown)
 
 	runID := r.RunIDFactory()
 	runDir := filepath.Join(opts.ArtifactsDir, runID)
@@ -329,29 +353,33 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 
 	timeline.Mark("artifacts_written")
 	trace := executionTraceOptions{
-		RunID:               runID,
-		WorkerName:          workerName,
-		Task:                task,
-		Result:              result,
-		Status:              runRecord.Status,
-		StartedAt:           startedAt,
-		FinishedAt:          finishedAt,
-		Prompt:              prompt,
-		ContextPackMarkdown: contextPackMarkdown,
-		MCPContextMarkdown:  mcpContextMarkdown,
-		MemoryPolicyPath:    opts.MemoryPolicyPath,
-		RuntimeConfigPath:   opts.RuntimeConfigPath,
-		MCPToolProposal:     mcpToolProposalCheck,
-		EnvRequirements:     opts.EnvRequirements,
-		WorkerRuntime:       workerRuntime,
-		Validation:          validationResult,
-		ValidationRuntime:   validationRuntime,
-		PolicyOK:            policyResult.OK(),
-		ChangedPathCount:    len(changedPaths),
-		Cleanup:             cleanup,
-		Timeline:            timeline.Events(),
+		RunID:                    runID,
+		WorkerName:               workerName,
+		Task:                     task,
+		Result:                   result,
+		Status:                   runRecord.Status,
+		StartedAt:                startedAt,
+		FinishedAt:               finishedAt,
+		Prompt:                   prompt,
+		ContextPackMarkdown:      contextPackMarkdown,
+		MCPContextMarkdown:       mcpContextMarkdown,
+		RetrievalContextMarkdown: retrievalContextMarkdown,
+		RetrievalContextAttached: len(task.RetrievalContext.Attachments) > 0 && retrievalContextStatus == "ok",
+		RetrievalContextCount:    retrievalContextCount,
+		RetrievalContextStatus:   retrievalContextStatus,
+		MemoryPolicyPath:         opts.MemoryPolicyPath,
+		RuntimeConfigPath:        opts.RuntimeConfigPath,
+		MCPToolProposal:          mcpToolProposalCheck,
+		EnvRequirements:          opts.EnvRequirements,
+		WorkerRuntime:            workerRuntime,
+		Validation:               validationResult,
+		ValidationRuntime:        validationRuntime,
+		PolicyOK:                 policyResult.OK(),
+		ChangedPathCount:         len(changedPaths),
+		Cleanup:                  cleanup,
+		Timeline:                 timeline.Events(),
 	}
-	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, mcpContextMarkdown, mcpContextCount, mcpToolProposalCheck, memoryProposalCheck, trace, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, mcpContextMarkdown, mcpContextCount, retrievalContextMarkdown, retrievalContextJSON, retrievalContextCount, mcpToolProposalCheck, memoryProposalCheck, trace, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -422,11 +450,12 @@ func taskForWorker(task *tasks.Task) *tasks.Task {
 	copied := *task
 	copied.MCPContext = tasks.MCPContextSpec{}
 	copied.MCPProposalPolicy = tasks.MCPProposalPolicySpec{}
+	copied.RetrievalContext = tasks.RetrievalContextSpec{}
 	return &copied
 }
 
-func buildRunnerPrompt(goal string, contextPackMarkdown []byte, mcpContextMarkdown []byte) string {
-	if len(contextPackMarkdown) == 0 && len(mcpContextMarkdown) == 0 {
+func buildRunnerPrompt(goal string, contextPackMarkdown []byte, mcpContextMarkdown []byte, retrievalContextMarkdown []byte) string {
+	if len(contextPackMarkdown) == 0 && len(mcpContextMarkdown) == 0 && len(retrievalContextMarkdown) == 0 {
 		return ""
 	}
 	var builder strings.Builder
@@ -444,6 +473,13 @@ func buildRunnerPrompt(goal string, contextPackMarkdown []byte, mcpContextMarkdo
 		builder.WriteByte('\n')
 		builder.Write(mcpContextMarkdown)
 		if !strings.HasSuffix(string(mcpContextMarkdown), "\n") {
+			builder.WriteByte('\n')
+		}
+	}
+	if len(retrievalContextMarkdown) > 0 {
+		builder.WriteByte('\n')
+		builder.Write(retrievalContextMarkdown)
+		if !strings.HasSuffix(string(retrievalContextMarkdown), "\n") {
 			builder.WriteByte('\n')
 		}
 	}
