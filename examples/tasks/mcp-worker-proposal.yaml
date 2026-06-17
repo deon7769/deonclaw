@@ -1,0 +1,27 @@
+id: mcp-worker-proposal-example-001
+title: Worker MCP proposal artifact example
+domain: general
+worker: codex
+goal: Suggest a read-only MCP call by writing mcp-tool-call-proposal.json, but do not execute it.
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+mcp_proposal_policy:
+  config: configs/examples/mcp-fake.yaml
+  policy: configs/examples/mcp-call-policy-fake.yaml
+  runtime_config: configs/examples/runtime.yaml
+  require_preflight: true
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+  - .env
+expected_outputs:
+  - artifacts/mcp-tool-call-proposal.json
+  - artifacts/mcp-tool-call-proposal-lint.json
+  - artifacts/mcp-tool-call-preflight.json
+  - artifacts/summary.md
+definition_of_done:
+  - Runner records the worker proposal status without executing MCP tools.

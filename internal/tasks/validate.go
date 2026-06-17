@@ -109,6 +109,14 @@ func Validate(task *Task) error {
 			errs = append(errs, fmt.Errorf("%s.path is required", prefix))
 		}
 	}
+	if usesMCPProposalPolicy(task.MCPProposalPolicy) {
+		if strings.TrimSpace(task.MCPProposalPolicy.Config) == "" {
+			errs = append(errs, errors.New("mcp_proposal_policy.config is required when mcp_proposal_policy is configured"))
+		}
+		if strings.TrimSpace(task.MCPProposalPolicy.Policy) == "" {
+			errs = append(errs, errors.New("mcp_proposal_policy.policy is required when mcp_proposal_policy is configured"))
+		}
+	}
 	if len(task.ForbiddenPaths) == 0 {
 		errs = append(errs, errors.New("forbidden_paths must not be empty"))
 	}
@@ -120,6 +128,13 @@ func Validate(task *Task) error {
 	}
 
 	return errors.Join(errs...)
+}
+
+func usesMCPProposalPolicy(policy MCPProposalPolicySpec) bool {
+	return strings.TrimSpace(policy.Config) != "" ||
+		strings.TrimSpace(policy.Policy) != "" ||
+		strings.TrimSpace(policy.RuntimeConfig) != "" ||
+		policy.RequirePreflight
 }
 
 func ValidateFallbackPolicy(policy *FallbackPolicy) error {

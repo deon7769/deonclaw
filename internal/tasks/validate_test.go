@@ -112,6 +112,22 @@ func TestValidateRejectsInvalidValidationRuntime(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsIncompleteMCPProposalPolicy(t *testing.T) {
+	task := validTask()
+	task.MCPProposalPolicy.RequirePreflight = true
+
+	err := Validate(task)
+	if err == nil {
+		t.Fatal("Validate() expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "mcp_proposal_policy.config is required") {
+		t.Fatalf("error = %v, want config requirement", err)
+	}
+	if !strings.Contains(err.Error(), "mcp_proposal_policy.policy is required") {
+		t.Fatalf("error = %v, want policy requirement", err)
+	}
+}
+
 func TestValidateRejectsModelProfileAndModelStrategy(t *testing.T) {
 	task := validTask()
 	task.ModelProfile = "opencode-zai-glm-5-1"

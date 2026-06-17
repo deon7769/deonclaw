@@ -246,6 +246,11 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		result.Worker = workerName
 	}
 	result.Workspace = workspace
+	mcpToolProposalCheck, mcpProposalErr := checkMCPToolProposal(result, task.MCPProposalPolicy)
+	if mcpProposalErr != nil && runErr == nil {
+		runErr = mcpProposalErr
+	}
+	timeline.MarkStatus("mcp_tool_proposal_checked", mcpToolProposalCheck.Status)
 
 	validationResult := skippedValidation(task.Validation.Commands, "worker failed")
 	validationResult.Runtime = validationRuntime
@@ -336,6 +341,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		MCPContextMarkdown:  mcpContextMarkdown,
 		MemoryPolicyPath:    opts.MemoryPolicyPath,
 		RuntimeConfigPath:   opts.RuntimeConfigPath,
+		MCPToolProposal:     mcpToolProposalCheck,
 		EnvRequirements:     opts.EnvRequirements,
 		WorkerRuntime:       workerRuntime,
 		Validation:          validationResult,
@@ -345,7 +351,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		Cleanup:             cleanup,
 		Timeline:            timeline.Events(),
 	}
-	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, mcpContextMarkdown, mcpContextCount, memoryProposalCheck, trace, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, mcpContextMarkdown, mcpContextCount, mcpToolProposalCheck, memoryProposalCheck, trace, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -415,6 +421,7 @@ func taskForWorker(task *tasks.Task) *tasks.Task {
 	}
 	copied := *task
 	copied.MCPContext = tasks.MCPContextSpec{}
+	copied.MCPProposalPolicy = tasks.MCPProposalPolicySpec{}
 	return &copied
 }
 

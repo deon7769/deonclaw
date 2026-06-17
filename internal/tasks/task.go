@@ -1,22 +1,23 @@
 package tasks
 
 type Task struct {
-	ID               string         `yaml:"id" json:"id"`
-	Title            string         `yaml:"title" json:"title"`
-	Domain           string         `yaml:"domain" json:"domain"`
-	Worker           string         `yaml:"worker" json:"worker"`
-	ModelProfile     string         `yaml:"model_profile,omitempty" json:"model_profile,omitempty"`
-	ModelStrategy    *ModelStrategy `yaml:"model_strategy,omitempty" json:"model_strategy,omitempty"`
-	Goal             string         `yaml:"goal" json:"goal"`
-	Mode             string         `yaml:"mode" json:"mode"`
-	Workspace        WorkspaceSpec  `yaml:"workspace" json:"workspace"`
-	Memory           MemorySpec     `yaml:"memory" json:"memory"`
-	Validation       ValidationSpec `yaml:"validation" json:"validation"`
-	MCPContext       MCPContextSpec `yaml:"mcp_context,omitempty" json:"mcp_context,omitempty"`
-	AllowedPaths     []string       `yaml:"allowed_paths" json:"allowed_paths"`
-	ForbiddenPaths   []string       `yaml:"forbidden_paths" json:"forbidden_paths"`
-	ExpectedOutputs  []string       `yaml:"expected_outputs" json:"expected_outputs"`
-	DefinitionOfDone []string       `yaml:"definition_of_done" json:"definition_of_done"`
+	ID                string                `yaml:"id" json:"id"`
+	Title             string                `yaml:"title" json:"title"`
+	Domain            string                `yaml:"domain" json:"domain"`
+	Worker            string                `yaml:"worker" json:"worker"`
+	ModelProfile      string                `yaml:"model_profile,omitempty" json:"model_profile,omitempty"`
+	ModelStrategy     *ModelStrategy        `yaml:"model_strategy,omitempty" json:"model_strategy,omitempty"`
+	Goal              string                `yaml:"goal" json:"goal"`
+	Mode              string                `yaml:"mode" json:"mode"`
+	Workspace         WorkspaceSpec         `yaml:"workspace" json:"workspace"`
+	Memory            MemorySpec            `yaml:"memory" json:"memory"`
+	Validation        ValidationSpec        `yaml:"validation" json:"validation"`
+	MCPContext        MCPContextSpec        `yaml:"mcp_context,omitempty" json:"mcp_context,omitempty"`
+	MCPProposalPolicy MCPProposalPolicySpec `yaml:"mcp_proposal_policy,omitempty" json:"mcp_proposal_policy,omitempty"`
+	AllowedPaths      []string              `yaml:"allowed_paths" json:"allowed_paths"`
+	ForbiddenPaths    []string              `yaml:"forbidden_paths" json:"forbidden_paths"`
+	ExpectedOutputs   []string              `yaml:"expected_outputs" json:"expected_outputs"`
+	DefinitionOfDone  []string              `yaml:"definition_of_done" json:"definition_of_done"`
 }
 
 type ModelStrategy struct {
@@ -62,4 +63,11 @@ type MCPContextAttachment struct {
 	Name string `yaml:"name" json:"name"`
 	Kind string `yaml:"kind" json:"kind"`
 	Path string `yaml:"path" json:"path"`
+}
+
+type MCPProposalPolicySpec struct {
+	Config           string `yaml:"config,omitempty" json:"config,omitempty"`
+	Policy           string `yaml:"policy,omitempty" json:"policy,omitempty"`
+	RuntimeConfig    string `yaml:"runtime_config,omitempty" json:"runtime_config,omitempty"`
+	RequirePreflight bool   `yaml:"require_preflight,omitempty" json:"require_preflight,omitempty"`
 }

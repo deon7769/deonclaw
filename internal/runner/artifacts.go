@@ -17,7 +17,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func writeCodexRunArtifacts(workerName string, runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, mcpContextMarkdown []byte, mcpContextCount int, memoryProposal memoryProposalCheck, trace executionTraceOptions, createdAt time.Time) ([]artifacts.Artifact, error) {
+func writeCodexRunArtifacts(workerName string, runDir string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, diffPatch []byte, changedFiles []ChangedFile, validation ValidationResult, contextPackMarkdown []byte, contextPackWarnings []string, mcpContextMarkdown []byte, mcpContextCount int, mcpToolProposal mcpToolProposalCheck, memoryProposal memoryProposalCheck, trace executionTraceOptions, createdAt time.Time) ([]artifacts.Artifact, error) {
 	if err := os.MkdirAll(runDir, 0o755); err != nil {
 		return nil, err
 	}
@@ -42,6 +42,12 @@ func writeCodexRunArtifacts(workerName string, runDir string, runID string, task
 		artifactCount++
 	}
 	if len(mcpContextMarkdown) > 0 {
+		artifactCount++
+	}
+	if len(mcpToolProposal.LintJSON) > 0 {
+		artifactCount++
+	}
+	if len(mcpToolProposal.PreflightJSON) > 0 {
 		artifactCount++
 	}
 	if len(memoryProposal.LintJSON) > 0 {
@@ -90,6 +96,16 @@ func writeCodexRunArtifacts(workerName string, runDir string, runID string, task
 			return nil, err
 		}
 	}
+	if len(mcpToolProposal.LintJSON) > 0 {
+		if err := writer.write("mcp-tool-call-proposal-lint", mcpToolProposalLintArtifactName, artifacts.KindOther, mcpToolProposal.LintJSON); err != nil {
+			return nil, err
+		}
+	}
+	if len(mcpToolProposal.PreflightJSON) > 0 {
+		if err := writer.write("mcp-tool-call-preflight", mcpToolProposalPreflightArtifactName, artifacts.KindOther, mcpToolProposal.PreflightJSON); err != nil {
+			return nil, err
+		}
+	}
 	if len(memoryProposal.LintJSON) > 0 {
 		if err := writer.write("memory-proposal-lint", "memory-proposal-lint.json", artifacts.KindOther, memoryProposal.LintJSON); err != nil {
 			return nil, err
@@ -116,7 +132,7 @@ func writeCodexRunArtifacts(workerName string, runDir string, runID string, task
 	if err := writer.write("execution-trace", "execution-trace.json", artifacts.KindOther, traceJSON); err != nil {
 		return nil, err
 	}
-	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(workerName, runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, trace.WorkerRuntime, contextPackWarnings, mcpContextCount, memoryProposal, artifactCount)); err != nil {
+	if err := writer.write("summary", "summary.md", artifacts.KindSummary, codexRunSummary(workerName, runID, task, result, status, runErr, policySummary, changedPathCount, cleanup, validation, trace.WorkerRuntime, contextPackWarnings, mcpContextCount, mcpToolProposal, memoryProposal, artifactCount)); err != nil {
 		return nil, err
 	}
 	manifest, err := artifactManifestJSON(writer.artifacts)
@@ -208,7 +224,7 @@ func artifactFileName(path string) string {
 
 func isCLIOwnedArtifact(name string) bool {
 	switch name {
-	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "validation.log", "validation.json", "context-pack.md", "mcp-context.md", "memory-proposal-lint.json", "execution-trace.json", "summary.md", "artifact-manifest.json":
+	case "stdout.jsonl", "stderr.log", "events.jsonl", "diff.patch", "changed-files.json", "validation.log", "validation.json", "context-pack.md", "mcp-context.md", mcpToolProposalLintArtifactName, mcpToolProposalPreflightArtifactName, "memory-proposal-lint.json", "execution-trace.json", "summary.md", "artifact-manifest.json":
 		return true
 	default:
 		return false

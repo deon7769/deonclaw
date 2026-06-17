@@ -45,6 +45,7 @@ type executionTraceOptions struct {
 	MCPContextMarkdown  []byte
 	MemoryPolicyPath    string
 	RuntimeConfigPath   string
+	MCPToolProposal     mcpToolProposalCheck
 	EnvRequirements     []workerconfig.EnvRequirementCheck
 	WorkerRuntime       string
 	Validation          ValidationResult
@@ -56,37 +57,39 @@ type executionTraceOptions struct {
 }
 
 type executionTrace struct {
-	RunID                string                             `json:"run_id"`
-	TaskID               string                             `json:"task_id"`
-	Worker               string                             `json:"worker"`
-	ModelProfile         string                             `json:"model_profile"`
-	ModelStrategy        string                             `json:"model_strategy,omitempty"`
-	SelectedModelProfile string                             `json:"selected_model_profile,omitempty"`
-	Provider             string                             `json:"provider"`
-	Model                string                             `json:"model"`
-	ModelArg             string                             `json:"model_arg"`
-	CommandDisplay       string                             `json:"command_display"`
-	PromptSHA256         string                             `json:"prompt_sha256"`
-	ContextPackSHA256    string                             `json:"context_pack_sha256,omitempty"`
-	MCPContextSHA256     string                             `json:"mcp_context_sha256,omitempty"`
-	MemoryPolicySHA256   string                             `json:"memory_policy_sha256,omitempty"`
-	RuntimeConfigSHA256  string                             `json:"runtime_config_sha256,omitempty"`
-	EnvRequirements      []workerconfig.EnvRequirementCheck `json:"env_requirements"`
-	WorkerRuntime        string                             `json:"worker_runtime"`
-	StartedAt            string                             `json:"started_at"`
-	FinishedAt           string                             `json:"finished_at"`
-	DurationMS           int64                              `json:"duration_ms"`
-	Status               string                             `json:"status"`
-	StdoutFormat         string                             `json:"stdout_format"`
-	ParsedEvents         int                                `json:"parsed_events"`
-	ParseWarnings        int                                `json:"parse_warnings"`
-	ValidationStatus     string                             `json:"validation_status"`
-	ValidationRuntime    string                             `json:"validation_runtime"`
-	PolicyStatus         string                             `json:"policy_status"`
-	ChangedPathsCount    int                                `json:"changed_paths_count"`
-	CleanupAction        string                             `json:"cleanup_action"`
-	CleanupReason        string                             `json:"cleanup_reason"`
-	Timeline             []executionTraceEvent              `json:"timeline"`
+	RunID                 string                             `json:"run_id"`
+	TaskID                string                             `json:"task_id"`
+	Worker                string                             `json:"worker"`
+	ModelProfile          string                             `json:"model_profile"`
+	ModelStrategy         string                             `json:"model_strategy,omitempty"`
+	SelectedModelProfile  string                             `json:"selected_model_profile,omitempty"`
+	Provider              string                             `json:"provider"`
+	Model                 string                             `json:"model"`
+	ModelArg              string                             `json:"model_arg"`
+	CommandDisplay        string                             `json:"command_display"`
+	PromptSHA256          string                             `json:"prompt_sha256"`
+	ContextPackSHA256     string                             `json:"context_pack_sha256,omitempty"`
+	MCPContextSHA256      string                             `json:"mcp_context_sha256,omitempty"`
+	MCPToolProposalStatus string                             `json:"mcp_tool_proposal_status"`
+	MCPToolProposalSHA256 string                             `json:"mcp_tool_proposal_sha256,omitempty"`
+	MemoryPolicySHA256    string                             `json:"memory_policy_sha256,omitempty"`
+	RuntimeConfigSHA256   string                             `json:"runtime_config_sha256,omitempty"`
+	EnvRequirements       []workerconfig.EnvRequirementCheck `json:"env_requirements"`
+	WorkerRuntime         string                             `json:"worker_runtime"`
+	StartedAt             string                             `json:"started_at"`
+	FinishedAt            string                             `json:"finished_at"`
+	DurationMS            int64                              `json:"duration_ms"`
+	Status                string                             `json:"status"`
+	StdoutFormat          string                             `json:"stdout_format"`
+	ParsedEvents          int                                `json:"parsed_events"`
+	ParseWarnings         int                                `json:"parse_warnings"`
+	ValidationStatus      string                             `json:"validation_status"`
+	ValidationRuntime     string                             `json:"validation_runtime"`
+	PolicyStatus          string                             `json:"policy_status"`
+	ChangedPathsCount     int                                `json:"changed_paths_count"`
+	CleanupAction         string                             `json:"cleanup_action"`
+	CleanupReason         string                             `json:"cleanup_reason"`
+	Timeline              []executionTraceEvent              `json:"timeline"`
 }
 
 type executionTraceEvent struct {
@@ -162,33 +165,35 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 		prompt = task.Goal
 	}
 	trace := executionTrace{
-		RunID:                opts.RunID,
-		TaskID:               taskID,
-		Worker:               worker,
-		ModelProfile:         modelProfile,
-		ModelStrategy:        metadata["model_strategy"],
-		SelectedModelProfile: metadata["selected_model_profile"],
-		Provider:             metadata["provider"],
-		Model:                metadata["model"],
-		ModelArg:             metadata["model_arg"],
-		CommandDisplay:       strings.Join(result.Command, " "),
-		PromptSHA256:         sha256Hex([]byte(prompt)),
-		EnvRequirements:      append([]workerconfig.EnvRequirementCheck(nil), opts.EnvRequirements...),
-		WorkerRuntime:        workerRuntimeForTrace(opts),
-		StartedAt:            opts.StartedAt.Format(time.RFC3339Nano),
-		FinishedAt:           opts.FinishedAt.Format(time.RFC3339Nano),
-		DurationMS:           durationMillis(opts.StartedAt, opts.FinishedAt),
-		Status:               string(opts.Status),
-		StdoutFormat:         metadataDefault(metadata, "opencode.stdout_format", "unknown"),
-		ParsedEvents:         metadataInt(metadata, "opencode.parsed_events"),
-		ParseWarnings:        metadataInt(metadata, "opencode.parse_warnings"),
-		ValidationStatus:     opts.Validation.Status,
-		ValidationRuntime:    validationRuntimeForTrace(opts),
-		PolicyStatus:         policyTraceStatus(opts.PolicyOK),
-		ChangedPathsCount:    opts.ChangedPathCount,
-		CleanupAction:        opts.Cleanup.Action,
-		CleanupReason:        string(opts.Cleanup.Reason),
-		Timeline:             completedTraceTimeline(opts.Timeline),
+		RunID:                 opts.RunID,
+		TaskID:                taskID,
+		Worker:                worker,
+		ModelProfile:          modelProfile,
+		ModelStrategy:         metadata["model_strategy"],
+		SelectedModelProfile:  metadata["selected_model_profile"],
+		Provider:              metadata["provider"],
+		Model:                 metadata["model"],
+		ModelArg:              metadata["model_arg"],
+		CommandDisplay:        strings.Join(result.Command, " "),
+		PromptSHA256:          sha256Hex([]byte(prompt)),
+		MCPToolProposalStatus: mcpToolProposalStatusForTrace(opts.MCPToolProposal),
+		MCPToolProposalSHA256: opts.MCPToolProposal.ProposalSHA256,
+		EnvRequirements:       append([]workerconfig.EnvRequirementCheck(nil), opts.EnvRequirements...),
+		WorkerRuntime:         workerRuntimeForTrace(opts),
+		StartedAt:             opts.StartedAt.Format(time.RFC3339Nano),
+		FinishedAt:            opts.FinishedAt.Format(time.RFC3339Nano),
+		DurationMS:            durationMillis(opts.StartedAt, opts.FinishedAt),
+		Status:                string(opts.Status),
+		StdoutFormat:          metadataDefault(metadata, "opencode.stdout_format", "unknown"),
+		ParsedEvents:          metadataInt(metadata, "opencode.parsed_events"),
+		ParseWarnings:         metadataInt(metadata, "opencode.parse_warnings"),
+		ValidationStatus:      opts.Validation.Status,
+		ValidationRuntime:     validationRuntimeForTrace(opts),
+		PolicyStatus:          policyTraceStatus(opts.PolicyOK),
+		ChangedPathsCount:     opts.ChangedPathCount,
+		CleanupAction:         opts.Cleanup.Action,
+		CleanupReason:         string(opts.Cleanup.Reason),
+		Timeline:              completedTraceTimeline(opts.Timeline),
 	}
 	if len(opts.ContextPackMarkdown) > 0 {
 		trace.ContextPackSHA256 = sha256Hex(opts.ContextPackMarkdown)
@@ -214,6 +219,13 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 		return nil, err
 	}
 	return output.Bytes(), nil
+}
+
+func mcpToolProposalStatusForTrace(check mcpToolProposalCheck) string {
+	if strings.TrimSpace(check.Status) != "" {
+		return check.Status
+	}
+	return mcpToolProposalStatusNone
 }
 
 func workerRuntimeForTrace(opts executionTraceOptions) string {

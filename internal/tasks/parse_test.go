@@ -227,6 +227,45 @@ definition_of_done:
 	}
 }
 
+func TestParseMCPProposalPolicy(t *testing.T) {
+	task, err := Parse([]byte(`id: mcp-proposal-policy-task-001
+title: MCP proposal policy task
+domain: general
+worker: codex
+goal: Run with worker-generated MCP proposal policy
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+mcp_proposal_policy:
+  config: " configs/examples/mcp.yaml "
+  policy: " configs/examples/mcp-call-policy.yaml "
+  runtime_config: " configs/examples/runtime.yaml "
+  require_preflight: true
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - MCP proposal is linted only
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if task.MCPProposalPolicy.Config != "configs/examples/mcp.yaml" ||
+		task.MCPProposalPolicy.Policy != "configs/examples/mcp-call-policy.yaml" ||
+		task.MCPProposalPolicy.RuntimeConfig != "configs/examples/runtime.yaml" ||
+		!task.MCPProposalPolicy.RequirePreflight {
+		t.Fatalf("mcp_proposal_policy = %#v, want normalized policy paths", task.MCPProposalPolicy)
+	}
+	if err := Validate(task); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestLoadCodexSmokeExample(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "examples", "tasks", "codex-smoke.yaml")
 	if _, err := os.Stat(path); err != nil {

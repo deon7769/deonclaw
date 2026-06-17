@@ -13,6 +13,7 @@ import (
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/mcpapproval"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
@@ -142,6 +143,7 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation: skipped")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation runtime: local")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Validation commands: 0")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP tool proposal: none")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Artifacts: 10")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Execution trace: execution-trace.json")
 	assertFileContains(t, filepath.Join(runDir, "summary.md"), "Workspace cleanup: removed")
@@ -155,6 +157,7 @@ func TestCodexRunnerRun(t *testing.T) {
 	assertTraceNonEmptyString(t, trace, "prompt_sha256")
 	assertTraceString(t, trace, "validation_status", ValidationSkipped)
 	assertTraceString(t, trace, "validation_runtime", "local")
+	assertTraceString(t, trace, "mcp_tool_proposal_status", "none")
 	assertTraceString(t, trace, "policy_status", "ok")
 	assertTraceString(t, trace, "cleanup_action", "removed")
 	assertTraceTimelineContains(t, trace, requiredExecutionTraceEvents...)
@@ -520,6 +523,274 @@ func TestCodexRunnerRunRejectsInvalidMCPContextBeforeWorker(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestCodexRunnerRunPreservesValidMCPToolProposalWithoutPolicy(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	secretArgument := "super-secret-value"
+	proposalJSON := mcpToolProposalJSON(t, "fake-stdio", "deonclaw.fake.echo", `{"text":"`+secretArgument+`"}`, "configs/examples/mcp-call-policy-fake.yaml", "", "")
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-mcp-tool-proposal-valid-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if spec.Task.MCPProposalPolicy.Config != "" || spec.Task.MCPProposalPolicy.Policy != "" {
+						t.Fatalf("worker received MCP proposal policy paths: %#v", spec.Task.MCPProposalPolicy)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+						Artifacts: []artifacts.Artifact{
+							{Path: "artifacts/" + mcpToolProposalArtifactName, Kind: artifacts.KindOther, Content: proposalJSON},
+						},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFile(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-mcp-tool-proposal-valid-001")
+	assertFileContent(t, filepath.Join(runDir, mcpToolProposalArtifactName), string(proposalJSON))
+	assertMCPToolProposalLintStatus(t, filepath.Join(runDir, mcpToolProposalLintArtifactName), "skipped_policy", 0, 1)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP tool proposal: valid")
+	assertFileNotContains(t, filepath.Join(runDir, "summary.md"), secretArgument)
+	assertFileNotContains(t, filepath.Join(runDir, "execution-trace.json"), secretArgument)
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "mcp_tool_proposal_status", "valid")
+	assertTraceNonEmptyString(t, trace, "mcp_tool_proposal_sha256")
+	if _, err := os.Stat(filepath.Join(runDir, mcpToolProposalPreflightArtifactName)); !os.IsNotExist(err) {
+		t.Fatalf("preflight artifact exists without mcp_proposal_policy: %v", err)
+	}
+}
+
+func TestCodexRunnerRunFailsInvalidMCPToolProposal(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-mcp-tool-proposal-invalid-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runResult: &workers.RunResult{
+					Workspace: ".",
+					Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+					Artifacts: []artifacts.Artifact{
+						{Path: "artifacts/" + mcpToolProposalArtifactName, Kind: artifacts.KindOther, Content: []byte(`{"id":"bad"}`)},
+					},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFile(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("Run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "MCP tool proposal invalid") {
+		t.Fatalf("stderr = %q, want MCP proposal failure", stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-mcp-tool-proposal-invalid-001")
+	assertMCPToolProposalLintStatus(t, filepath.Join(runDir, mcpToolProposalLintArtifactName), "invalid", 1, 0)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP tool proposal: invalid")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "mcp_tool_proposal_status", "invalid")
+}
+
+func TestCodexRunnerRunMCPToolProposalPreflightPassed(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	configPath, policyPath, runtimeConfigPath := writeRunnerMCPProposalPolicyFiles(t, tempDir, []string{"read"}, []string{"deonclaw.fake.echo"})
+	proposalJSON := mcpToolProposalJSON(t, "fake-stdio", "deonclaw.fake.echo", `{"text":"hello"}`, policyPath, configPath, runtimeConfigPath)
+	taskPath := writeTaskFileWithMCPProposalPolicy(t, "codex", configPath, policyPath, runtimeConfigPath, true)
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-mcp-tool-proposal-preflight-pass-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if spec.Task.MCPProposalPolicy.Config != "" || spec.Task.MCPProposalPolicy.Policy != "" || spec.Task.MCPProposalPolicy.RuntimeConfig != "" {
+						t.Fatalf("worker received MCP proposal policy paths: %#v", spec.Task.MCPProposalPolicy)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+						Artifacts: []artifacts.Artifact{
+							{Path: "artifacts/" + mcpToolProposalArtifactName, Kind: artifacts.KindOther, Content: proposalJSON},
+						},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     taskPath,
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-mcp-tool-proposal-preflight-pass-001")
+	assertMCPToolProposalLintStatus(t, filepath.Join(runDir, mcpToolProposalLintArtifactName), "passed", 0, 0)
+	assertMCPToolPreflightStatus(t, filepath.Join(runDir, mcpToolProposalPreflightArtifactName), "passed", 0)
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP tool proposal: preflight_passed")
+	assertArtifactManifestContains(t, filepath.Join(runDir, "artifact-manifest.json"), filepath.Join(runDir, mcpToolProposalPreflightArtifactName), artifacts.KindOther)
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "mcp_tool_proposal_status", "preflight_passed")
+	assertTraceNonEmptyString(t, trace, "mcp_tool_proposal_sha256")
+}
+
+func TestCodexRunnerRunMCPToolProposalPreflightFailureModes(t *testing.T) {
+	tests := []struct {
+		name             string
+		requirePreflight bool
+		capabilities     []string
+		allowedTools     []string
+		wantCode         int
+	}{
+		{
+			name:             "required tool not allowlisted fails run",
+			requirePreflight: true,
+			capabilities:     []string{"read"},
+			allowedTools:     []string{"other.tool"},
+			wantCode:         1,
+		},
+		{
+			name:             "optional tool not allowlisted records artifact",
+			requirePreflight: false,
+			capabilities:     []string{"read"},
+			allowedTools:     []string{"other.tool"},
+			wantCode:         0,
+		},
+		{
+			name:             "write capability fails run",
+			requirePreflight: true,
+			capabilities:     []string{"read", "write"},
+			allowedTools:     []string{"deonclaw.fake.echo"},
+			wantCode:         1,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			storePath := filepath.Join(tempDir, "deonclaw.db")
+			artifactsDir := filepath.Join(tempDir, "artifacts")
+			configPath, policyPath, runtimeConfigPath := writeRunnerMCPProposalPolicyFiles(t, tempDir, tt.capabilities, tt.allowedTools)
+			proposalJSON := mcpToolProposalJSON(t, "fake-stdio", "deonclaw.fake.echo", `{"text":"hello"}`, policyPath, configPath, runtimeConfigPath)
+			taskPath := writeTaskFileWithMCPProposalPolicy(t, "codex", configPath, policyPath, runtimeConfigPath, tt.requirePreflight)
+
+			runner := testCodexRunner(t, testCodexRunnerOptions{
+				RunID:    "run-mcp-tool-proposal-preflight-fail-001",
+				Baseline: &git.Snapshot{},
+				PostRun:  &git.Snapshot{},
+				WorkerFactory: func() workers.Worker {
+					return fakeWorker{
+						runResult: &workers.RunResult{
+							Workspace: ".",
+							Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+							Artifacts: []artifacts.Artifact{
+								{Path: "artifacts/" + mcpToolProposalArtifactName, Kind: artifacts.KindOther, Content: proposalJSON},
+							},
+						},
+					}
+				},
+			})
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := runner.Run(context.Background(), CodexRunOptions{
+				TaskPath:     taskPath,
+				StorePath:    storePath,
+				ArtifactsDir: artifactsDir,
+			}, &stdout, &stderr)
+			if code != tt.wantCode {
+				t.Fatalf("Run() exit code = %d, want %d, stderr=%q", code, tt.wantCode, stderr.String())
+			}
+
+			runDir := filepath.Join(artifactsDir, "run-mcp-tool-proposal-preflight-fail-001")
+			assertMCPToolPreflightStatus(t, filepath.Join(runDir, mcpToolProposalPreflightArtifactName), "failed", 1)
+			assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP tool proposal: preflight_failed")
+			trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+			assertTraceString(t, trace, "mcp_tool_proposal_status", "preflight_failed")
+			if tt.requirePreflight && !strings.Contains(stderr.String(), "MCP proposal preflight failed") {
+				t.Fatalf("stderr = %q, want preflight failure", stderr.String())
+			}
+		})
+	}
+}
+
+func TestCodexRunnerRunFailsWorkerMCPApprovalArtifact(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-mcp-tool-approval-refused-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runResult: &workers.RunResult{
+					Workspace: ".",
+					Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", ".", "-"},
+					Artifacts: []artifacts.Artifact{
+						{Path: "artifacts/mcp-tool-call-approval.json", Kind: artifacts.KindOther, Content: []byte(`{"decision":"approved"}`)},
+					},
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     writeTaskFile(t, "codex"),
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("Run() exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stderr.String(), "MCP proposal approval artifact refused") {
+		t.Fatalf("stderr = %q, want refused approval artifact", stderr.String())
+	}
+	runDir := filepath.Join(artifactsDir, "run-mcp-tool-approval-refused-001")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP tool proposal: invalid")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceString(t, trace, "mcp_tool_proposal_status", "invalid")
 }
 
 func TestCodexRunnerRunWithEscalasoftContextPack(t *testing.T) {
@@ -2161,6 +2432,44 @@ definition_of_done:
 	return writeTaskFileContent(t, builder.String())
 }
 
+func writeTaskFileWithMCPProposalPolicy(t *testing.T, worker string, configPath string, policyPath string, runtimeConfigPath string, requirePreflight bool) string {
+	t.Helper()
+	builder := strings.Builder{}
+	builder.WriteString(`id: mcp-proposal-task-001
+title: "MCP proposal task"
+domain: general
+worker: ` + worker + `
+goal: "Review worker MCP proposal without execution"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+mcp_proposal_policy:
+  config: ` + filepath.ToSlash(configPath) + `
+  policy: ` + filepath.ToSlash(policyPath) + `
+`)
+	if strings.TrimSpace(runtimeConfigPath) != "" {
+		builder.WriteString("  runtime_config: " + filepath.ToSlash(runtimeConfigPath) + "\n")
+	}
+	builder.WriteString("  require_preflight: ")
+	if requirePreflight {
+		builder.WriteString("true\n")
+	} else {
+		builder.WriteString("false\n")
+	}
+	builder.WriteString(`allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - MCP proposal is linted without execution
+`)
+	return writeTaskFileContent(t, builder.String())
+}
+
 func writeRunnerMCPAttachment(t *testing.T, dir string, name string, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, name)
@@ -2449,6 +2758,147 @@ func assertMemoryProposalLintStatus(t *testing.T, path string, wantStatus string
 	if len(decoded.Warnings) != wantWarnings {
 		t.Fatalf("lint warnings = %d, want %d; json=%s", len(decoded.Warnings), wantWarnings, got)
 	}
+}
+
+func assertMCPToolProposalLintStatus(t *testing.T, path string, wantStatus string, minViolations int, wantWarnings int) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+
+	var decoded struct {
+		Status     string   `json:"status"`
+		Violations []string `json:"violations"`
+		Warnings   []string `json:"warnings"`
+	}
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", path, err)
+	}
+	if decoded.Status != wantStatus {
+		t.Fatalf("MCP proposal lint status = %q, want %q; json=%s", decoded.Status, wantStatus, got)
+	}
+	if len(decoded.Violations) < minViolations {
+		t.Fatalf("MCP proposal lint violations = %d, want at least %d; json=%s", len(decoded.Violations), minViolations, got)
+	}
+	if len(decoded.Warnings) != wantWarnings {
+		t.Fatalf("MCP proposal lint warnings = %d, want %d; json=%s", len(decoded.Warnings), wantWarnings, got)
+	}
+}
+
+func assertMCPToolPreflightStatus(t *testing.T, path string, wantStatus string, minFailures int) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+
+	var decoded struct {
+		Status   string   `json:"status"`
+		Failures []string `json:"failures"`
+	}
+	if err := json.Unmarshal(got, &decoded); err != nil {
+		t.Fatalf("Unmarshal(%q) error = %v", path, err)
+	}
+	if decoded.Status != wantStatus {
+		t.Fatalf("MCP proposal preflight status = %q, want %q; json=%s", decoded.Status, wantStatus, got)
+	}
+	if len(decoded.Failures) < minFailures {
+		t.Fatalf("MCP proposal preflight failures = %d, want at least %d; json=%s", len(decoded.Failures), minFailures, got)
+	}
+}
+
+func mcpToolProposalJSON(t *testing.T, server string, tool string, arguments string, policyPath string, configPath string, runtimeConfigPath string) []byte {
+	t.Helper()
+	proposal, err := mcpapproval.NewProposal(mcpapproval.NewProposalOptions{
+		ID:                "mcp-call-runner-test-001",
+		Server:            server,
+		Tool:              tool,
+		Arguments:         []byte(arguments),
+		Reason:            "runner test proposal",
+		RequestedBy:       "worker",
+		SourceType:        mcpapproval.SourceTypeManual,
+		PolicyPath:        policyPath,
+		ConfigPath:        configPath,
+		Runtime:           "local",
+		RuntimeConfigPath: runtimeConfigPath,
+		Workspace:         ".",
+	})
+	if err != nil {
+		t.Fatalf("NewProposal() error = %v", err)
+	}
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("proposal.JSON() error = %v", err)
+	}
+	return data
+}
+
+func writeRunnerMCPProposalPolicyFiles(t *testing.T, dir string, capabilities []string, allowedTools []string) (string, string, string) {
+	t.Helper()
+	configPath := filepath.Join(dir, "mcp.yaml")
+	policyPath := filepath.Join(dir, "mcp-call-policy.yaml")
+	runtimeConfigPath := filepath.Join(dir, "runtime.yaml")
+
+	capabilityLines := make([]string, 0, len(capabilities))
+	for _, capability := range capabilities {
+		capabilityLines = append(capabilityLines, "        - "+capability)
+	}
+	toolLines := make([]string, 0, len(allowedTools))
+	for _, tool := range allowedTools {
+		toolLines = append(toolLines, "    - "+tool)
+	}
+	config := `mcp:
+  servers:
+    fake-stdio:
+      command: deonctl
+      args:
+        - mcp
+        - fake-server
+      enabled: false
+      test_only: true
+      protocol: stdio
+      trust: local
+      capabilities:
+` + strings.Join(capabilityLines, "\n") + `
+      env:
+        passthrough: []
+`
+	policy := `mcp_call_policy:
+  allow_real_readonly: true
+  require_docker_for_real: false
+  max_tool_calls: 1
+  allowed_servers:
+    - fake-stdio
+  allowed_tools:
+` + strings.Join(toolLines, "\n") + `
+  allowed_capabilities:
+    - read
+  max_arguments_bytes: 65536
+  max_response_bytes: 1048576
+`
+	runtimeConfig := `runtime:
+  mode: docker
+  docker:
+    image: deonclaw-runner:latest
+    workdir: /workspace
+    network: none
+    read_only_root: true
+    mounts:
+      - source: .
+        target: /workspace
+        mode: rw
+`
+	if err := os.WriteFile(configPath, []byte(config), 0o600); err != nil {
+		t.Fatalf("WriteFile(mcp config) error = %v", err)
+	}
+	if err := os.WriteFile(policyPath, []byte(policy), 0o600); err != nil {
+		t.Fatalf("WriteFile(call policy) error = %v", err)
+	}
+	if err := os.WriteFile(runtimeConfigPath, []byte(runtimeConfig), 0o600); err != nil {
+		t.Fatalf("WriteFile(runtime config) error = %v", err)
+	}
+	return configPath, policyPath, runtimeConfigPath
 }
 
 func assertArtifactManifestContains(t *testing.T, path string, wantPath string, wantKind artifacts.Kind) {

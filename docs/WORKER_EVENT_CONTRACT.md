@@ -97,6 +97,8 @@ The shared runner writes the standard run artifact set:
 - artifact-manifest.json
 - context-pack.md, when --domains is used
 - mcp-context.md, when task.mcp_context attachments are configured
+- mcp-tool-call-proposal-lint.json, when a worker emits mcp-tool-call-proposal.json
+- mcp-tool-call-preflight.json, when a worker proposal is checked with task.mcp_proposal_policy
 - memory-proposal-lint.json, when --memory-policy produces a lint artifact
 
 Worker artifacts with names owned by the CLI are not duplicated. Additional worker artifacts are preserved with unique names.
@@ -116,6 +118,8 @@ The trace is an audit artifact for the runner lifecycle. It records:
 - prompt_sha256 instead of raw prompt text
 - context_pack_sha256 when `--domains` built a context pack
 - mcp_context_sha256 when the task attached audited MCP context
+- mcp_tool_proposal_status for worker-generated MCP tool call proposals
+- mcp_tool_proposal_sha256 when a worker emitted `mcp-tool-call-proposal.json`
 - memory_policy_sha256 when `--memory-policy` was configured and readable
 - worker_runtime as `local` or `docker`
 - validation_runtime as `local` or `docker`
@@ -129,6 +133,10 @@ The trace is an audit artifact for the runner lifecycle. It records:
 The trace must not contain raw prompts, raw runtime config content, or environment variable values. Environment variable names can appear because they are part of the requirement contract and Docker env passthrough allowlist; values must not.
 
 Task `mcp_context.attachments` is passive context only. The shared runner validates referenced discovery/call artifacts before worker execution, writes `mcp-context.md`, appends a summarized `# MCP Context Attachments` section to the prompt, and records `mcp_context_sha256`. Workers do not receive permission to start MCP servers or call MCP tools, and the runner passes a sanitized task copy to workers without MCP attachment paths. Raw MCP transcripts and raw tool responses are not included in prompts by default.
+
+Workers may emit `mcp-tool-call-proposal.json` as a suggestion artifact only. After the worker exits, the shared runner validates the proposal schema and `arguments_sha256`, then writes `mcp-tool-call-proposal-lint.json`. If task `mcp_proposal_policy` is configured, the runner loads the named MCP config, call policy, and optional runtime config and runs preflight through `internal/mcpapproval`, writing `mcp-tool-call-preflight.json`. The runner never starts an MCP server, never calls MCP tools, never creates approval artifacts, and never executes the proposal. The runner passes a sanitized task copy to workers without `mcp_proposal_policy`.
+
+Workers must not emit MCP approval artifacts such as `mcp-tool-call-approval.json`. A worker-supplied approval artifact fails the run because workers cannot self-approve MCP calls. Summaries and traces record proposal status and hashes only; raw proposal arguments remain only in the worker proposal artifact.
 
 Task `model_strategy` is controlled selection metadata in the current OpenCode contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real OpenCode runs select `preferred[0]` as `selected_model_profile`, record `model_strategy: selected`, reuse `model_profile` for run report grouping, add `--model <model_arg>` when defined, and validate env requirements from the selected profile before worker execution.
 

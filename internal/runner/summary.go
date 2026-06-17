@@ -9,7 +9,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func codexRunSummary(workerName string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, workerRuntime string, contextPackWarnings []string, mcpContextCount int, memoryProposal memoryProposalCheck, artifactCount int) []byte {
+func codexRunSummary(workerName string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, workerRuntime string, contextPackWarnings []string, mcpContextCount int, mcpToolProposal mcpToolProposalCheck, memoryProposal memoryProposalCheck, artifactCount int) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -33,6 +33,7 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 		fmt.Sprintf("Validation: %s", validation.Status),
 		fmt.Sprintf("Validation runtime: %s", validationRuntimeForSummary(validation)),
 		fmt.Sprintf("Validation commands: %d", validation.CommandCount),
+		fmt.Sprintf("MCP tool proposal: %s", mcpToolProposalStatusForSummary(mcpToolProposal)),
 		fmt.Sprintf("Memory proposal: %s", memoryProposal.Status),
 		fmt.Sprintf("Memory proposal violations: %d", len(memoryProposal.Violations)),
 		fmt.Sprintf("Memory proposal warnings: %d", len(memoryProposal.Warnings)),
@@ -47,12 +48,17 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 	if memoryProposal.ProposalID != "" {
 		lines = append(lines, fmt.Sprintf("Memory proposal id: %s", memoryProposal.ProposalID))
 	}
+	if mcpToolProposal.ProposalSHA256 != "" {
+		lines = append(lines, fmt.Sprintf("MCP tool proposal sha256: %s", mcpToolProposal.ProposalSHA256))
+	}
 	if workerName == "opencode" {
 		lines = append(lines, opencodeStdoutSummaryLines(result)...)
 	}
 	if mcpContextCount > 0 {
 		lines = append(lines, fmt.Sprintf("MCP context attachments: %d", mcpContextCount))
 	}
+	lines = appendSmallDetails(lines, "MCP tool proposal violation", mcpToolProposal.Violations)
+	lines = appendSmallDetails(lines, "MCP tool proposal warning", mcpToolProposal.Warnings)
 	lines = appendSmallDetails(lines, "Memory proposal violation", memoryProposal.Violations)
 	lines = appendSmallDetails(lines, "Memory proposal warning", memoryProposal.Warnings)
 	if len(contextPackWarnings) > 0 {
@@ -68,6 +74,13 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 		lines = append(lines, fmt.Sprintf("Cleanup warning: %s", cleanup.Warning))
 	}
 	return []byte(strings.Join(lines, "\n") + "\n")
+}
+
+func mcpToolProposalStatusForSummary(check mcpToolProposalCheck) string {
+	if status := strings.TrimSpace(check.Status); status != "" {
+		return status
+	}
+	return mcpToolProposalStatusNone
 }
 
 func workerRuntimeForSummary(workerRuntime string) string {

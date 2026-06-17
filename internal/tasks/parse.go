@@ -54,6 +54,9 @@ func normalize(task *Task) {
 		task.MCPContext.Attachments[i].Kind = strings.TrimSpace(task.MCPContext.Attachments[i].Kind)
 		task.MCPContext.Attachments[i].Path = strings.TrimSpace(task.MCPContext.Attachments[i].Path)
 	}
+	task.MCPProposalPolicy.Config = strings.TrimSpace(task.MCPProposalPolicy.Config)
+	task.MCPProposalPolicy.Policy = strings.TrimSpace(task.MCPProposalPolicy.Policy)
+	task.MCPProposalPolicy.RuntimeConfig = strings.TrimSpace(task.MCPProposalPolicy.RuntimeConfig)
 }
 
 func normalizeStringList(values []string) []string {
