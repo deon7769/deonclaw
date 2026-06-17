@@ -149,6 +149,123 @@ func TestSecretsPathBlocked(t *testing.T) {
 	if plan.SourceCount != 1 {
 		t.Fatalf("source_count = %d, want 1 without secrets", plan.SourceCount)
 	}
+	if plan.Skipped.SecretPaths == 0 {
+		t.Fatalf("skipped_secret_paths = %d, want > 0", plan.Skipped.SecretPaths)
+	}
+}
+
+func TestPlanSkipsSymlinkInsideRoot(t *testing.T) {
+	root := t.TempDir()
+	cfg := writeTestIndexLayout(t, root)
+	realPath := filepath.Join(root, "memory", "mysecondbrain", "real.md")
+	writeFile(t, realPath, "# real\n")
+	linkPath := filepath.Join(root, "memory", "mysecondbrain", "link.md")
+	symlinkOrSkip(t, realPath, linkPath)
+
+	plan, err := memoryindex.Plan(cfg)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.SourceCount != 1 {
+		t.Fatalf("source_count = %d, want 1 without symlink", plan.SourceCount)
+	}
+	if plan.Skipped.Symlinks != 1 {
+		t.Fatalf("skipped_symlinks = %d, want 1", plan.Skipped.Symlinks)
+	}
+	for _, domain := range plan.Domains {
+		for _, path := range domain.Files {
+			if path == linkPath {
+				t.Fatalf("indexed symlink %q", linkPath)
+			}
+		}
+	}
+}
+
+func TestPlanSkipsSymlinkPointingOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	cfg := writeTestIndexLayout(t, root)
+	outside := filepath.Join(root, "outside.md")
+	writeFile(t, outside, "# outside\n")
+	linkPath := filepath.Join(root, "memory", "mysecondbrain", "escape.md")
+	symlinkOrSkip(t, outside, linkPath)
+	writeFile(t, filepath.Join(root, "memory", "mysecondbrain", "inside.md"), "# inside\n")
+
+	plan, err := memoryindex.Plan(cfg)
+	if err != nil {
+		t.Fatalf("Plan() error = %v", err)
+	}
+	if plan.SourceCount != 1 {
+		t.Fatalf("source_count = %d, want 1", plan.SourceCount)
+	}
+	if plan.Skipped.Symlinks != 1 {
+		t.Fatalf("skipped_symlinks = %d, want 1", plan.Skipped.Symlinks)
+	}
+	for _, domain := range plan.Domains {
+		for _, path := range domain.Files {
+			if path == linkPath || path == outside {
+				t.Fatalf("indexed symlink or outside target: %q", path)
+			}
+		}
+	}
+}
+
+func TestValidateRejectsAbsoluteOutputPath(t *testing.T) {
+	root := t.TempDir()
+	cfg := writeTestIndexLayout(t, root)
+	cfg.MemoryIndex.Output.Manifest = "/tmp/memory-index-manifest.json"
+	if err := memoryindex.Validate(cfg); err == nil {
+		t.Fatal("Validate() error = nil, want absolute output failure")
+	}
+}
+
+func TestValidateRejectsOutputWithParentTraversal(t *testing.T) {
+	root := t.TempDir()
+	cfg := writeTestIndexLayout(t, root)
+	cfg.MemoryIndex.Output.Chunks = "../escape-chunks.jsonl"
+	if err := memoryindex.Validate(cfg); err == nil {
+		t.Fatal("Validate() error = nil, want parent traversal failure")
+	}
+}
+
+func TestValidateRejectsSecretsOutputPath(t *testing.T) {
+	root := t.TempDir()
+	cfg := writeTestIndexLayout(t, root)
+	cfg.MemoryIndex.Output.Manifest = "secrets/memory-index-manifest.json"
+	if err := memoryindex.Validate(cfg); err == nil {
+		t.Fatal("Validate() error = nil, want secrets output failure")
+	}
+}
+
+func TestBuildWritesOutputsInsideArtifactsDir(t *testing.T) {
+	root := t.TempDir()
+	cfg := writeTestIndexLayout(t, root)
+	cfg.MemoryIndex.Output.Manifest = "indexes/manifest.json"
+	cfg.MemoryIndex.Output.Chunks = "indexes/chunks.jsonl"
+	cfgPath := writeTestIndexConfigWithOutput(t, root, cfg)
+	writeFile(t, filepath.Join(root, "memory", "mysecondbrain", "note.md"), "# note\n")
+
+	loaded, err := memoryindex.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	configBytes, err := os.ReadFile(cfgPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+
+	artifactsDir := filepath.Join(root, "artifacts")
+	result, err := memoryindex.Build(loaded, artifactsDir, configBytes)
+	if err != nil {
+		t.Fatalf("Build() error = %v", err)
+	}
+	wantManifest := filepath.Join(artifactsDir, "indexes", "manifest.json")
+	wantChunks := filepath.Join(artifactsDir, "indexes", "chunks.jsonl")
+	if result.Manifest.ManifestPath != wantManifest {
+		t.Fatalf("manifest_path = %q, want %q", result.Manifest.ManifestPath, wantManifest)
+	}
+	if result.Manifest.ChunksPath != wantChunks {
+		t.Fatalf("chunks_path = %q, want %q", result.Manifest.ChunksPath, wantChunks)
+	}
 }
 
 func TestFileOutsideRootNotIndexed(t *testing.T) {
@@ -265,6 +382,11 @@ func testConfig(root string) memoryindex.Config {
 
 func writeTestIndexConfig(t *testing.T, root string, cfg memoryindex.Config) string {
 	t.Helper()
+	return writeTestIndexConfigWithOutput(t, root, cfg)
+}
+
+func writeTestIndexConfigWithOutput(t *testing.T, root string, cfg memoryindex.Config) string {
+	t.Helper()
 	path := filepath.Join(root, "memory-index.yaml")
 	data := []byte(`memory_index:
   domains:
@@ -289,13 +411,20 @@ func writeTestIndexConfig(t *testing.T, root string, cfg memoryindex.Config) str
     max_chars: 2000
     overlap_chars: 200
   output:
-    manifest: memory-index-manifest.json
-    chunks: memory-index-chunks.jsonl
+    manifest: ` + yamlString(cfg.MemoryIndex.Output.Manifest) + `
+    chunks: ` + yamlString(cfg.MemoryIndex.Output.Chunks) + `
 `)
 	if err := os.WriteFile(path, data, 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
 	return path
+}
+
+func symlinkOrSkip(t *testing.T, oldname, newname string) {
+	t.Helper()
+	if err := os.Symlink(oldname, newname); err != nil {
+		t.Skipf("symlink not supported: %v", err)
+	}
 }
 
 func yamlString(value string) string {

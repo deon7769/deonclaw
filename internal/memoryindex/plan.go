@@ -19,6 +19,7 @@ type PlanResult struct {
 	Domains      []DomainPlan `json:"domains"`
 	SourceCount  int          `json:"source_count"`
 	SkippedCount int          `json:"skipped_count"`
+	Skipped      SkippedStats `json:"skipped"`
 }
 
 func Plan(cfg Config) (PlanResult, error) {
@@ -60,6 +61,7 @@ func Plan(cfg Config) (PlanResult, error) {
 		Domains:      domains,
 		SourceCount:  len(scan.Candidates),
 		SkippedCount: scan.SkippedCount,
+		Skipped:      scan.Skipped,
 	}, nil
 }
 
@@ -84,6 +86,15 @@ func WritePlanText(plan PlanResult, out io.Writer) error {
 		return err
 	}
 	if _, err := fmt.Fprintf(out, "skipped_count: %d\n", plan.SkippedCount); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "skipped_symlinks: %d\n", plan.Skipped.Symlinks); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "skipped_secret_paths: %d\n", plan.Skipped.SecretPaths); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintf(out, "skipped_excluded: %d\n", plan.Skipped.Excluded); err != nil {
 		return err
 	}
 	for _, domain := range plan.Domains {

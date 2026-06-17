@@ -18,38 +18,16 @@ type CandidateFile struct {
 	SkipNote string `json:"skip_note,omitempty"`
 }
 
+type SkippedStats struct {
+	Symlinks    int `json:"skipped_symlinks"`
+	SecretPaths int `json:"skipped_secret_paths"`
+	Excluded    int `json:"skipped_excluded"`
+}
+
 type ScanResult struct {
 	Candidates   []CandidateFile `json:"candidates"`
 	SkippedCount int             `json:"skipped_count"`
-}
-
-func isSecretsPath(path string) bool {
-	path = filepath.ToSlash(filepath.Clean(path))
-	for _, segment := range strings.Split(path, "/") {
-		if segment == "secrets" {
-			return true
-		}
-	}
-	return false
-}
-
-func pathWithinRoot(root string, path string) bool {
-	rootAbs, err := filepath.Abs(root)
-	if err != nil {
-		return false
-	}
-	pathAbs, err := filepath.Abs(path)
-	if err != nil {
-		return false
-	}
-	rel, err := filepath.Rel(rootAbs, pathAbs)
-	if err != nil {
-		return false
-	}
-	if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return false
-	}
-	return true
+	Skipped      SkippedStats    `json:"skipped"`
 }
 
 func matchesAnyPattern(patterns []string, relPath string) bool {
@@ -114,6 +92,10 @@ func pathContainsSegment(path string, segment string) bool {
 	return false
 }
 
+func isSymlinkEntry(entry fs.DirEntry) bool {
+	return entry.Type()&fs.ModeSymlink != 0
+}
+
 func scanSource(source Source) (ScanResult, error) {
 	root := source.Root
 	info, err := os.Stat(root)
@@ -143,17 +125,27 @@ func scanSource(source Source) (ScanResult, error) {
 			return nil
 		}
 
-		if isSecretsPath(relSlash) {
+		if isSymlinkEntry(entry) {
+			result.Skipped.Symlinks++
+			result.SkippedCount++
 			if entry.IsDir() {
-				result.SkippedCount++
 				return fs.SkipDir
 			}
+			return nil
+		}
+
+		if isSecretsPath(relSlash) {
+			result.Skipped.SecretPaths++
 			result.SkippedCount++
+			if entry.IsDir() {
+				return fs.SkipDir
+			}
 			return nil
 		}
 
 		if entry.IsDir() {
 			if matchesAnyPattern(source.Exclude, relSlash) || matchesAnyPattern(source.Exclude, relSlash+"/") {
+				result.Skipped.Excluded++
 				result.SkippedCount++
 				return fs.SkipDir
 			}
@@ -161,10 +153,12 @@ func scanSource(source Source) (ScanResult, error) {
 		}
 
 		if !matchesAnyPattern(source.Include, relSlash) {
+			result.Skipped.Excluded++
 			result.SkippedCount++
 			return nil
 		}
 		if matchesAnyPattern(source.Exclude, relSlash) {
+			result.Skipped.Excluded++
 			result.SkippedCount++
 			return nil
 		}
@@ -192,6 +186,9 @@ func scanConfig(cfg Config) (ScanResult, error) {
 		}
 		combined.Candidates = append(combined.Candidates, part.Candidates...)
 		combined.SkippedCount += part.SkippedCount
+		combined.Skipped.Symlinks += part.Skipped.Symlinks
+		combined.Skipped.SecretPaths += part.Skipped.SecretPaths
+		combined.Skipped.Excluded += part.Skipped.Excluded
 	}
 	return combined, nil
 }

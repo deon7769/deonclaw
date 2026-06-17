@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"gopkg.in/yaml.v3"
@@ -63,14 +62,15 @@ type Chunk struct {
 }
 
 type Manifest struct {
-	GeneratedAt  string   `json:"generated_at"`
-	ConfigSHA256 string   `json:"config_sha256"`
-	Domains      []string `json:"domains"`
-	SourceCount  int      `json:"source_count"`
-	ChunkCount   int      `json:"chunk_count"`
-	SkippedCount int      `json:"skipped_count"`
-	ManifestPath string   `json:"manifest_path"`
-	ChunksPath   string   `json:"chunks_path"`
+	GeneratedAt  string       `json:"generated_at"`
+	ConfigSHA256 string       `json:"config_sha256"`
+	Domains      []string     `json:"domains"`
+	SourceCount  int          `json:"source_count"`
+	ChunkCount   int          `json:"chunk_count"`
+	SkippedCount int          `json:"skipped_count"`
+	Skipped      SkippedStats `json:"skipped"`
+	ManifestPath string       `json:"manifest_path"`
+	ChunksPath   string       `json:"chunks_path"`
 }
 
 type BuildResult struct {
@@ -144,9 +144,13 @@ func validate(cfg Config, checkFilesystem bool) error {
 
 	if strings.TrimSpace(cfg.MemoryIndex.Output.Manifest) == "" {
 		errs = append(errs, errors.New("memory_index.output.manifest is required"))
+	} else if err := validateConfiguredOutputPath("manifest", cfg.MemoryIndex.Output.Manifest); err != nil {
+		errs = append(errs, err)
 	}
 	if strings.TrimSpace(cfg.MemoryIndex.Output.Chunks) == "" {
 		errs = append(errs, errors.New("memory_index.output.chunks is required"))
+	} else if err := validateConfiguredOutputPath("chunks", cfg.MemoryIndex.Output.Chunks); err != nil {
+		errs = append(errs, err)
 	}
 
 	for i, source := range cfg.MemoryIndex.Sources {
@@ -211,15 +215,4 @@ func trimNonEmpty(values []string) []string {
 		out = append(out, value)
 	}
 	return out
-}
-
-func resolveOutputPath(artifactsDir string, configured string) string {
-	configured = strings.TrimSpace(configured)
-	if configured == "" {
-		return ""
-	}
-	if filepath.IsAbs(configured) {
-		return configured
-	}
-	return filepath.Join(artifactsDir, filepath.Base(configured))
 }

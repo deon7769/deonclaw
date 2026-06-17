@@ -63,6 +63,10 @@ Validation rules:
 - `overlap_chars >= 0` and `< max_chars`
 - secrets paths are blocked
 - files outside configured roots are never indexed
+- symlinks are never followed or indexed
+- `memory_index.output.manifest` and `memory_index.output.chunks` must be relative paths (not absolute)
+- output paths must not contain `..`, `secrets`, or `.env`
+- build writes manifest/chunks only inside `--artifacts-dir`
 
 ## CLI
 
@@ -85,12 +89,14 @@ Build auditable index artifacts:
 deonctl memory index build --config configs/examples/memory-index.yaml --artifacts-dir artifacts
 ~~~
 
-`plan` reports candidate file counts per domain and skipped paths.
+`plan` reports candidate file counts per domain and skipped paths (`skipped_count`, plus `skipped_symlinks`, `skipped_secret_paths`, and `skipped_excluded` when available).
 
-`build` writes:
+`build` writes manifest and chunks under `--artifacts-dir` using the configured relative output paths:
 
-- `memory-index-manifest.json`
-- `memory-index-chunks.jsonl`
+- `memory-index-manifest.json` (default)
+- `memory-index-chunks.jsonl` (default)
+
+Relative paths may include subdirectories (for example `indexes/manifest.json`); absolute output paths are rejected.
 
 ## Chunk contract
 
@@ -114,9 +120,12 @@ The manifest records:
 - `source_count`
 - `chunk_count`
 - `skipped_count`
+- `skipped` (`skipped_symlinks`, `skipped_secret_paths`, `skipped_excluded`)
 - output paths
 
 ## Safety
+
+The memory index is derived state. Markdown + Git remain canonical; rebuilds are safe to repeat and do not modify source memory files.
 
 - read-only over memory files
 - no memory apply/restore changes
@@ -125,6 +134,8 @@ The manifest records:
 - no network calls
 - no environment values in artifacts
 - secrets paths are excluded
+- symlinks are skipped (never followed or indexed)
+- index artifacts are confined to `--artifacts-dir` by default
 
 A future task may transform these chunks into vectors or wire retrieval into the runner. That is intentionally out of scope for Task 22.0.
 

@@ -33,8 +33,10 @@ func Build(cfg Config, artifactsDir string, configBytes []byte) (BuildResult, er
 		return BuildResult{}, err
 	}
 
-	manifestPath := resolveOutputPath(artifactsDir, cfg.MemoryIndex.Output.Manifest)
-	chunksPath := resolveOutputPath(artifactsDir, cfg.MemoryIndex.Output.Chunks)
+	manifestPath, chunksPath, err := resolveOutputPaths(cfg, artifactsDir)
+	if err != nil {
+		return BuildResult{}, err
+	}
 	if err := os.MkdirAll(filepath.Dir(manifestPath), 0o755); err != nil {
 		return BuildResult{}, fmt.Errorf("create artifacts dir: %w", err)
 	}
@@ -76,6 +78,7 @@ func Build(cfg Config, artifactsDir string, configBytes []byte) (BuildResult, er
 		SourceCount:  len(scan.Candidates),
 		ChunkCount:   len(chunks),
 		SkippedCount: scan.SkippedCount,
+		Skipped:      scan.Skipped,
 		ManifestPath: manifestPath,
 		ChunksPath:   chunksPath,
 	}
