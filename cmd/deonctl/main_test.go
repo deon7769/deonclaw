@@ -17,6 +17,7 @@ import (
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/mcpapproval"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
@@ -1414,6 +1415,295 @@ func TestRunMCPCallSmokeDockerWithFakeDockerGeneratesArtifacts(t *testing.T) {
 	}
 	for _, name := range []string{"mcp-call-smoke-summary.md", "mcp-call-transcript.jsonl", "mcp-call-result.json", "mcp-call-stdout.log", "mcp-call-stderr.log", "mcp-call-response.json"} {
 		assertCLIFileNotContains(t, filepath.Join(artifactsDir, name), "super-secret-value")
+	}
+}
+
+func TestRunMCPProposalWorkflowNewLintPreflightApprove(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"read"})
+	policyPath := writeCLIMCPCallPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"}, 65536, 1048576, true)
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	proposalPath := filepath.Join(tempDir, "proposal.json")
+	preflightPath := filepath.Join(tempDir, "preflight.json")
+	approvalPath := filepath.Join(tempDir, "approval.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "proposal", "new",
+		"--server", "fake-stdio",
+		"--tool", "deonclaw.fake.echo",
+		"--arguments", `{"text":"hello"}`,
+		"--reason", "Manual read-only call.",
+		"--policy", policyPath,
+		"--runtime", "docker",
+		"--runtime-config", runtimeConfigPath,
+		"--workspace", ".",
+		"--output", proposalPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("proposal new exit code = %d, stderr = %q", code, stderr.String())
+	}
+	proposal := readMCPProposalFile(t, proposalPath)
+	if proposal.Status != mcpapproval.ProposalStatusProposed || proposal.ArgumentsSHA256 == "" {
+		t.Fatalf("proposal = %#v, want proposed with arguments hash", proposal)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"mcp", "proposal", "lint",
+		"--proposal", proposalPath,
+		"--config", configPath,
+		"--policy", policyPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("proposal lint exit code = %d, stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "status: passed") {
+		t.Fatalf("lint stdout = %q, want passed", stdout.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"mcp", "proposal", "preflight",
+		"--proposal", proposalPath,
+		"--config", configPath,
+		"--policy", policyPath,
+		"--output", preflightPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("proposal preflight exit code = %d, stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	preflight := readMCPPreflightFile(t, preflightPath)
+	if preflight.Status != mcpapproval.PreflightStatusPassed ||
+		!preflight.Checks.PolicyLoaded ||
+		!preflight.Checks.ServerAllowlisted ||
+		!preflight.Checks.ToolAllowlisted ||
+		!preflight.Checks.ReadOnlyCapability ||
+		!preflight.Checks.DockerRequired ||
+		!preflight.Checks.EnvAvailable ||
+		!preflight.Checks.ArgumentsWithinLimit ||
+		!preflight.Checks.NoWriteExec {
+		t.Fatalf("preflight = %#v, want all checks passed", preflight)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"mcp", "proposal", "approve",
+		"--proposal", proposalPath,
+		"--policy", policyPath,
+		"--decision", "approved",
+		"--reason", "Approved after preflight.",
+		"--output", approvalPath,
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("approve without confirm exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --confirm-read-only") {
+		t.Fatalf("stderr = %q, want confirm-read-only", stderr.String())
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"mcp", "proposal", "approve",
+		"--proposal", proposalPath,
+		"--policy", policyPath,
+		"--decision", "approved",
+		"--reason", "Approved after preflight.",
+		"--output", approvalPath,
+		"--confirm-read-only",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("proposal approve exit code = %d, stderr = %q", code, stderr.String())
+	}
+	approval := readMCPApprovalFile(t, approvalPath)
+	if approval.Decision != mcpapproval.ApprovalDecisionApproved ||
+		approval.ArgumentsSHA256 != proposal.ArgumentsSHA256 ||
+		approval.PolicySHA256 == "" ||
+		!approval.ConfirmReadOnly {
+		t.Fatalf("approval = %#v, want approved with hashes", approval)
+	}
+}
+
+func TestRunMCPProposalLintRejectsInvalidArguments(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"read"})
+	policyPath := writeCLIMCPCallPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"}, 65536, 1048576, true)
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	proposal := newCLIMCPProposal(t, "fake-stdio", []byte(`{"text":"hello"}`), policyPath, runtimeConfigPath)
+	proposal.Arguments = json.RawMessage(`"not-object"`)
+	proposal.ArgumentsSHA256 = mcpapproval.ArgumentsSHA256(proposal.Arguments)
+	proposalPath := writeRawJSONFile(t, tempDir, "proposal-invalid-arguments.json", proposal)
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "proposal", "lint",
+		"--proposal", proposalPath,
+		"--config", configPath,
+		"--policy", policyPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("proposal lint exit code = %d, want 1", code)
+	}
+	if !strings.Contains(stdout.String(), "arguments must be a valid JSON object") {
+		t.Fatalf("stdout = %q, want arguments failure", stdout.String())
+	}
+}
+
+func TestRunMCPProposalPreflightRejectsWriteExecAndMissingEnv(t *testing.T) {
+	tempDir := t.TempDir()
+	policyPath := writeCLIMCPCallPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"}, 65536, 1048576, true)
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	proposalPath := writeMCPProposalFile(t, tempDir, newCLIMCPProposal(t, "fake-stdio", []byte(`{"text":"hello"}`), policyPath, runtimeConfigPath))
+
+	writeExecConfig := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"write"})
+	writeExecPreflightPath := filepath.Join(tempDir, "preflight-write.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"mcp", "proposal", "preflight",
+		"--proposal", proposalPath,
+		"--config", writeExecConfig,
+		"--policy", policyPath,
+		"--output", writeExecPreflightPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("write preflight exit code = %d, want 1", code)
+	}
+	writePreflight := readMCPPreflightFile(t, writeExecPreflightPath)
+	if writePreflight.Checks.NoWriteExec || writePreflight.Checks.ReadOnlyCapability {
+		t.Fatalf("write preflight = %#v, want no_write_exec/read_only failure", writePreflight)
+	}
+
+	unsetEnvForTest(t, "MCP_TOKEN")
+	missingEnvConfig := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", false, []string{"read"})
+	missingEnvPreflightPath := filepath.Join(tempDir, "preflight-env.json")
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"mcp", "proposal", "preflight",
+		"--proposal", proposalPath,
+		"--config", missingEnvConfig,
+		"--policy", policyPath,
+		"--output", missingEnvPreflightPath,
+	}, &stdout, &stderr)
+	if code != 1 {
+		t.Fatalf("missing env preflight exit code = %d, want 1", code)
+	}
+	envPreflight := readMCPPreflightFile(t, missingEnvPreflightPath)
+	if envPreflight.Checks.EnvAvailable || !strings.Contains(strings.Join(envPreflight.Failures, "\n"), "MCP_TOKEN") {
+		t.Fatalf("env preflight = %#v, want missing MCP_TOKEN", envPreflight)
+	}
+}
+
+func TestRunMCPProposalExecuteRejectsMissingRejectedAndHashChanges(t *testing.T) {
+	tempDir := t.TempDir()
+	configPath := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"read"})
+	policyPath := writeCLIMCPCallPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"}, 65536, 1048576, true)
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	proposal := newCLIMCPProposal(t, "fake-stdio", []byte(`{"text":"hello"}`), policyPath, runtimeConfigPath)
+	proposalPath := writeMCPProposalFile(t, tempDir, proposal)
+	approval := newCLIMCPApproval(t, proposal, policyPath, mcpapproval.ApprovalDecisionApproved)
+	approvalPath := writeMCPApprovalFile(t, tempDir, approval, "approval.json")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := run([]string{
+		"mcp", "proposal", "execute",
+		"--proposal", proposalPath,
+		"--config", configPath,
+		"--policy", policyPath,
+		"--artifacts-dir", filepath.Join(tempDir, "artifacts-missing-approval"),
+		"--confirm-execute",
+	}, &stdout, &stderr)
+	if code != 2 {
+		t.Fatalf("execute missing approval exit code = %d, want 2", code)
+	}
+	if !strings.Contains(stderr.String(), "missing --approval") {
+		t.Fatalf("stderr = %q, want missing approval", stderr.String())
+	}
+
+	rejectedApproval := approval
+	rejectedApproval.Decision = mcpapproval.ApprovalDecisionRejected
+	rejectedPath := writeMCPApprovalFile(t, tempDir, rejectedApproval, "approval-rejected.json")
+	stdout.Reset()
+	stderr.Reset()
+	code = runMCPProposalExecuteCLI(t, proposalPath, rejectedPath, configPath, policyPath, filepath.Join(tempDir, "artifacts-rejected"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "approved") {
+		t.Fatalf("rejected execute code=%d stderr=%q, want approval rejection", code, stderr.String())
+	}
+
+	changedProposal := proposal
+	changedProposal.Arguments = json.RawMessage(`{"text":"changed"}`)
+	changedProposal.ArgumentsSHA256 = mcpapproval.ArgumentsSHA256(changedProposal.Arguments)
+	changedPath := writeMCPProposalFile(t, tempDir, changedProposal)
+	stdout.Reset()
+	stderr.Reset()
+	code = runMCPProposalExecuteCLI(t, changedPath, approvalPath, configPath, policyPath, filepath.Join(tempDir, "artifacts-arg-hash"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "arguments_sha256") {
+		t.Fatalf("changed arguments execute code=%d stderr=%q, want hash rejection", code, stderr.String())
+	}
+
+	if err := os.WriteFile(policyPath, append(mustReadCLIFile(t, policyPath), []byte("\n# changed\n")...), 0o600); err != nil {
+		t.Fatalf("WriteFile(policy changed) error = %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = runMCPProposalExecuteCLI(t, proposalPath, approvalPath, configPath, policyPath, filepath.Join(tempDir, "artifacts-policy-hash"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "policy_sha256") {
+		t.Fatalf("changed policy execute code=%d stderr=%q, want policy hash rejection", code, stderr.String())
+	}
+}
+
+func TestRunMCPProposalExecuteCallsCallSmokeGeneratesArtifacts(t *testing.T) {
+	t.Setenv("MCP_TOKEN", "super-secret-value")
+	argsPath := installCLIMCPFakeDocker(t, "fake", "docker fake stderr super-secret-value\n")
+	tempDir := t.TempDir()
+	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", false, []string{"read"})
+	policyPath := writeCLIMCPCallPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"}, 65536, 80, true)
+	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
+	proposal := newCLIMCPProposal(t, "fake-stdio", []byte(`{"text":"super-secret-value `+strings.Repeat("x", 200)+`"}`), policyPath, runtimeConfigPath)
+	proposalPath := writeMCPProposalFile(t, tempDir, proposal)
+	approvalPath := writeMCPApprovalFile(t, tempDir, newCLIMCPApproval(t, proposal, policyPath, mcpapproval.ApprovalDecisionApproved), "approval.json")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+
+	code := runMCPProposalExecuteCLI(t, proposalPath, approvalPath, configPath, policyPath, artifactsDir, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("execute exit code = %d, stdout=%q stderr=%q", code, stdout.String(), stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "approved read-only call smoke") ||
+		!strings.Contains(stdout.String(), "tool_calls: 1") ||
+		!strings.Contains(stdout.String(), "response_truncated: true") {
+		t.Fatalf("stdout = %q, want execute summary", stdout.String())
+	}
+	for _, name := range []string{"mcp-call-smoke-summary.md", "mcp-call-transcript.jsonl", "mcp-call-result.json", "mcp-call-stdout.log", "mcp-call-stderr.log", "mcp-call-response.json"} {
+		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
+			t.Fatalf("artifact %s stat error = %v", name, err)
+		}
+		assertCLIFileNotContains(t, filepath.Join(artifactsDir, name), "super-secret-value")
+	}
+	transcript := assertCLITranscriptJSONLValid(t, filepath.Join(artifactsDir, "mcp-call-transcript.jsonl"))
+	assertCLITranscriptRequestMethodCount(t, transcript, "tools/call", 1)
+	var response struct {
+		ResponseTruncated bool `json:"response_truncated"`
+	}
+	if err := json.Unmarshal(mustReadCLIFile(t, filepath.Join(artifactsDir, "mcp-call-response.json")), &response); err != nil {
+		t.Fatalf("mcp-call-response.json invalid: %v", err)
+	}
+	if !response.ResponseTruncated {
+		t.Fatalf("response = %#v, want truncation", response)
+	}
+	args := readCLIDockerArgs(t, argsPath)
+	joinedArgs := strings.Join(args, " ")
+	if strings.Contains(joinedArgs, "sh -c") || strings.Contains(joinedArgs, "super-secret-value") {
+		t.Fatalf("docker args unsafe or leaked secret: %#v", args)
 	}
 }
 
@@ -6684,6 +6974,144 @@ func readMemoryApprovalFile(t *testing.T, path string) memory.MemoryApproval {
 		t.Fatalf("Unmarshal(approval) error = %v", err)
 	}
 	return approval
+}
+
+func readMCPProposalFile(t *testing.T, path string) mcpapproval.MCPToolCallProposal {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(proposal) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("proposal output is invalid JSON: %s", data)
+	}
+	var proposal mcpapproval.MCPToolCallProposal
+	if err := json.Unmarshal(data, &proposal); err != nil {
+		t.Fatalf("Unmarshal(proposal) error = %v", err)
+	}
+	return proposal
+}
+
+func readMCPPreflightFile(t *testing.T, path string) mcpapproval.MCPToolCallPreflight {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(preflight) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("preflight output is invalid JSON: %s", data)
+	}
+	var preflight mcpapproval.MCPToolCallPreflight
+	if err := json.Unmarshal(data, &preflight); err != nil {
+		t.Fatalf("Unmarshal(preflight) error = %v", err)
+	}
+	return preflight
+}
+
+func readMCPApprovalFile(t *testing.T, path string) mcpapproval.MCPToolCallApproval {
+	t.Helper()
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(approval) error = %v", err)
+	}
+	if !json.Valid(data) {
+		t.Fatalf("approval output is invalid JSON: %s", data)
+	}
+	var approval mcpapproval.MCPToolCallApproval
+	if err := json.Unmarshal(data, &approval); err != nil {
+		t.Fatalf("Unmarshal(approval) error = %v", err)
+	}
+	return approval
+}
+
+func newCLIMCPProposal(t *testing.T, server string, arguments []byte, policyPath string, runtimeConfigPath string) mcpapproval.MCPToolCallProposal {
+	t.Helper()
+	proposal, err := mcpapproval.NewProposal(mcpapproval.NewProposalOptions{
+		ID:                "mcp-call-cli-test",
+		CreatedAt:         time.Date(2026, 6, 16, 21, 30, 0, 0, time.UTC),
+		Server:            server,
+		Tool:              "deonclaw.fake.echo",
+		Arguments:         arguments,
+		Reason:            "CLI read-only approval test.",
+		RequestedBy:       "davi",
+		PolicyPath:        policyPath,
+		Runtime:           "docker",
+		RuntimeConfigPath: runtimeConfigPath,
+		Workspace:         ".",
+	})
+	if err != nil {
+		t.Fatalf("NewProposal() error = %v", err)
+	}
+	return proposal
+}
+
+func newCLIMCPApproval(t *testing.T, proposal mcpapproval.MCPToolCallProposal, policyPath string, decision string) mcpapproval.MCPToolCallApproval {
+	t.Helper()
+	approval, err := mcpapproval.BuildApproval(proposal, mcpapproval.NewApprovalOptions{
+		Decision:        decision,
+		ApprovedAt:      time.Date(2026, 6, 16, 21, 35, 0, 0, time.UTC),
+		ApprovedBy:      "davi",
+		Reason:          "CLI approval test.",
+		PolicyPath:      policyPath,
+		ConfirmReadOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildApproval() error = %v", err)
+	}
+	return approval
+}
+
+func writeMCPProposalFile(t *testing.T, dir string, proposal mcpapproval.MCPToolCallProposal) string {
+	t.Helper()
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("proposal.JSON() error = %v", err)
+	}
+	file, err := os.CreateTemp(dir, "mcp-proposal-*.json")
+	if err != nil {
+		t.Fatalf("CreateTemp(MCP proposal) error = %v", err)
+	}
+	path := file.Name()
+	if _, err := file.Write(data); err != nil {
+		t.Fatalf("write MCP proposal file: %v", err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatalf("close MCP proposal file: %v", err)
+	}
+	if err := os.Chmod(path, 0o600); err != nil {
+		t.Fatalf("chmod MCP proposal file: %v", err)
+	}
+	return path
+}
+
+func writeMCPApprovalFile(t *testing.T, dir string, approval mcpapproval.MCPToolCallApproval, name string) string {
+	t.Helper()
+	data, err := approval.JSON()
+	if err != nil {
+		t.Fatalf("approval.JSON() error = %v", err)
+	}
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write MCP approval file: %v", err)
+	}
+	return path
+}
+
+func runMCPProposalExecuteCLI(t *testing.T, proposalPath string, approvalPath string, configPath string, policyPath string, artifactsDir string, stdout io.Writer, stderr io.Writer) int {
+	t.Helper()
+	return run([]string{
+		"mcp", "proposal", "execute",
+		"--proposal", proposalPath,
+		"--approval", approvalPath,
+		"--config", configPath,
+		"--policy", policyPath,
+		"--artifacts-dir", artifactsDir,
+		"--timeout-seconds", "3",
+		"--confirm-execute",
+	}, stdout, stderr)
 }
 
 func writeApprovalTestProposal(t *testing.T, dir string, id string) string {

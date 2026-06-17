@@ -2,7 +2,7 @@
 
 Task 20.0 adds the Docker runtime foundation.
 
-DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, run fake/test MCP smoke, fake read-only tool-smoke, real read-only MCP discovery, real read-only MCP call-smoke, and run an OpenCode Docker worker runtime path marked `supported_experimental`. Codex still runs through the existing local worker runtime.
+DeonClaw can load and validate `runtime.yaml`, produce a dry-run Docker command plan, execute a simple explicit command inside Docker, run Docker-backed validation commands, run fake/test MCP smoke, fake read-only tool-smoke, real read-only MCP discovery, real read-only MCP call-smoke, the explicit MCP call approval workflow, and run an OpenCode Docker worker runtime path marked `supported_experimental`. Codex still runs through the existing local worker runtime.
 
 The OpenCode Docker Z.AI smoke has been validated, but production use still requires caution because the current OpenCode Docker prompt contract uses a prompt argument placeholder. The recorded command keeps `<prompt>`, but the real process args receive the raw prompt. A future wrapper may move this to stdin or another hardened transport.
 
@@ -158,6 +158,8 @@ deonctl mcp call-smoke \
 
 This uses the same Docker planner and execution path for policy-allowlisted real read-only servers. It sends `initialize`, `tools/list`, exactly one `tools/call`, `shutdown`, and `exit`. It is a smoke test only: no Codex/OpenCode worker integration, no automatic tool dispatch, and no fallback execution. Server env passthrough is name-only and must be set before Docker starts; artifacts redact env passthrough values and run a leak scan before writing. The real call policy template must be edited with a tool name from `mcp discover`; fake echo policy lives separately at `configs/examples/mcp-call-policy-fake.yaml`.
 
+`deonctl mcp proposal execute` uses this same Docker-gated call-smoke path after proposal lint, preflight, and explicit approval. It does not add worker integration or automatic MCP dispatch.
+
 Prompt delivery is worker-specific. A Docker worker plan must declare one of:
 
 - `prompt_delivery: stdin`: the runner writes the prompt to process stdin.
@@ -292,6 +294,7 @@ Current state:
 - MCP Docker fake/test smoke and fake read-only tool-smoke implemented for `test_only` stdio servers
 - MCP Docker real read-only discovery implemented for policy-allowlisted stdio servers, tools-list only
 - MCP Docker real read-only call-smoke implemented for policy-allowlisted stdio servers, exactly one tool call
+- MCP Docker real read-only proposal execute implemented as approval-gated reuse of call-smoke
 - OpenCode Docker worker runtime supported experimental with prompt placeholder masking
 - OpenCode Docker Z.AI smoke validated with `configs/examples/runtime-opencode-zai-smoke.yaml`
 - Codex worker execution remains local

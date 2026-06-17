@@ -15,7 +15,7 @@ Before changing code, read:
 
 For current sequencing, follow AGENTS.md Next implementation order first.
 
-Do not implement fallback execution, Codex Docker worker execution, MCP execution/manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, allowlisted env passthrough, fake/test worker runtime scaffold, MCP fake/test smoke, fake read-only tool-smoke, real read-only discovery, real read-only call-smoke, and OpenCode Docker smoke only; Codex still runs locally. The current MCP surface is registry validation/list/plan/doctor/risk/docker-plan plus local/Docker fake/test stdio smoke, fake read-only tool-smoke, policy-gated real read-only discovery, and policy-gated one-call real read-only call-smoke only; no automatic MCP tool orchestration, external worker integration, or fallback integration.
+Do not implement fallback execution, Codex Docker worker execution, MCP execution/manager, memory index, or UI out of order. The current fallback surface is schema/policy only. The current Docker surface is runtime config validation, docker-plan, simple `runtime docker-exec`, Docker-backed validation commands, allowlisted env passthrough, fake/test worker runtime scaffold, MCP fake/test smoke, fake read-only tool-smoke, real read-only discovery, real read-only call-smoke, MCP call approval workflow, and OpenCode Docker smoke only; Codex still runs locally. The current MCP surface is registry validation/list/plan/doctor/risk/docker-plan plus local/Docker fake/test stdio smoke, fake read-only tool-smoke, policy-gated real read-only discovery, policy-gated one-call real read-only call-smoke, and explicit proposal/preflight/approval execution for that same call path only; no automatic MCP tool orchestration, external worker integration, or fallback integration.
 
 Memory apply and restore already exist. Do not alter their behavior unless a task explicitly targets the memory workflow.
 
@@ -37,6 +37,7 @@ backup plan -> backup materialization -> restore dry-run -> restore execute
 - internal/runtimeconfig: runtime.yaml loading, validation, Docker mount/env passthrough policy, docker-plan generation, simple docker-exec planning, validation command Docker planning, and fake/test worker Docker planning
 - internal/mcpconfig: mcp.yaml loading, validation, registry listing, diagnostics, risk reporting, and static command/env planning only
 - internal/mcpsmoke: controlled fake/test MCP stdio smoke, fake read-only tool-smoke, real read-only discovery smoke, real read-only call-smoke, policy scaffolds, and transcript artifacts only
+- internal/mcpapproval: MCP read-only tool call proposal, lint, preflight, approval, hash binding, and explicit execute workflow only
 - internal/policy: path policy
 - internal/memory: memory proposal/lint/apply-preview/approval/preflight/backup-plan/backup-materialize/restore-preview/restore-execute/apply-execute
 - internal/contextpack: scoped context generation
