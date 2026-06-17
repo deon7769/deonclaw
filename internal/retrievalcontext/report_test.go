@@ -11,8 +11,8 @@ import (
 	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/retrievalcontext"
 	"github.com/deon7769/deonclaw/internal/runs"
-	"github.com/deon7769/deonclaw/internal/tasks"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
+	"github.com/deon7769/deonclaw/internal/tasks"
 )
 
 func TestBuildRetrievalReportListsRunWithTraceFields(t *testing.T) {
