@@ -172,6 +172,17 @@ func loadChunksJSONL(path string) ([]Chunk, []InvalidChunkReport, error) {
 	return chunks, invalid, nil
 }
 
+func LoadChunksJSONL(path string) ([]Chunk, error) {
+	chunks, invalid, err := loadChunksJSONL(path)
+	if err != nil {
+		return nil, err
+	}
+	if len(invalid) > 0 {
+		return nil, fmt.Errorf("chunks jsonl has %d invalid lines", len(invalid))
+	}
+	return chunks, nil
+}
+
 func reportStatus(invalidCount int, duplicateCount int, warnings []string) string {
 	if invalidCount > 0 || duplicateCount > 0 {
 		return StatusFailed

@@ -1,6 +1,8 @@
 package embeddingpolicy
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
@@ -15,7 +17,8 @@ const (
 	ProviderZAI    = "zai"
 	ProviderLocal  = "local"
 
-	ModeDryRun = "dry_run"
+	ModeDryRun      = "dry_run"
+	ModeFakeVectors = "fake_vectors"
 
 	EnvStateSetMasked = "set_masked"
 	EnvStateMissing   = "missing"
@@ -32,7 +35,8 @@ var (
 		ProviderLocal:  {},
 	}
 	allowedModes = map[string]struct{}{
-		ModeDryRun: {},
+		ModeDryRun:      {},
+		ModeFakeVectors: {},
 	}
 	envNamePattern = regexp.MustCompile(`^[A-Z][A-Z0-9_]*$`)
 )
@@ -218,4 +222,9 @@ func EstimatedBatches(chunkCount int, batchSize int) int {
 		return 0
 	}
 	return (chunkCount + batchSize - 1) / batchSize
+}
+
+func PolicySHA256(data []byte) string {
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:])
 }

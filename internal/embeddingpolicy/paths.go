@@ -72,18 +72,19 @@ func validateOutputPath(field string, configured string, artifactsDir string) er
 	if err := validateConfiguredPath(field, configured); err != nil {
 		return err
 	}
-	artifactsAbs, err := filepath.Abs(strings.TrimSpace(artifactsDir))
-	if err != nil {
-		return fmt.Errorf("resolve artifacts dir %q: %w", artifactsDir, err)
-	}
-	resolved, err := filepath.Abs(configured)
-	if err != nil {
-		return fmt.Errorf("resolve %s: %w", field, err)
-	}
-	if !pathWithinRoot(artifactsAbs, resolved) {
+	if !pathUnderArtifacts(artifactsDir, configured) {
 		return fmt.Errorf("embedding_policy.%s must be under artifacts dir %q", field, artifactsDir)
 	}
 	return nil
+}
+
+func pathUnderArtifacts(artifactsDir string, configured string) bool {
+	rel := filepath.ToSlash(filepath.Clean(configured))
+	base := filepath.ToSlash(filepath.Clean(artifactsDir))
+	if base == "." || base == "" {
+		return false
+	}
+	return rel == base || strings.HasPrefix(rel, base+"/")
 }
 
 func artifactsDirFromInput(chunksPath string) string {

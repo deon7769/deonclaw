@@ -159,9 +159,7 @@ func TestPlanFailsWhenChunksExceedMaxChunks(t *testing.T) {
 
 func TestPlanFailsWhenInputMissing(t *testing.T) {
 	root := t.TempDir()
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
-	}
+	chdirTo(t, root)
 	cfg := testPolicyConfig(root)
 	plan, err := embeddingpolicy.Plan(cfg)
 	if err != nil {
@@ -273,9 +271,7 @@ func testPolicyConfig(root string) embeddingpolicy.Config {
 
 func writePolicyWithInputs(t *testing.T, root string) (embeddingpolicy.Config, string) {
 	t.Helper()
-	if err := os.Chdir(root); err != nil {
-		t.Fatalf("Chdir() error = %v", err)
-	}
+	chdirTo(t, root)
 	cfg := testPolicyConfig(root)
 	artifactsDir := filepath.Join(root, "artifacts")
 	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {

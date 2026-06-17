@@ -96,6 +96,7 @@ Usage:
   deonctl memory embedding validate --policy <embedding-policy.yaml>
   deonctl memory embedding doctor --policy <embedding-policy.yaml> [--output-format text|json]
   deonctl memory embedding plan --policy <embedding-policy.yaml> [--output-format text|json]
+  deonctl memory embedding build-fake --policy <embedding-policy-fake.yaml> --artifacts-dir <dir> --confirm-fake-vectors
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -571,6 +572,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryEmbeddingPlan(opts, stdout, stderr)
+			case "build-fake":
+				opts, err := parseMemoryEmbeddingBuildFakeOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryEmbeddingBuildFake(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3381,6 +3390,70 @@ func runMemoryEmbeddingPlan(opts memoryEmbeddingDoctorOptions, stdout io.Writer,
 	if result.Status == embeddingpolicy.StatusFailed {
 		return 1
 	}
+	return 0
+}
+
+type memoryEmbeddingBuildFakeOptions struct {
+	policyPath   string
+	artifactsDir string
+	confirmFake  bool
+}
+
+func parseMemoryEmbeddingBuildFakeOptions(args []string) (memoryEmbeddingBuildFakeOptions, error) {
+	var opts memoryEmbeddingBuildFakeOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryEmbeddingBuildFakeOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return memoryEmbeddingBuildFakeOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		case "--confirm-fake-vectors":
+			opts.confirmFake = true
+		default:
+			return memoryEmbeddingBuildFakeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryEmbeddingBuildFakeOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.artifactsDir == "" {
+		return memoryEmbeddingBuildFakeOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	if !opts.confirmFake {
+		return memoryEmbeddingBuildFakeOptions{}, fmt.Errorf("missing --confirm-fake-vectors")
+	}
+	return opts, nil
+}
+
+func runMemoryEmbeddingBuildFake(opts memoryEmbeddingBuildFakeOptions, stdout io.Writer, stderr io.Writer) int {
+	policyBytes, err := os.ReadFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding build-fake failed: %v\n", err)
+		return 1
+	}
+	cfg, err := embeddingpolicy.Parse(policyBytes)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding build-fake failed: %v\n", err)
+		return 1
+	}
+	result, err := embeddingpolicy.BuildFake(cfg, policyBytes, opts.artifactsDir, opts.confirmFake)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding build-fake failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory embedding build-fake: ok")
+	fmt.Fprintf(stdout, "vectors: %s\n", result.Manifest.OutputVectorsPath)
+	fmt.Fprintf(stdout, "manifest: %s\n", result.Manifest.OutputManifestPath)
+	fmt.Fprintf(stdout, "vector_count: %d\n", result.Manifest.VectorCount)
+	fmt.Fprintf(stdout, "dimensions: %d\n", result.Manifest.Dimensions)
 	return 0
 }
 

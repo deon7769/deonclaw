@@ -78,7 +78,13 @@ func Doctor(cfg Config) (DoctorResult, error) {
 
 func doctorWarnings(p Policy, chunksExists bool, manifestExists bool, chunkCount int, manifestChunkCount int, envRequirements []EnvRequirement) []string {
 	var warnings []string
+	if p.Provider == ProviderLocal && len(envRequirements) > 0 {
+		warnings = append(warnings, "env.required is configured for local provider; not required for fake_vectors")
+	}
 	for _, req := range envRequirements {
+		if p.Provider == ProviderLocal {
+			continue
+		}
 		if req.State == EnvStateMissing {
 			warnings = append(warnings, fmt.Sprintf("required env %s is missing", req.Name))
 		}

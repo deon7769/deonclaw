@@ -77,7 +77,8 @@ Implemented:
 - MCP passive context attachments for runner prompts from audited discovery/call artifacts, without worker tool execution
 - MCP worker-generated tool call proposal lint/preflight artifacts, without worker tool execution
 - MCP proposal review queue from runs (`mcp proposals list/show/export`), without automatic execution
-- memory index foundation (`memory index validate/plan/build`) with auditable chunks, without runner retrieval
+- memory index foundation (`memory index validate/plan/build/doctor/report`) with auditable chunks, without runner retrieval
+- embedding policy dry-run and deterministic fake vector smoke (`memory embedding validate/doctor/plan/build-fake`), without real provider APIs or LanceDB
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
