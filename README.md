@@ -95,6 +95,7 @@ Implemented:
 - LanceDB write plan-only (`memory lancedb validate/plan`) over embedding artifacts, without LanceDB import or database writes
 - LanceDB fake-write artifact smoke (`memory lancedb fake-write`), without LanceDB SDK or real database creation
 - LanceDB real local write smoke (`memory lancedb write-smoke`) via Python adapter, without retrieval or runner integration
+- LanceDB structural readback doctor/report (`memory lancedb doctor/report`) over write-smoke databases, without search or runner integration
 
 Not implemented yet:
 

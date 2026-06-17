@@ -35,3 +35,35 @@ type WriteResponse struct {
 
 // DefaultWriter is the production LanceDB writer adapter.
 var DefaultWriter LanceDBWriter = PythonLanceDBWriter{}
+
+// LanceDBReader performs structural readback from a local LanceDB database.
+type LanceDBReader interface {
+	Readback(req ReadbackRequest) (ReadbackResponse, error)
+}
+
+// ReadbackRequest is the adapter-neutral readback contract.
+type ReadbackRequest struct {
+	DatabasePath       string
+	Table              string
+	VectorColumn       string
+	TextRefColumn      string
+	MetadataColumns    []string
+	ExpectedDimensions int
+}
+
+// ReadbackResponse summarizes structural LanceDB table metadata.
+type ReadbackResponse struct {
+	Status                 string   `json:"status"`
+	TableExists            bool     `json:"table_exists"`
+	RowCount               int      `json:"row_count"`
+	Columns                []string `json:"columns"`
+	VectorColumnExists     bool     `json:"vector_column_exists"`
+	TextRefColumnExists    bool     `json:"text_ref_column_exists"`
+	MetadataColumnsPresent []string `json:"metadata_columns_present"`
+	InferredDimensions     int      `json:"inferred_dimensions"`
+	SampleChunkIDs         []string `json:"sample_chunk_ids"`
+	Message                string   `json:"message,omitempty"`
+}
+
+// DefaultReader is the production LanceDB readback adapter.
+var DefaultReader LanceDBReader = PythonLanceDBReader{}

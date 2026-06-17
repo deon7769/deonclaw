@@ -103,6 +103,8 @@ Usage:
   deonctl memory lancedb plan --policy <lancedb-policy.yaml> [--output-format text|json]
   deonctl memory lancedb fake-write --policy <lancedb-policy-fake.yaml> --artifacts-dir <dir> --confirm-fake-write
   deonctl memory lancedb write-smoke --policy <lancedb-policy-write-smoke.yaml> --artifacts-dir <dir> --confirm-lancedb-write [--allow-overwrite-smoke]
+  deonctl memory lancedb doctor --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
+  deonctl memory lancedb report --manifest <lancedb-write-smoke-manifest.json> --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -636,6 +638,22 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryLanceDBWriteSmoke(opts, stdout, stderr)
+			case "doctor":
+				opts, err := parseMemoryLanceDBDoctorOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBDoctor(opts, stdout, stderr)
+			case "report":
+				opts, err := parseMemoryLanceDBReadbackReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBReadbackReport(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3823,6 +3841,138 @@ func runMemoryLanceDBWriteSmoke(opts memoryLanceDBWriteSmokeOptions, stdout io.W
 	fmt.Fprintf(stdout, "dimensions: %d\n", result.Manifest.Dimensions)
 	fmt.Fprintf(stdout, "lancedb_written: %t\n", result.Manifest.LanceDBWritten)
 	fmt.Fprintf(stdout, "retrieval_performed: %t\n", result.Manifest.RetrievalPerformed)
+	return 0
+}
+
+type memoryLanceDBDoctorOptions struct {
+	policyPath   string
+	outputFormat string
+}
+
+type memoryLanceDBReadbackReportOptions struct {
+	manifestPath string
+	policyPath   string
+	outputFormat string
+}
+
+func parseMemoryLanceDBDoctorOptions(args []string) (memoryLanceDBDoctorOptions, error) {
+	opts := memoryLanceDBDoctorOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBDoctorOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryLanceDBDoctorOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryLanceDBDoctorOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBDoctorOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryLanceDBDoctorOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func parseMemoryLanceDBReadbackReportOptions(args []string) (memoryLanceDBReadbackReportOptions, error) {
+	opts := memoryLanceDBReadbackReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--manifest":
+			if i+1 >= len(args) {
+				return memoryLanceDBReadbackReportOptions{}, fmt.Errorf("missing value for --manifest")
+			}
+			opts.manifestPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBReadbackReportOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryLanceDBReadbackReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryLanceDBReadbackReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.manifestPath == "" {
+		return memoryLanceDBReadbackReportOptions{}, fmt.Errorf("missing --manifest")
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBReadbackReportOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryLanceDBReadbackReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMemoryLanceDBDoctor(opts memoryLanceDBDoctorOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := lancedbpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb doctor failed: %v\n", err)
+		return 1
+	}
+	result, err := lancedbpolicy.Doctor(cfg, lancedbpolicy.DoctorOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb doctor failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = lancedbpolicy.WriteDoctorJSON(result, stdout)
+	default:
+		err = lancedbpolicy.WriteDoctorText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb doctor failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+func runMemoryLanceDBReadbackReport(opts memoryLanceDBReadbackReportOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := lancedbpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb report failed: %v\n", err)
+		return 1
+	}
+	result, err := lancedbpolicy.ReadbackReport(opts.manifestPath, cfg, lancedbpolicy.ReadbackReportOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = lancedbpolicy.WriteReadbackReportJSON(result, stdout)
+	default:
+		err = lancedbpolicy.WriteReadbackReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
 	return 0
 }
 
