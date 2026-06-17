@@ -23,6 +23,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/domains"
 	"github.com/deon7769/deonclaw/internal/embeddingpolicy"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/lancedbpolicy"
 	"github.com/deon7769/deonclaw/internal/mcpapproval"
 	"github.com/deon7769/deonclaw/internal/mcpconfig"
 	"github.com/deon7769/deonclaw/internal/mcpproposalqueue"
@@ -98,6 +99,8 @@ Usage:
   deonctl memory embedding plan --policy <embedding-policy.yaml> [--output-format text|json]
   deonctl memory embedding build-fake --policy <embedding-policy-fake.yaml> --artifacts-dir <dir> --confirm-fake-vectors
   deonctl memory embedding report --manifest <memory-embedding-manifest.json> --vectors <memory-index-vectors.jsonl> [--chunks <memory-index-chunks.jsonl>] [--output-format text|json]
+  deonctl memory lancedb validate --policy <lancedb-policy.yaml>
+  deonctl memory lancedb plan --policy <lancedb-policy.yaml> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -589,6 +592,32 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryEmbeddingReport(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "lancedb":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "validate":
+				opts, err := parseMemoryLanceDBPolicyOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBValidate(opts, stdout, stderr)
+			case "plan":
+				opts, err := parseMemoryLanceDBPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBPlan(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3534,6 +3563,105 @@ func runMemoryEmbeddingReport(opts memoryEmbeddingReportOptions, stdout io.Write
 		return 1
 	}
 	if result.Status == embeddingpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type memoryLanceDBPolicyOptions struct {
+	policyPath string
+}
+
+type memoryLanceDBPlanOptions struct {
+	policyPath   string
+	outputFormat string
+}
+
+func parseMemoryLanceDBPolicyOptions(args []string) (memoryLanceDBPolicyOptions, error) {
+	opts := memoryLanceDBPolicyOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBPolicyOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		default:
+			return memoryLanceDBPolicyOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBPolicyOptions{}, fmt.Errorf("missing --policy")
+	}
+	return opts, nil
+}
+
+func parseMemoryLanceDBPlanOptions(args []string) (memoryLanceDBPlanOptions, error) {
+	opts := memoryLanceDBPlanOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBPlanOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryLanceDBPlanOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryLanceDBPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBPlanOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryLanceDBPlanOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMemoryLanceDBValidate(opts memoryLanceDBPolicyOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := lancedbpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb validate failed: %v\n", err)
+		return 1
+	}
+	if err := lancedbpolicy.Validate(cfg); err != nil {
+		fmt.Fprintf(stderr, "memory lancedb validate failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory lancedb validate: ok")
+	return 0
+}
+
+func runMemoryLanceDBPlan(opts memoryLanceDBPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := lancedbpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb plan failed: %v\n", err)
+		return 1
+	}
+	result, err := lancedbpolicy.Plan(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb plan failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = lancedbpolicy.WritePlanJSON(result, stdout)
+	default:
+		err = lancedbpolicy.WritePlanText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb plan failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
 	}
 	return 0

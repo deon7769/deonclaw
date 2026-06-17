@@ -92,13 +92,14 @@ Implemented:
 - real restore execution
 - memory index foundation (`memory index validate/plan/build/doctor/report`) with auditable chunks, without runner retrieval or LanceDB writes
 - embedding policy dry-run and deterministic fake vector smoke (`memory embedding validate/doctor/plan/build-fake/report`), without real provider APIs or LanceDB writes
+- LanceDB write plan-only (`memory lancedb validate/plan`) over embedding artifacts, without LanceDB import or database writes
 
 Not implemented yet:
 
 - real fallback execution
 - Codex Docker worker runtime
 - MCP execution/manager for automatic real external MCP tool orchestration
-- memory index retrieval/LanceDB in runner
+- memory index retrieval/LanceDB writes in runner
 - UI/dashboard
 
 ## Quick command map

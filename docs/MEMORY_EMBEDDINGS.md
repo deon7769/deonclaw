@@ -1,6 +1,6 @@
 # Memory Embeddings
 
-Task 22.2 adds embedding provider policy and dry-run diagnostics. Task 22.3 adds deterministic local fake vector generation for smoke testing. Neither task calls real embedding APIs, writes LanceDB, or integrates retrieval into the runner.
+Task 22.2 adds embedding provider policy and dry-run diagnostics. Task 22.3 adds deterministic local fake vector generation for smoke testing. Task 22.3.1 adds post-build vector QA. Neither task calls real embedding APIs, writes LanceDB, or integrates retrieval into the runner.
 
 ## Scope
 
@@ -159,6 +159,8 @@ It writes vector JSONL lines with deterministic hashes derived from `text_sha256
 
 `report` validates embedding manifest/vectors consistency (`vector_count`, unique vector IDs, `vector_sha256`, dimensions, `fake_vectors`, `lancedb_written: false`) and optional cross-checks against chunks when `--chunks` is provided. Text output prints aggregate stats only — not full vectors or chunk text.
 
+A passing `memory embedding report` is a prerequisite for `memory lancedb plan` (Task 22.4). LanceDB writes are not implemented yet; see docs/MEMORY_LANCEDB.md.
+
 ## Vector contract
 
 Each JSONL vector records:
@@ -206,4 +208,4 @@ The embedding manifest records:
 
 ## Boundary
 
-Tasks 22.0 and 22.1 own chunk build and QA. Task 22.2 owns provider policy and dry-run. Task 22.3 owns deterministic fake vector smoke only. Real embeddings, LanceDB, and retrieval remain future work.
+Tasks 22.0 and 22.1 own chunk build and QA. Task 22.2 owns provider policy and dry-run. Task 22.3 owns deterministic fake vector smoke only. Task 22.3.1 owns vector report QA. Task 22.4 owns LanceDB write planning only (`memory lancedb validate/plan`). Real embeddings, LanceDB writes, and retrieval remain future work.
