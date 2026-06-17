@@ -153,9 +153,67 @@ func TestValidateExecutionRejectsChangedHashes(t *testing.T) {
 	proposal.Arguments = []byte(`{"text":"changed"}`)
 	proposal.ArgumentsSHA256 = ArgumentsSHA256(proposal.Arguments)
 
-	err = ValidateExecution(proposal, approval, policyPath, MCPToolCallPreflight{Status: PreflightStatusPassed})
+	err = ValidateExecution(proposal, approval, policyPath, "", "", MCPToolCallPreflight{Status: PreflightStatusPassed})
 	if err == nil || !strings.Contains(err.Error(), "arguments_sha256") {
 		t.Fatalf("ValidateExecution() error = %v, want arguments hash mismatch", err)
+	}
+}
+
+func TestBuildExecutionBundleRecordsHashesAndArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	policyPath := filepath.Join(dir, "policy.yaml")
+	configPath := filepath.Join(dir, "mcp.yaml")
+	runtimePath := filepath.Join(dir, "runtime.yaml")
+	mustWriteApprovalTestFile(t, policyPath, []byte("mcp_call_policy:\n  allow_real_readonly: true\n"))
+	mustWriteApprovalTestFile(t, configPath, []byte("mcp:\n  servers: {}\n"))
+	mustWriteApprovalTestFile(t, runtimePath, []byte("runtime:\n  mode: docker\n"))
+
+	proposal, err := NewProposal(NewProposalOptions{
+		CreatedAt:         time.Date(2026, 6, 16, 21, 0, 0, 0, time.UTC),
+		Server:            "filesystem-readonly",
+		Tool:              mcpsmoke.FakeEchoToolName,
+		Arguments:         []byte(`{"text":"hello"}`),
+		Reason:            "Read-only call.",
+		PolicyPath:        policyPath,
+		ConfigPath:        configPath,
+		Runtime:           mcpsmoke.RuntimeDocker,
+		RuntimeConfigPath: runtimePath,
+		Workspace:         ".",
+	})
+	if err != nil {
+		t.Fatalf("NewProposal() error = %v", err)
+	}
+	approval, err := BuildApproval(proposal, NewApprovalOptions{
+		Decision:        ApprovalDecisionApproved,
+		Reason:          "Approve.",
+		PolicyPath:      policyPath,
+		ConfirmReadOnly: true,
+	})
+	if err != nil {
+		t.Fatalf("BuildApproval() error = %v", err)
+	}
+	result := mcpsmoke.CallResult{
+		Status:            mcpsmoke.StatusSucceeded,
+		StartedAt:         "2026-06-16T21:01:00Z",
+		FinishedAt:        "2026-06-16T21:01:01Z",
+		SummaryPath:       filepath.Join(dir, "mcp-call-smoke-summary.md"),
+		TranscriptPath:    filepath.Join(dir, "mcp-call-transcript.jsonl"),
+		ResultPath:        filepath.Join(dir, "mcp-call-result.json"),
+		StdoutPath:        filepath.Join(dir, "mcp-call-stdout.log"),
+		StderrPath:        filepath.Join(dir, "mcp-call-stderr.log"),
+		ResponsePath:      filepath.Join(dir, "mcp-call-response.json"),
+		ResponseTruncated: true,
+		ToolCalls:         1,
+	}
+	bundle, err := BuildExecutionBundle(proposal, approval, MCPToolCallPreflight{Status: PreflightStatusPassed}, result, policyPath, configPath, runtimePath)
+	if err != nil {
+		t.Fatalf("BuildExecutionBundle() error = %v", err)
+	}
+	if bundle.ProposalSHA256 == "" || bundle.ApprovalSHA256 == "" || bundle.PolicySHA256 == "" || bundle.ConfigSHA256 == "" || bundle.RuntimeConfigSHA256 == "" {
+		t.Fatalf("bundle hashes = %#v, want populated", bundle)
+	}
+	if bundle.Artifacts["mcp-call-response.json"] == "" || bundle.ToolCalls != 1 || !bundle.ResponseTruncated {
+		t.Fatalf("bundle = %#v, want artifacts/tool calls/truncation", bundle)
 	}
 }
 
@@ -218,4 +276,11 @@ func unsetEnvForApprovalTest(t *testing.T, name string) {
 			_ = os.Unsetenv(name)
 		}
 	})
+}
+
+func mustWriteApprovalTestFile(t *testing.T, path string, data []byte) {
+	t.Helper()
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
 }

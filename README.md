@@ -85,7 +85,7 @@ Implemented:
 - OpenCode Docker worker runtime supported experimental
 - OpenCode Docker Z.AI smoke runtime
 - MCP registry config validation, list and plan foundation
-- MCP fake/test smoke, fake read-only tool-smoke, real read-only discovery, policy-gated real read-only call-smoke, and explicit MCP call proposal approval workflow
+- MCP fake/test smoke, fake read-only tool-smoke, real read-only discovery, policy-gated real read-only call-smoke, and explicit MCP call proposal approval workflow with stale-hash checks and execution bundle
 - fallback policy schema validation only; no fallback execution or retries
 - memory proposal/lint/dry-run/approval/preflight/backup/materialize/apply/restore workflow
 - real memory apply for create/append/update/archive

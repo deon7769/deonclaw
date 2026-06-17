@@ -29,20 +29,23 @@ const (
 )
 
 type MCPToolCallProposal struct {
-	ID                string            `json:"id"`
-	CreatedAt         time.Time         `json:"created_at"`
-	Server            string            `json:"server"`
-	Tool              string            `json:"tool"`
-	Arguments         json.RawMessage   `json:"arguments"`
-	ArgumentsSHA256   string            `json:"arguments_sha256"`
-	Reason            string            `json:"reason"`
-	RequestedBy       string            `json:"requested_by"`
-	Source            MCPToolCallSource `json:"source"`
-	PolicyPath        string            `json:"policy_path"`
-	Runtime           string            `json:"runtime"`
-	RuntimeConfigPath string            `json:"runtime_config_path,omitempty"`
-	Workspace         string            `json:"workspace,omitempty"`
-	Status            string            `json:"status"`
+	ID                  string            `json:"id"`
+	CreatedAt           time.Time         `json:"created_at"`
+	Server              string            `json:"server"`
+	Tool                string            `json:"tool"`
+	Arguments           json.RawMessage   `json:"arguments"`
+	ArgumentsSHA256     string            `json:"arguments_sha256"`
+	Reason              string            `json:"reason"`
+	RequestedBy         string            `json:"requested_by"`
+	Source              MCPToolCallSource `json:"source"`
+	PolicyPath          string            `json:"policy_path"`
+	ConfigPath          string            `json:"config_path,omitempty"`
+	ConfigSHA256        string            `json:"config_sha256,omitempty"`
+	Runtime             string            `json:"runtime"`
+	RuntimeConfigPath   string            `json:"runtime_config_path,omitempty"`
+	RuntimeConfigSHA256 string            `json:"runtime_config_sha256,omitempty"`
+	Workspace           string            `json:"workspace,omitempty"`
+	Status              string            `json:"status"`
 }
 
 type MCPToolCallSource struct {
@@ -51,22 +54,27 @@ type MCPToolCallSource struct {
 }
 
 type MCPToolCallApproval struct {
-	ProposalID      string    `json:"proposal_id"`
-	Decision        string    `json:"decision"`
-	ApprovedAt      time.Time `json:"approved_at"`
-	ApprovedBy      string    `json:"approved_by"`
-	Reason          string    `json:"reason"`
-	ArgumentsSHA256 string    `json:"arguments_sha256"`
-	PolicySHA256    string    `json:"policy_sha256"`
-	ConfirmReadOnly bool      `json:"confirm_read_only"`
+	ProposalID          string    `json:"proposal_id"`
+	Decision            string    `json:"decision"`
+	ApprovedAt          time.Time `json:"approved_at"`
+	ApprovedBy          string    `json:"approved_by"`
+	Reason              string    `json:"reason"`
+	ArgumentsSHA256     string    `json:"arguments_sha256"`
+	PolicySHA256        string    `json:"policy_sha256"`
+	ConfigSHA256        string    `json:"config_sha256,omitempty"`
+	RuntimeConfigSHA256 string    `json:"runtime_config_sha256,omitempty"`
+	ConfirmReadOnly     bool      `json:"confirm_read_only"`
 }
 
 type MCPToolCallPreflight struct {
-	ProposalID string                     `json:"proposal_id"`
-	Status     string                     `json:"status"`
-	Checks     MCPToolCallPreflightChecks `json:"checks"`
-	Warnings   []string                   `json:"warnings"`
-	Failures   []string                   `json:"failures,omitempty"`
+	ProposalID          string                     `json:"proposal_id"`
+	Status              string                     `json:"status"`
+	Checks              MCPToolCallPreflightChecks `json:"checks"`
+	PolicySHA256        string                     `json:"policy_sha256,omitempty"`
+	ConfigSHA256        string                     `json:"config_sha256,omitempty"`
+	RuntimeConfigSHA256 string                     `json:"runtime_config_sha256,omitempty"`
+	Warnings            []string                   `json:"warnings"`
+	Failures            []string                   `json:"failures,omitempty"`
 }
 
 type MCPToolCallPreflightChecks struct {
@@ -87,6 +95,26 @@ type LintResult struct {
 	Warnings   []string `json:"warnings"`
 }
 
+type MCPToolCallExecutionBundle struct {
+	ProposalID          string            `json:"proposal_id"`
+	ApprovalSHA256      string            `json:"approval_sha256"`
+	ProposalSHA256      string            `json:"proposal_sha256"`
+	PolicySHA256        string            `json:"policy_sha256"`
+	ConfigSHA256        string            `json:"config_sha256,omitempty"`
+	RuntimeConfigSHA256 string            `json:"runtime_config_sha256,omitempty"`
+	PreflightStatus     string            `json:"preflight_status"`
+	Server              string            `json:"server"`
+	Tool                string            `json:"tool"`
+	ArgumentsSHA256     string            `json:"arguments_sha256"`
+	Runtime             string            `json:"runtime"`
+	Artifacts           map[string]string `json:"artifacts"`
+	Status              string            `json:"status"`
+	StartedAt           string            `json:"started_at"`
+	FinishedAt          string            `json:"finished_at"`
+	ResponseTruncated   bool              `json:"response_truncated"`
+	ToolCalls           int               `json:"tool_calls"`
+}
+
 type NewProposalOptions struct {
 	ID                string
 	CreatedAt         time.Time
@@ -98,6 +126,7 @@ type NewProposalOptions struct {
 	SourceType        string
 	DiscoveryArtifact string
 	PolicyPath        string
+	ConfigPath        string
 	Runtime           string
 	RuntimeConfigPath string
 	Workspace         string
@@ -139,6 +168,16 @@ func NewProposal(opts NewProposalOptions) (MCPToolCallProposal, error) {
 	if err != nil {
 		return MCPToolCallProposal{}, err
 	}
+	configPath := strings.TrimSpace(opts.ConfigPath)
+	configSHA256, err := optionalFileSHA256(configPath)
+	if err != nil {
+		return MCPToolCallProposal{}, err
+	}
+	runtimeConfigPath := strings.TrimSpace(opts.RuntimeConfigPath)
+	runtimeConfigSHA256, err := optionalFileSHA256(runtimeConfigPath)
+	if err != nil {
+		return MCPToolCallProposal{}, err
+	}
 	proposal := MCPToolCallProposal{
 		ID:              id,
 		CreatedAt:       createdAt.UTC(),
@@ -152,11 +191,14 @@ func NewProposal(opts NewProposalOptions) (MCPToolCallProposal, error) {
 			Type:              sourceType,
 			DiscoveryArtifact: strings.TrimSpace(opts.DiscoveryArtifact),
 		},
-		PolicyPath:        strings.TrimSpace(opts.PolicyPath),
-		Runtime:           normalizeRuntime(opts.Runtime),
-		RuntimeConfigPath: strings.TrimSpace(opts.RuntimeConfigPath),
-		Workspace:         strings.TrimSpace(opts.Workspace),
-		Status:            ProposalStatusProposed,
+		PolicyPath:          strings.TrimSpace(opts.PolicyPath),
+		ConfigPath:          configPath,
+		ConfigSHA256:        configSHA256,
+		Runtime:             normalizeRuntime(opts.Runtime),
+		RuntimeConfigPath:   runtimeConfigPath,
+		RuntimeConfigSHA256: runtimeConfigSHA256,
+		Workspace:           strings.TrimSpace(opts.Workspace),
+		Status:              ProposalStatusProposed,
 	}
 	if err := proposal.Validate(); err != nil {
 		return MCPToolCallProposal{}, err
@@ -206,6 +248,12 @@ func (p MCPToolCallProposal) Validate() error {
 	}
 	if strings.TrimSpace(p.ArgumentsSHA256) == "" {
 		errs = append(errs, errors.New("arguments_sha256 is required"))
+	}
+	if strings.TrimSpace(p.ConfigSHA256) != "" && strings.TrimSpace(p.ConfigPath) == "" {
+		errs = append(errs, errors.New("config_path is required when config_sha256 is set"))
+	}
+	if strings.TrimSpace(p.RuntimeConfigSHA256) != "" && strings.TrimSpace(p.RuntimeConfigPath) == "" {
+		errs = append(errs, errors.New("runtime_config_path is required when runtime_config_sha256 is set"))
 	}
 	return errors.Join(errs...)
 }
@@ -263,6 +311,9 @@ func BuildPreflight(proposal MCPToolCallProposal, opts ValidationOptions) MCPToo
 		Warnings:   []string{},
 		Failures:   []string{},
 	}
+	preflight.PolicySHA256 = hashFileIfReadable(proposal.PolicyPath)
+	preflight.ConfigSHA256 = hashFileIfReadable(proposal.ConfigPath)
+	preflight.RuntimeConfigSHA256 = hashFileIfReadable(proposal.RuntimeConfigPath)
 
 	if err := proposal.Validate(); err != nil {
 		preflight.addFailure(err.Error())
@@ -368,6 +419,20 @@ func BuildApproval(proposal MCPToolCallProposal, opts NewApprovalOptions) (MCPTo
 	if err != nil {
 		return MCPToolCallApproval{}, err
 	}
+	configSHA256 := proposal.ConfigSHA256
+	if configSHA256 == "" && proposal.ConfigPath != "" {
+		configSHA256, err = optionalFileSHA256(proposal.ConfigPath)
+		if err != nil {
+			return MCPToolCallApproval{}, err
+		}
+	}
+	runtimeConfigSHA256 := proposal.RuntimeConfigSHA256
+	if runtimeConfigSHA256 == "" && proposal.RuntimeConfigPath != "" {
+		runtimeConfigSHA256, err = optionalFileSHA256(proposal.RuntimeConfigPath)
+		if err != nil {
+			return MCPToolCallApproval{}, err
+		}
+	}
 	approvedAt := opts.ApprovedAt
 	if approvedAt.IsZero() {
 		approvedAt = time.Now().UTC()
@@ -377,14 +442,16 @@ func BuildApproval(proposal MCPToolCallProposal, opts NewApprovalOptions) (MCPTo
 		approvedBy = "manual"
 	}
 	approval := MCPToolCallApproval{
-		ProposalID:      proposal.ID,
-		Decision:        strings.TrimSpace(opts.Decision),
-		ApprovedAt:      approvedAt.UTC(),
-		ApprovedBy:      approvedBy,
-		Reason:          strings.TrimSpace(opts.Reason),
-		ArgumentsSHA256: proposal.ArgumentsSHA256,
-		PolicySHA256:    policySHA256,
-		ConfirmReadOnly: true,
+		ProposalID:          proposal.ID,
+		Decision:            strings.TrimSpace(opts.Decision),
+		ApprovedAt:          approvedAt.UTC(),
+		ApprovedBy:          approvedBy,
+		Reason:              strings.TrimSpace(opts.Reason),
+		ArgumentsSHA256:     proposal.ArgumentsSHA256,
+		PolicySHA256:        policySHA256,
+		ConfigSHA256:        configSHA256,
+		RuntimeConfigSHA256: runtimeConfigSHA256,
+		ConfirmReadOnly:     true,
 	}
 	if err := approval.Validate(); err != nil {
 		return MCPToolCallApproval{}, err
@@ -464,7 +531,7 @@ func (p MCPToolCallPreflight) finish() MCPToolCallPreflight {
 	return p
 }
 
-func ValidateExecution(proposal MCPToolCallProposal, approval MCPToolCallApproval, policyPath string, preflight MCPToolCallPreflight) error {
+func ValidateExecution(proposal MCPToolCallProposal, approval MCPToolCallApproval, policyPath string, configPath string, runtimeConfigPath string, preflight MCPToolCallPreflight) error {
 	if err := proposal.Validate(); err != nil {
 		return err
 	}
@@ -487,6 +554,30 @@ func ValidateExecution(proposal MCPToolCallProposal, approval MCPToolCallApprova
 	if approval.PolicySHA256 != policySHA256 {
 		return errors.New("approval policy_sha256 does not match current policy")
 	}
+	if approval.ConfigSHA256 != "" {
+		if strings.TrimSpace(configPath) == "" {
+			return errors.New("approval config_sha256 is present but no config path was provided")
+		}
+		configSHA256, err := FileSHA256(configPath)
+		if err != nil {
+			return err
+		}
+		if approval.ConfigSHA256 != configSHA256 {
+			return errors.New("approval config_sha256 does not match current config")
+		}
+	}
+	if approval.RuntimeConfigSHA256 != "" {
+		if strings.TrimSpace(runtimeConfigPath) == "" {
+			return errors.New("approval runtime_config_sha256 is present but no runtime config path was provided")
+		}
+		runtimeConfigSHA256, err := FileSHA256(runtimeConfigPath)
+		if err != nil {
+			return err
+		}
+		if approval.RuntimeConfigSHA256 != runtimeConfigSHA256 {
+			return errors.New("approval runtime_config_sha256 does not match current runtime config")
+		}
+	}
 	if !approval.ConfirmReadOnly {
 		return errors.New("approval confirm_read_only must be true")
 	}
@@ -494,6 +585,70 @@ func ValidateExecution(proposal MCPToolCallProposal, approval MCPToolCallApprova
 		return errors.New("proposal preflight failed")
 	}
 	return nil
+}
+
+func BuildExecutionBundle(proposal MCPToolCallProposal, approval MCPToolCallApproval, preflight MCPToolCallPreflight, result mcpsmoke.CallResult, policyPath string, configPath string, runtimeConfigPath string) (MCPToolCallExecutionBundle, error) {
+	proposalSHA256, err := JSONSHA256(proposal)
+	if err != nil {
+		return MCPToolCallExecutionBundle{}, err
+	}
+	approvalSHA256, err := JSONSHA256(approval)
+	if err != nil {
+		return MCPToolCallExecutionBundle{}, err
+	}
+	policySHA256, err := FileSHA256(policyPath)
+	if err != nil {
+		return MCPToolCallExecutionBundle{}, err
+	}
+	configSHA256 := ""
+	if strings.TrimSpace(configPath) != "" {
+		configSHA256, err = FileSHA256(configPath)
+		if err != nil {
+			return MCPToolCallExecutionBundle{}, err
+		}
+	}
+	runtimeConfigSHA256 := ""
+	if strings.TrimSpace(runtimeConfigPath) != "" {
+		runtimeConfigSHA256, err = FileSHA256(runtimeConfigPath)
+		if err != nil {
+			return MCPToolCallExecutionBundle{}, err
+		}
+	}
+	bundle := MCPToolCallExecutionBundle{
+		ProposalID:          proposal.ID,
+		ApprovalSHA256:      approvalSHA256,
+		ProposalSHA256:      proposalSHA256,
+		PolicySHA256:        policySHA256,
+		ConfigSHA256:        configSHA256,
+		RuntimeConfigSHA256: runtimeConfigSHA256,
+		PreflightStatus:     preflight.Status,
+		Server:              proposal.Server,
+		Tool:                proposal.Tool,
+		ArgumentsSHA256:     proposal.ArgumentsSHA256,
+		Runtime:             proposal.Runtime,
+		Artifacts: map[string]string{
+			"mcp-call-smoke-summary.md": result.SummaryPath,
+			"mcp-call-transcript.jsonl": result.TranscriptPath,
+			"mcp-call-result.json":      result.ResultPath,
+			"mcp-call-stdout.log":       result.StdoutPath,
+			"mcp-call-stderr.log":       result.StderrPath,
+			"mcp-call-response.json":    result.ResponsePath,
+		},
+		Status:            result.Status,
+		StartedAt:         result.StartedAt,
+		FinishedAt:        result.FinishedAt,
+		ResponseTruncated: result.ResponseTruncated,
+		ToolCalls:         result.ToolCalls,
+	}
+	return bundle, nil
+}
+
+func (b MCPToolCallExecutionBundle) JSON() ([]byte, error) {
+	data, err := json.MarshalIndent(b, "", "  ")
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
 }
 
 func ArgumentsSHA256(raw json.RawMessage) string {
@@ -506,12 +661,48 @@ func ArgumentsSHA256(raw json.RawMessage) string {
 }
 
 func PolicySHA256FromFile(path string) (string, error) {
+	return FileSHA256(path)
+}
+
+func FileSHA256(path string) (string, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		return "", fmt.Errorf("read MCP call policy %q: %w", path, err)
+		return "", fmt.Errorf("read file for sha256 %q: %w", path, err)
 	}
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:]), nil
+}
+
+func JSONSHA256(value any) (string, error) {
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	sum := sha256.Sum256(data)
+	return hex.EncodeToString(sum[:]), nil
+}
+
+func optionalFileSHA256(path string) (string, error) {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "", nil
+	}
+	sha256, err := FileSHA256(path)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", nil
+		}
+		return "", err
+	}
+	return sha256, nil
+}
+
+func hashFileIfReadable(path string) string {
+	sha256, err := optionalFileSHA256(path)
+	if err != nil {
+		return ""
+	}
+	return sha256
 }
 
 func canonicalArguments(raw []byte) (json.RawMessage, error) {

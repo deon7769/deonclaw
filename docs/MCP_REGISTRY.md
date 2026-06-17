@@ -1,8 +1,8 @@
 # MCP Registry
 
-Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold. Task 21.4 adds a real read-only discovery smoke that lists tools only under a discovery policy. Task 21.5 adds a policy-gated real read-only call smoke with exactly one tool call. Task 21.6 adds an explicit proposal, preflight, approval, and execute workflow for read-only MCP tool calls.
+Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold. Task 21.4 adds a real read-only discovery smoke that lists tools only under a discovery policy. Task 21.5 adds a policy-gated real read-only call smoke with exactly one tool call. Task 21.6 adds an explicit proposal, preflight, approval, and execute workflow for read-only MCP tool calls. Task 21.6.1 hardens approval hashes and writes an auditable execution bundle.
 
-The registry records MCP server definitions so DeonClaw can validate and inspect them before any future worker integration exists. It can run fake/test smoke, fake/test tool smoke, policy-gated real read-only discovery, one policy-gated real read-only call smoke, and the explicit proposal workflow for that same read-only call path. It does not connect MCP to Codex or OpenCode, does not automatically dispatch tools for agents, and does not participate in fallback execution.
+The registry records MCP server definitions so DeonClaw can validate and inspect them before any future worker integration exists. It can run fake/test smoke, fake/test tool smoke, policy-gated real read-only discovery, one policy-gated real read-only call smoke, and the explicit proposal workflow for that same read-only call path. The proposal workflow now records hashes for arguments, policy, optional MCP config, optional runtime config, proposal, approval, and execution bundle. It does not connect MCP to Codex or OpenCode, does not automatically dispatch tools for agents, and does not participate in fallback execution.
 
 ## Config
 
@@ -429,6 +429,7 @@ Call-smoke artifacts:
 - `mcp-call-stdout.log`
 - `mcp-call-stderr.log`
 - `mcp-call-response.json`
+- `mcp-call-execution-bundle.json` when invoked through `mcp proposal execute`
 
 The call summary records `tool_call_count` and `response_truncated` explicitly.
 
@@ -438,13 +439,17 @@ Run the recommended proposal workflow for one read-only tool call:
 deonctl mcp proposal new \
   --server filesystem-readonly \
   --tool <tool-name> \
-  --arguments '{"key":"value"}' \
-  --reason "Manual read-only smoke" \
-  --policy configs/examples/mcp-call-policy.yaml \
-  --runtime docker \
-  --runtime-config configs/examples/runtime.yaml \
-  --workspace . \
-  --output artifacts/mcp-call-proposal.json
+	  --arguments '{"key":"value"}' \
+	  --reason "Manual read-only smoke" \
+	  --policy configs/examples/mcp-call-policy.yaml \
+	  --config configs/examples/mcp.yaml \
+	  --runtime docker \
+	  --runtime-config configs/examples/runtime.yaml \
+	  --workspace . \
+	  --output artifacts/mcp-call-proposal.json
+
+deonctl mcp proposal inspect \
+  --proposal artifacts/mcp-call-proposal.json
 
 deonctl mcp proposal lint \
   --proposal artifacts/mcp-call-proposal.json \
@@ -462,8 +467,11 @@ deonctl mcp proposal approve \
   --policy configs/examples/mcp-call-policy.yaml \
   --decision approved \
   --reason "Preflight passed and call is read-only" \
-  --output artifacts/mcp-call-approval.json \
-  --confirm-read-only
+	  --output artifacts/mcp-call-approval.json \
+	  --confirm-read-only
+
+deonctl mcp approval inspect \
+  --approval artifacts/mcp-call-approval.json
 
 deonctl mcp proposal execute \
   --proposal artifacts/mcp-call-proposal.json \
@@ -472,11 +480,15 @@ deonctl mcp proposal execute \
   --policy configs/examples/mcp-call-policy.yaml \
   --artifacts-dir artifacts/mcp-call-smoke \
   --confirm-execute
-~~~
+	~~~
 
-`mcp proposal execute` reuses the same hardened `mcp call-smoke` execution path. It still sends exactly one `tools/call`, keeps Docker required for real servers when policy says so, checks the approval decision, verifies the proposal arguments hash, verifies the current policy hash, requires `confirm_read_only`, reruns preflight, and refuses rejected or stale approvals.
+`mcp proposal inspect` and `mcp approval inspect` show status and hashes without printing raw arguments. Use `--output-format json` when a machine-readable sanitized view is needed.
 
-The workflow is the recommended checkpoint before future runner integration. There is still no agent, Codex worker, OpenCode worker, or fallback path that can call MCP tools automatically.
+`mcp proposal execute` reuses the same hardened `mcp call-smoke` execution path. It still sends exactly one `tools/call`, keeps Docker required for real servers when policy says so, checks the approval decision, verifies the proposal arguments hash, verifies the current policy hash, verifies the current MCP config and runtime config hashes when the approval recorded them, requires `confirm_read_only`, reruns preflight, and refuses rejected or stale approvals before any MCP process is started.
+
+`mcp-call-execution-bundle.json` ties together the proposal id, proposal hash, approval hash, policy hash, config hash, runtime config hash, preflight status, server, tool, arguments hash, runtime, call status, timestamps, `response_truncated`, `tool_calls`, and the generated call-smoke artifact paths. It is the audit envelope for the approved manual call.
+
+The workflow is the recommended checkpoint and prerequisite before future runner integration. There is still no agent, Codex worker, OpenCode worker, or fallback path that can call MCP tools automatically.
 
 Run the built-in fake server directly:
 
@@ -498,7 +510,7 @@ Implemented smoke boundaries:
 - `mcp call-smoke`: one manual real read-only allowlisted `tools/call`
 - `mcp proposal execute`: one approved real read-only allowlisted `tools/call` through the same call-smoke path
 
-Not implemented through Task 21.6:
+Not implemented through Task 21.6.1:
 
 - MCP integration with Codex or OpenCode
 - automatic MCP tool dispatch by workers or agents

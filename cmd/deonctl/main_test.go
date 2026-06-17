@@ -1436,6 +1436,7 @@ func TestRunMCPProposalWorkflowNewLintPreflightApprove(t *testing.T) {
 		"--arguments", `{"text":"hello"}`,
 		"--reason", "Manual read-only call.",
 		"--policy", policyPath,
+		"--config", configPath,
 		"--runtime", "docker",
 		"--runtime-config", runtimeConfigPath,
 		"--workspace", ".",
@@ -1445,8 +1446,24 @@ func TestRunMCPProposalWorkflowNewLintPreflightApprove(t *testing.T) {
 		t.Fatalf("proposal new exit code = %d, stderr = %q", code, stderr.String())
 	}
 	proposal := readMCPProposalFile(t, proposalPath)
-	if proposal.Status != mcpapproval.ProposalStatusProposed || proposal.ArgumentsSHA256 == "" {
-		t.Fatalf("proposal = %#v, want proposed with arguments hash", proposal)
+	if proposal.Status != mcpapproval.ProposalStatusProposed ||
+		proposal.ArgumentsSHA256 == "" ||
+		proposal.ConfigSHA256 == "" ||
+		proposal.RuntimeConfigSHA256 == "" {
+		t.Fatalf("proposal = %#v, want proposed with file hashes", proposal)
+	}
+
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"mcp", "proposal", "inspect",
+		"--proposal", proposalPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("proposal inspect exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "arguments_sha256:") || strings.Contains(stdout.String(), `"text"`) || strings.Contains(stdout.String(), "hello") {
+		t.Fatalf("proposal inspect stdout = %q, want hashes without raw arguments", stdout.String())
 	}
 
 	stdout.Reset()
@@ -1488,6 +1505,9 @@ func TestRunMCPProposalWorkflowNewLintPreflightApprove(t *testing.T) {
 		!preflight.Checks.NoWriteExec {
 		t.Fatalf("preflight = %#v, want all checks passed", preflight)
 	}
+	if preflight.ConfigSHA256 == "" || preflight.RuntimeConfigSHA256 == "" {
+		t.Fatalf("preflight = %#v, want config/runtime hashes", preflight)
+	}
 
 	stdout.Reset()
 	stderr.Reset()
@@ -1524,8 +1544,24 @@ func TestRunMCPProposalWorkflowNewLintPreflightApprove(t *testing.T) {
 	if approval.Decision != mcpapproval.ApprovalDecisionApproved ||
 		approval.ArgumentsSHA256 != proposal.ArgumentsSHA256 ||
 		approval.PolicySHA256 == "" ||
+		approval.ConfigSHA256 == "" ||
+		approval.RuntimeConfigSHA256 == "" ||
 		!approval.ConfirmReadOnly {
 		t.Fatalf("approval = %#v, want approved with hashes", approval)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = run([]string{
+		"mcp", "approval", "inspect",
+		"--approval", approvalPath,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("approval inspect exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "policy_sha256:") ||
+		!strings.Contains(stdout.String(), "config_sha256:") ||
+		!strings.Contains(stdout.String(), "runtime_config_sha256:") {
+		t.Fatalf("approval inspect stdout = %q, want hashes", stdout.String())
 	}
 }
 
@@ -1606,7 +1642,7 @@ func TestRunMCPProposalExecuteRejectsMissingRejectedAndHashChanges(t *testing.T)
 	configPath := writeCLIMCPFakeConfig(t, nil, "fake", false, []string{"read"})
 	policyPath := writeCLIMCPCallPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"}, 65536, 1048576, true)
 	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
-	proposal := newCLIMCPProposal(t, "fake-stdio", []byte(`{"text":"hello"}`), policyPath, runtimeConfigPath)
+	proposal := newCLIMCPProposalWithConfig(t, "fake-stdio", []byte(`{"text":"hello"}`), policyPath, configPath, runtimeConfigPath)
 	proposalPath := writeMCPProposalFile(t, tempDir, proposal)
 	approval := newCLIMCPApproval(t, proposal, policyPath, mcpapproval.ApprovalDecisionApproved)
 	approvalPath := writeMCPApprovalFile(t, tempDir, approval, "approval.json")
@@ -1649,6 +1685,34 @@ func TestRunMCPProposalExecuteRejectsMissingRejectedAndHashChanges(t *testing.T)
 		t.Fatalf("changed arguments execute code=%d stderr=%q, want hash rejection", code, stderr.String())
 	}
 
+	originalConfig := mustReadCLIFile(t, configPath)
+	if err := os.WriteFile(configPath, append(originalConfig, []byte("\n# changed config\n")...), 0o600); err != nil {
+		t.Fatalf("WriteFile(config changed) error = %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = runMCPProposalExecuteCLI(t, proposalPath, approvalPath, configPath, policyPath, filepath.Join(tempDir, "artifacts-config-hash"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "config_sha256") {
+		t.Fatalf("changed config execute code=%d stderr=%q, want config hash rejection", code, stderr.String())
+	}
+	if err := os.WriteFile(configPath, originalConfig, 0o600); err != nil {
+		t.Fatalf("WriteFile(config restore) error = %v", err)
+	}
+
+	originalRuntime := mustReadCLIFile(t, runtimeConfigPath)
+	if err := os.WriteFile(runtimeConfigPath, append(originalRuntime, []byte("\n# changed runtime\n")...), 0o600); err != nil {
+		t.Fatalf("WriteFile(runtime changed) error = %v", err)
+	}
+	stdout.Reset()
+	stderr.Reset()
+	code = runMCPProposalExecuteCLI(t, proposalPath, approvalPath, configPath, policyPath, filepath.Join(tempDir, "artifacts-runtime-hash"), &stdout, &stderr)
+	if code != 1 || !strings.Contains(stderr.String(), "runtime_config_sha256") {
+		t.Fatalf("changed runtime execute code=%d stderr=%q, want runtime hash rejection", code, stderr.String())
+	}
+	if err := os.WriteFile(runtimeConfigPath, originalRuntime, 0o600); err != nil {
+		t.Fatalf("WriteFile(runtime restore) error = %v", err)
+	}
+
 	if err := os.WriteFile(policyPath, append(mustReadCLIFile(t, policyPath), []byte("\n# changed\n")...), 0o600); err != nil {
 		t.Fatalf("WriteFile(policy changed) error = %v", err)
 	}
@@ -1667,7 +1731,7 @@ func TestRunMCPProposalExecuteCallsCallSmokeGeneratesArtifacts(t *testing.T) {
 	configPath := writeCLIMCPFakeConfig(t, []string{"MCP_TOKEN"}, "fake", false, []string{"read"})
 	policyPath := writeCLIMCPCallPolicy(t, []string{"fake-stdio"}, []string{"deonclaw.fake.echo"}, []string{"read"}, 65536, 80, true)
 	runtimeConfigPath := writeCLIRuntimeConfig(t, validRuntimeConfigYAML())
-	proposal := newCLIMCPProposal(t, "fake-stdio", []byte(`{"text":"super-secret-value `+strings.Repeat("x", 200)+`"}`), policyPath, runtimeConfigPath)
+	proposal := newCLIMCPProposalWithConfig(t, "fake-stdio", []byte(`{"text":"super-secret-value `+strings.Repeat("x", 200)+`"}`), policyPath, configPath, runtimeConfigPath)
 	proposalPath := writeMCPProposalFile(t, tempDir, proposal)
 	approvalPath := writeMCPApprovalFile(t, tempDir, newCLIMCPApproval(t, proposal, policyPath, mcpapproval.ApprovalDecisionApproved), "approval.json")
 	artifactsDir := filepath.Join(tempDir, "artifacts")
@@ -1683,7 +1747,7 @@ func TestRunMCPProposalExecuteCallsCallSmokeGeneratesArtifacts(t *testing.T) {
 		!strings.Contains(stdout.String(), "response_truncated: true") {
 		t.Fatalf("stdout = %q, want execute summary", stdout.String())
 	}
-	for _, name := range []string{"mcp-call-smoke-summary.md", "mcp-call-transcript.jsonl", "mcp-call-result.json", "mcp-call-stdout.log", "mcp-call-stderr.log", "mcp-call-response.json"} {
+	for _, name := range []string{"mcp-call-smoke-summary.md", "mcp-call-transcript.jsonl", "mcp-call-result.json", "mcp-call-stdout.log", "mcp-call-stderr.log", "mcp-call-response.json", "mcp-call-execution-bundle.json"} {
 		if _, err := os.Stat(filepath.Join(artifactsDir, name)); err != nil {
 			t.Fatalf("artifact %s stat error = %v", name, err)
 		}
@@ -1699,6 +1763,35 @@ func TestRunMCPProposalExecuteCallsCallSmokeGeneratesArtifacts(t *testing.T) {
 	}
 	if !response.ResponseTruncated {
 		t.Fatalf("response = %#v, want truncation", response)
+	}
+	var bundle struct {
+		ProposalID          string            `json:"proposal_id"`
+		ApprovalSHA256      string            `json:"approval_sha256"`
+		ProposalSHA256      string            `json:"proposal_sha256"`
+		PolicySHA256        string            `json:"policy_sha256"`
+		ConfigSHA256        string            `json:"config_sha256"`
+		RuntimeConfigSHA256 string            `json:"runtime_config_sha256"`
+		Artifacts           map[string]string `json:"artifacts"`
+		ResponseTruncated   bool              `json:"response_truncated"`
+		ToolCalls           int               `json:"tool_calls"`
+	}
+	if err := json.Unmarshal(mustReadCLIFile(t, filepath.Join(artifactsDir, "mcp-call-execution-bundle.json")), &bundle); err != nil {
+		t.Fatalf("mcp-call-execution-bundle.json invalid: %v", err)
+	}
+	if bundle.ProposalID != proposal.ID ||
+		bundle.ApprovalSHA256 == "" ||
+		bundle.ProposalSHA256 == "" ||
+		bundle.PolicySHA256 == "" ||
+		bundle.ConfigSHA256 == "" ||
+		bundle.RuntimeConfigSHA256 == "" ||
+		!bundle.ResponseTruncated ||
+		bundle.ToolCalls != 1 {
+		t.Fatalf("bundle = %#v, want execution hashes/truncation/tool call count", bundle)
+	}
+	for _, name := range []string{"mcp-call-smoke-summary.md", "mcp-call-transcript.jsonl", "mcp-call-result.json", "mcp-call-stdout.log", "mcp-call-stderr.log", "mcp-call-response.json"} {
+		if bundle.Artifacts[name] == "" {
+			t.Fatalf("bundle artifacts = %#v, missing %s", bundle.Artifacts, name)
+		}
 	}
 	args := readCLIDockerArgs(t, argsPath)
 	joinedArgs := strings.Join(args, " ")
@@ -7029,6 +7122,11 @@ func readMCPApprovalFile(t *testing.T, path string) mcpapproval.MCPToolCallAppro
 
 func newCLIMCPProposal(t *testing.T, server string, arguments []byte, policyPath string, runtimeConfigPath string) mcpapproval.MCPToolCallProposal {
 	t.Helper()
+	return newCLIMCPProposalWithConfig(t, server, arguments, policyPath, "", runtimeConfigPath)
+}
+
+func newCLIMCPProposalWithConfig(t *testing.T, server string, arguments []byte, policyPath string, configPath string, runtimeConfigPath string) mcpapproval.MCPToolCallProposal {
+	t.Helper()
 	proposal, err := mcpapproval.NewProposal(mcpapproval.NewProposalOptions{
 		ID:                "mcp-call-cli-test",
 		CreatedAt:         time.Date(2026, 6, 16, 21, 30, 0, 0, time.UTC),
@@ -7038,6 +7136,7 @@ func newCLIMCPProposal(t *testing.T, server string, arguments []byte, policyPath
 		Reason:            "CLI read-only approval test.",
 		RequestedBy:       "davi",
 		PolicyPath:        policyPath,
+		ConfigPath:        configPath,
 		Runtime:           "docker",
 		RuntimeConfigPath: runtimeConfigPath,
 		Workspace:         ".",

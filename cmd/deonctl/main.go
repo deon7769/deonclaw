@@ -65,11 +65,13 @@ Usage:
   deonctl mcp tool-smoke --config <mcp.yaml> --server <name> --tool <name> --arguments <json> --artifacts-dir <dir> [--timeout-seconds 5] [--runtime local|docker] [--runtime-config <runtime.yaml>] [--workspace <path>] [--policy <policy.yaml>]
   deonctl mcp discover --config <mcp.yaml> --server <name> --artifacts-dir <dir> --policy <policy.yaml> [--timeout-seconds 5] [--runtime local|docker] [--runtime-config <runtime.yaml>] [--workspace <path>]
   deonctl mcp call-smoke --config <mcp.yaml> --server <name> --tool <name> --arguments <json> --artifacts-dir <dir> --policy <policy.yaml> [--timeout-seconds 5] [--runtime docker] [--runtime-config <runtime.yaml>] [--workspace <path>]
-  deonctl mcp proposal new --server <name> --tool <tool> --arguments <json> --reason <text> --policy <policy.yaml> --runtime docker --runtime-config <runtime.yaml> --workspace <path> --output <proposal.json>
+  deonctl mcp proposal new --server <name> --tool <tool> --arguments <json> --reason <text> --policy <policy.yaml> [--config <mcp.yaml>] --runtime docker --runtime-config <runtime.yaml> --workspace <path> --output <proposal.json>
+  deonctl mcp proposal inspect --proposal <proposal.json> [--output-format text|json]
   deonctl mcp proposal lint --proposal <proposal.json> --config <mcp.yaml> --policy <policy.yaml>
   deonctl mcp proposal preflight --proposal <proposal.json> --config <mcp.yaml> --policy <policy.yaml> --output <preflight.json>
   deonctl mcp proposal approve --proposal <proposal.json> --policy <policy.yaml> --decision approved|rejected --reason <text> --output <approval.json> --confirm-read-only
   deonctl mcp proposal execute --proposal <proposal.json> --approval <approval.json> --config <mcp.yaml> --policy <policy.yaml> --artifacts-dir <dir> --confirm-execute
+  deonctl mcp approval inspect --approval <approval.json> [--output-format text|json]
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -369,6 +371,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMCPProposalNew(opts, stdout, stderr)
+			case "inspect":
+				opts, err := parseMCPProposalInspectOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMCPProposalInspect(opts, stdout, stderr)
 			case "lint":
 				opts, err := parseMCPProposalLintOptions(args[3:])
 				if err != nil {
@@ -401,6 +411,24 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMCPProposalExecute(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "approval":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "inspect":
+				opts, err := parseMCPApprovalInspectOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMCPApprovalInspect(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -1295,10 +1323,16 @@ type mcpProposalNewOptions struct {
 	reason            string
 	requestedBy       string
 	policyPath        string
+	configPath        string
 	runtime           string
 	runtimeConfigPath string
 	workspace         string
 	outputPath        string
+}
+
+type mcpProposalInspectOptions struct {
+	proposalPath string
+	outputFormat string
 }
 
 type mcpProposalLintOptions struct {
@@ -1332,6 +1366,11 @@ type mcpProposalExecuteOptions struct {
 	artifactsDir   string
 	confirmExecute bool
 	timeoutSeconds int
+}
+
+type mcpApprovalInspectOptions struct {
+	approvalPath string
+	outputFormat string
 }
 
 func parseMCPSmokeOptions(args []string) (mcpSmokeOptions, error) {
@@ -1849,6 +1888,12 @@ func parseMCPProposalNewOptions(args []string) (mcpProposalNewOptions, error) {
 			}
 			opts.policyPath = args[i+1]
 			i++
+		case "--config":
+			if i+1 >= len(args) {
+				return mcpProposalNewOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
 		case "--runtime":
 			if i+1 >= len(args) {
 				return mcpProposalNewOptions{}, fmt.Errorf("missing value for --runtime")
@@ -1908,6 +1953,35 @@ func parseMCPProposalNewOptions(args []string) (mcpProposalNewOptions, error) {
 	}
 	if opts.outputPath == "" {
 		return mcpProposalNewOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func parseMCPProposalInspectOptions(args []string) (mcpProposalInspectOptions, error) {
+	opts := mcpProposalInspectOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--proposal":
+			if i+1 >= len(args) {
+				return mcpProposalInspectOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return mcpProposalInspectOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return mcpProposalInspectOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.proposalPath == "" {
+		return mcpProposalInspectOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return mcpProposalInspectOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
 	}
 	return opts, nil
 }
@@ -2135,6 +2209,35 @@ func parseMCPProposalExecuteOptions(args []string) (mcpProposalExecuteOptions, e
 	return opts, nil
 }
 
+func parseMCPApprovalInspectOptions(args []string) (mcpApprovalInspectOptions, error) {
+	opts := mcpApprovalInspectOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--approval":
+			if i+1 >= len(args) {
+				return mcpApprovalInspectOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return mcpApprovalInspectOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return mcpApprovalInspectOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.approvalPath == "" {
+		return mcpApprovalInspectOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return mcpApprovalInspectOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
 func runMCPProposalNew(opts mcpProposalNewOptions, stdout io.Writer, stderr io.Writer) int {
 	proposal, err := mcpapproval.NewProposal(mcpapproval.NewProposalOptions{
 		Server:            opts.server,
@@ -2143,6 +2246,7 @@ func runMCPProposalNew(opts mcpProposalNewOptions, stdout io.Writer, stderr io.W
 		Reason:            opts.reason,
 		RequestedBy:       opts.requestedBy,
 		PolicyPath:        opts.policyPath,
+		ConfigPath:        opts.configPath,
 		Runtime:           opts.runtime,
 		RuntimeConfigPath: opts.runtimeConfigPath,
 		Workspace:         opts.workspace,
@@ -2158,6 +2262,121 @@ func runMCPProposalNew(opts mcpProposalNewOptions, stdout io.Writer, stderr io.W
 	fmt.Fprintf(stdout, "mcp proposal written: %s\n", opts.outputPath)
 	fmt.Fprintf(stdout, "proposal_id: %s\n", proposal.ID)
 	fmt.Fprintf(stdout, "arguments_sha256: %s\n", proposal.ArgumentsSHA256)
+	return 0
+}
+
+type mcpProposalInspectView struct {
+	ID                  string `json:"id"`
+	CreatedAt           string `json:"created_at"`
+	Server              string `json:"server"`
+	Tool                string `json:"tool"`
+	ArgumentsSHA256     string `json:"arguments_sha256"`
+	RequestedBy         string `json:"requested_by"`
+	SourceType          string `json:"source_type"`
+	DiscoveryArtifact   string `json:"discovery_artifact,omitempty"`
+	PolicyPath          string `json:"policy_path"`
+	ConfigPath          string `json:"config_path,omitempty"`
+	ConfigSHA256        string `json:"config_sha256,omitempty"`
+	Runtime             string `json:"runtime"`
+	RuntimeConfigPath   string `json:"runtime_config_path,omitempty"`
+	RuntimeConfigSHA256 string `json:"runtime_config_sha256,omitempty"`
+	Workspace           string `json:"workspace,omitempty"`
+	Status              string `json:"status"`
+}
+
+type mcpApprovalInspectView struct {
+	ProposalID          string `json:"proposal_id"`
+	Decision            string `json:"decision"`
+	ApprovedAt          string `json:"approved_at"`
+	ApprovedBy          string `json:"approved_by"`
+	ArgumentsSHA256     string `json:"arguments_sha256"`
+	PolicySHA256        string `json:"policy_sha256"`
+	ConfigSHA256        string `json:"config_sha256,omitempty"`
+	RuntimeConfigSHA256 string `json:"runtime_config_sha256,omitempty"`
+	ConfirmReadOnly     bool   `json:"confirm_read_only"`
+}
+
+func runMCPProposalInspect(opts mcpProposalInspectOptions, stdout io.Writer, stderr io.Writer) int {
+	proposal, err := mcpapproval.LoadProposal(opts.proposalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp proposal inspect failed: %v\n", err)
+		return 1
+	}
+	view := mcpProposalInspectView{
+		ID:                  proposal.ID,
+		CreatedAt:           proposal.CreatedAt.Format(time.RFC3339Nano),
+		Server:              proposal.Server,
+		Tool:                proposal.Tool,
+		ArgumentsSHA256:     proposal.ArgumentsSHA256,
+		RequestedBy:         proposal.RequestedBy,
+		SourceType:          proposal.Source.Type,
+		DiscoveryArtifact:   proposal.Source.DiscoveryArtifact,
+		PolicyPath:          proposal.PolicyPath,
+		ConfigPath:          proposal.ConfigPath,
+		ConfigSHA256:        proposal.ConfigSHA256,
+		Runtime:             proposal.Runtime,
+		RuntimeConfigPath:   proposal.RuntimeConfigPath,
+		RuntimeConfigSHA256: proposal.RuntimeConfigSHA256,
+		Workspace:           proposal.Workspace,
+		Status:              proposal.Status,
+	}
+	if opts.outputFormat == "json" {
+		return writeJSONInspect(stdout, stderr, "mcp proposal inspect", view)
+	}
+	fmt.Fprintf(stdout, "proposal_id: %s\n", view.ID)
+	fmt.Fprintf(stdout, "status: %s\n", view.Status)
+	fmt.Fprintf(stdout, "server: %s\n", view.Server)
+	fmt.Fprintf(stdout, "tool: %s\n", view.Tool)
+	fmt.Fprintf(stdout, "arguments_sha256: %s\n", view.ArgumentsSHA256)
+	fmt.Fprintf(stdout, "policy_path: %s\n", view.PolicyPath)
+	fmt.Fprintf(stdout, "config_path: %s\n", view.ConfigPath)
+	fmt.Fprintf(stdout, "config_sha256: %s\n", view.ConfigSHA256)
+	fmt.Fprintf(stdout, "runtime: %s\n", view.Runtime)
+	fmt.Fprintf(stdout, "runtime_config_path: %s\n", view.RuntimeConfigPath)
+	fmt.Fprintf(stdout, "runtime_config_sha256: %s\n", view.RuntimeConfigSHA256)
+	fmt.Fprintf(stdout, "requested_by: %s\n", view.RequestedBy)
+	fmt.Fprintf(stdout, "source_type: %s\n", view.SourceType)
+	return 0
+}
+
+func runMCPApprovalInspect(opts mcpApprovalInspectOptions, stdout io.Writer, stderr io.Writer) int {
+	approval, err := mcpapproval.LoadApproval(opts.approvalPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp approval inspect failed: %v\n", err)
+		return 1
+	}
+	view := mcpApprovalInspectView{
+		ProposalID:          approval.ProposalID,
+		Decision:            approval.Decision,
+		ApprovedAt:          approval.ApprovedAt.Format(time.RFC3339Nano),
+		ApprovedBy:          approval.ApprovedBy,
+		ArgumentsSHA256:     approval.ArgumentsSHA256,
+		PolicySHA256:        approval.PolicySHA256,
+		ConfigSHA256:        approval.ConfigSHA256,
+		RuntimeConfigSHA256: approval.RuntimeConfigSHA256,
+		ConfirmReadOnly:     approval.ConfirmReadOnly,
+	}
+	if opts.outputFormat == "json" {
+		return writeJSONInspect(stdout, stderr, "mcp approval inspect", view)
+	}
+	fmt.Fprintf(stdout, "proposal_id: %s\n", view.ProposalID)
+	fmt.Fprintf(stdout, "decision: %s\n", view.Decision)
+	fmt.Fprintf(stdout, "approved_by: %s\n", view.ApprovedBy)
+	fmt.Fprintf(stdout, "arguments_sha256: %s\n", view.ArgumentsSHA256)
+	fmt.Fprintf(stdout, "policy_sha256: %s\n", view.PolicySHA256)
+	fmt.Fprintf(stdout, "config_sha256: %s\n", view.ConfigSHA256)
+	fmt.Fprintf(stdout, "runtime_config_sha256: %s\n", view.RuntimeConfigSHA256)
+	fmt.Fprintf(stdout, "confirm_read_only: %t\n", view.ConfirmReadOnly)
+	return 0
+}
+
+func writeJSONInspect(stdout io.Writer, stderr io.Writer, label string, value any) int {
+	data, err := json.MarshalIndent(value, "", "  ")
+	if err != nil {
+		fmt.Fprintf(stderr, "%s failed: %v\n", label, err)
+		return 1
+	}
+	fmt.Fprintln(stdout, string(data))
 	return 0
 }
 
@@ -2242,11 +2461,11 @@ func runMCPProposalExecute(opts mcpProposalExecuteOptions, stdout io.Writer, std
 		return 1
 	}
 	preflight := mcpapproval.BuildPreflight(proposal, mcpapproval.ValidationOptions{Config: cfg, Policy: policy, RuntimeConfig: runtimeCfg})
-	if err := mcpapproval.ValidateExecution(proposal, approval, opts.policyPath, preflight); err != nil {
+	if err := mcpapproval.ValidateExecution(proposal, approval, opts.policyPath, opts.configPath, proposal.RuntimeConfigPath, preflight); err != nil {
 		fmt.Fprintf(stderr, "mcp proposal execute failed: %v\n", err)
 		return 1
 	}
-	result, err := mcpsmoke.CallSmoke(context.Background(), mcpsmoke.CallOptions{
+	result, callErr := mcpsmoke.CallSmoke(context.Background(), mcpsmoke.CallOptions{
 		Config:        cfg,
 		Server:        proposal.Server,
 		Tool:          proposal.Tool,
@@ -2258,8 +2477,18 @@ func runMCPProposalExecute(opts mcpProposalExecuteOptions, stdout io.Writer, std
 		Workspace:     proposal.Workspace,
 		Policy:        &policy,
 	})
+	bundle, err := mcpapproval.BuildExecutionBundle(proposal, approval, preflight, result, opts.policyPath, opts.configPath, proposal.RuntimeConfigPath)
 	if err != nil {
 		fmt.Fprintf(stderr, "mcp proposal execute failed: %v\n", err)
+		return 1
+	}
+	bundlePath := filepath.Join(opts.artifactsDir, "mcp-call-execution-bundle.json")
+	if err := writeMCPExecutionBundle(bundlePath, bundle); err != nil {
+		fmt.Fprintf(stderr, "mcp proposal execute failed: %v\n", err)
+		return 1
+	}
+	if callErr != nil {
+		fmt.Fprintf(stderr, "mcp proposal execute failed: %v\n", callErr)
 		return 1
 	}
 	fmt.Fprintln(stdout, "mcp proposal execute: approved read-only call smoke")
@@ -2272,6 +2501,7 @@ func runMCPProposalExecute(opts mcpProposalExecuteOptions, stdout io.Writer, std
 	fmt.Fprintf(stdout, "artifacts_dir: %s\n", result.ArtifactsDir)
 	fmt.Fprintf(stdout, "transcript: %s\n", result.TranscriptPath)
 	fmt.Fprintf(stdout, "response: %s\n", result.ResponsePath)
+	fmt.Fprintf(stdout, "execution_bundle: %s\n", bundlePath)
 	return 0
 }
 
@@ -2317,6 +2547,14 @@ func writeMCPApproval(outputPath string, approval mcpapproval.MCPToolCallApprova
 
 func writeMCPPreflight(outputPath string, preflight mcpapproval.MCPToolCallPreflight) error {
 	data, err := preflight.JSON()
+	if err != nil {
+		return err
+	}
+	return writeOutputFile(outputPath, data)
+}
+
+func writeMCPExecutionBundle(outputPath string, bundle mcpapproval.MCPToolCallExecutionBundle) error {
+	data, err := bundle.JSON()
 	if err != nil {
 		return err
 	}
