@@ -21,6 +21,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/contextpack"
 	doctorpkg "github.com/deon7769/deonclaw/internal/doctor"
 	"github.com/deon7769/deonclaw/internal/domains"
+	"github.com/deon7769/deonclaw/internal/embeddingpolicy"
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/mcpapproval"
 	"github.com/deon7769/deonclaw/internal/mcpconfig"
@@ -92,6 +93,9 @@ Usage:
   deonctl memory index build --config <memory-index.yaml> --artifacts-dir <dir>
   deonctl memory index doctor --config <memory-index.yaml> [--output-format text|json]
   deonctl memory index report --manifest <memory-index-manifest.json> --chunks <memory-index-chunks.jsonl> [--output-format text|json]
+  deonctl memory embedding validate --policy <embedding-policy.yaml>
+  deonctl memory embedding doctor --policy <embedding-policy.yaml> [--output-format text|json]
+  deonctl memory embedding plan --policy <embedding-policy.yaml> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -533,6 +537,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryIndexReport(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "embedding":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "validate":
+				opts, err := parseMemoryEmbeddingPolicyOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryEmbeddingValidate(opts, stdout, stderr)
+			case "doctor":
+				opts, err := parseMemoryEmbeddingDoctorOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryEmbeddingDoctor(opts, stdout, stderr)
+			case "plan":
+				opts, err := parseMemoryEmbeddingDoctorOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryEmbeddingPlan(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3215,6 +3253,132 @@ func runMemoryIndexReport(opts memoryIndexReportOptions, stdout io.Writer, stder
 		return 1
 	}
 	if result.Status == memoryindex.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type memoryEmbeddingPolicyOptions struct {
+	policyPath string
+}
+
+func parseMemoryEmbeddingPolicyOptions(args []string) (memoryEmbeddingPolicyOptions, error) {
+	var opts memoryEmbeddingPolicyOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryEmbeddingPolicyOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		default:
+			return memoryEmbeddingPolicyOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryEmbeddingPolicyOptions{}, fmt.Errorf("missing --policy")
+	}
+	return opts, nil
+}
+
+type memoryEmbeddingDoctorOptions struct {
+	policyPath   string
+	outputFormat string
+}
+
+func parseMemoryEmbeddingDoctorOptions(args []string) (memoryEmbeddingDoctorOptions, error) {
+	opts := memoryEmbeddingDoctorOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryEmbeddingDoctorOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryEmbeddingDoctorOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryEmbeddingDoctorOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryEmbeddingDoctorOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryEmbeddingDoctorOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMemoryEmbeddingValidate(opts memoryEmbeddingPolicyOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := embeddingpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding validate failed: %v\n", err)
+		return 1
+	}
+	if err := embeddingpolicy.Validate(cfg); err != nil {
+		fmt.Fprintf(stderr, "memory embedding validate failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory embedding validate: ok")
+	return 0
+}
+
+func runMemoryEmbeddingDoctor(opts memoryEmbeddingDoctorOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := embeddingpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding doctor failed: %v\n", err)
+		return 1
+	}
+	result, err := embeddingpolicy.Doctor(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding doctor failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = embeddingpolicy.WriteDoctorJSON(result, stdout)
+	default:
+		err = embeddingpolicy.WriteDoctorText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding doctor failed: %v\n", err)
+		return 1
+	}
+	if result.Status == embeddingpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+func runMemoryEmbeddingPlan(opts memoryEmbeddingDoctorOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := embeddingpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding plan failed: %v\n", err)
+		return 1
+	}
+	result, err := embeddingpolicy.Plan(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding plan failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = embeddingpolicy.WritePlanJSON(result, stdout)
+	default:
+		err = embeddingpolicy.WritePlanText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding plan failed: %v\n", err)
+		return 1
+	}
+	if result.Status == embeddingpolicy.StatusFailed {
 		return 1
 	}
 	return 0

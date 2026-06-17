@@ -1,0 +1,18 @@
+embedding_policy:
+  provider: openai
+  model: text-embedding-3-small
+  dimensions: 1536
+  input:
+    chunks_path: artifacts/memory-index-chunks.jsonl
+    manifest_path: artifacts/memory-index-manifest.json
+  output:
+    vectors_path: artifacts/memory-index-vectors.jsonl
+    manifest_path: artifacts/memory-embedding-manifest.json
+  env:
+    required:
+      - OPENAI_API_KEY
+  limits:
+    max_chunks: 10000
+    max_chunk_chars: 8000
+    batch_size: 64
+  mode: dry_run

@@ -14,7 +14,7 @@ Implemented now:
 
 Not implemented yet:
 
-- embeddings
+- real embedding provider calls and vector generation (see docs/MEMORY_EMBEDDINGS.md for dry-run policy only)
 - LanceDB writes or queries
 - runner retrieval integration
 - MCP integration
@@ -171,6 +171,16 @@ The memory index is derived state. Markdown + Git remain canonical; rebuilds are
 - index artifacts are confined to `--artifacts-dir` by default
 
 A future task may transform these chunks into vectors or wire retrieval into the runner. That is intentionally out of scope for Task 22.0.
+
+## Roadmap boundary
+
+| Task | Scope |
+|------|-------|
+| 22.0 | Chunk config, scan, build |
+| 22.1 | Index doctor and post-build report |
+| 22.2 | Embedding provider policy and dry-run (`memory embedding validate/doctor/plan`) |
+
+22.2 does not call embedding APIs, generate vectors, write LanceDB, or integrate retrieval into the runner. See docs/MEMORY_EMBEDDINGS.md.
 
 ## Boundary
 
