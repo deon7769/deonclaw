@@ -81,6 +81,7 @@ Implemented:
 - embedding policy dry-run and deterministic fake vector smoke (`memory embedding validate/doctor/plan/build-fake/report`), without real provider APIs or LanceDB writes
 - LanceDB write plan-only (`memory lancedb validate/plan`) over embedding artifacts, without LanceDB import or database writes
 - LanceDB fake-write artifact smoke (`memory lancedb fake-write`), without LanceDB SDK or real database creation
+- LanceDB real local write smoke (`memory lancedb write-smoke`) via Python adapter, without retrieval or runner integration
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -91,7 +92,7 @@ Not implemented yet:
 - real fallback execution/retry
 - Codex Docker worker execution
 - MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, explicit proposal approval workflow with execution bundle, passive context attachments, worker proposal lint/preflight only, and run-scoped proposal review queue without execution
-- memory index/LanceDB vector writes and retrieval in runner
+- memory index/LanceDB retrieval in runner
 - UI/dashboard
 
 ## Non-goals for the MVP
@@ -311,7 +312,7 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 Current next sequence:
 
 1. MCP manager
-2. LanceDB writes and memory index retrieval
+2. memory index retrieval/LanceDB search
 3. UI/dashboard
 
 ## Coding style

@@ -94,13 +94,14 @@ Implemented:
 - embedding policy dry-run and deterministic fake vector smoke (`memory embedding validate/doctor/plan/build-fake/report`), without real provider APIs or LanceDB writes
 - LanceDB write plan-only (`memory lancedb validate/plan`) over embedding artifacts, without LanceDB import or database writes
 - LanceDB fake-write artifact smoke (`memory lancedb fake-write`), without LanceDB SDK or real database creation
+- LanceDB real local write smoke (`memory lancedb write-smoke`) via Python adapter, without retrieval or runner integration
 
 Not implemented yet:
 
 - real fallback execution
 - Codex Docker worker runtime
 - MCP execution/manager for automatic real external MCP tool orchestration
-- memory index retrieval/LanceDB writes in runner
+- memory index retrieval/LanceDB search in runner
 - UI/dashboard
 
 ## Quick command map

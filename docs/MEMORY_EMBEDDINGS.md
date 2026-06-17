@@ -159,7 +159,7 @@ It writes vector JSONL lines with deterministic hashes derived from `text_sha256
 
 `report` validates embedding manifest/vectors consistency (`vector_count`, unique vector IDs, `vector_sha256`, dimensions, `fake_vectors`, `lancedb_written: false`), per-vector `provider`/`embedding_model` match against the manifest, and optional cross-checks against chunks when `--chunks` is provided. Text output prints aggregate stats only — not full vectors or chunk text.
 
-A passing `memory embedding report` is a prerequisite for `memory lancedb plan` (Task 22.4). LanceDB writes are not implemented yet; see docs/MEMORY_LANCEDB.md.
+A passing `memory embedding report` is a prerequisite for `memory lancedb plan`, `fake-write`, and `write-smoke`. See docs/MEMORY_LANCEDB.md.
 
 ## Vector contract
 
@@ -208,4 +208,4 @@ The embedding manifest records:
 
 ## Boundary
 
-Tasks 22.0 and 22.1 own chunk build and QA. Task 22.2 owns provider policy and dry-run. Task 22.3 owns deterministic fake vector smoke only. Task 22.3.1 owns vector report QA (including provider/model hardening). Task 22.4 owns LanceDB write planning only (`memory lancedb validate/plan`). Task 22.4.1 adds fake-write artifact smoke (`memory lancedb fake-write`). Real embeddings, LanceDB writes, and retrieval remain future work.
+Tasks 22.0 and 22.1 own chunk build and QA. Task 22.2 owns provider policy and dry-run. Task 22.3 owns deterministic fake vector smoke only. Task 22.3.1 owns vector report QA (including provider/model hardening). Task 22.4 owns LanceDB write planning only (`memory lancedb validate/plan`). Task 22.4.1 adds fake-write artifact smoke (`memory lancedb fake-write`). Task 22.5 adds controlled real local LanceDB write smoke (`memory lancedb write-smoke`). Retrieval and runner integration remain future work.

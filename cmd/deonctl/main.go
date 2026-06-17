@@ -102,6 +102,7 @@ Usage:
   deonctl memory lancedb validate --policy <lancedb-policy.yaml>
   deonctl memory lancedb plan --policy <lancedb-policy.yaml> [--output-format text|json]
   deonctl memory lancedb fake-write --policy <lancedb-policy-fake.yaml> --artifacts-dir <dir> --confirm-fake-write
+  deonctl memory lancedb write-smoke --policy <lancedb-policy-write-smoke.yaml> --artifacts-dir <dir> --confirm-lancedb-write [--allow-overwrite-smoke]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -627,6 +628,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryLanceDBFakeWrite(opts, stdout, stderr)
+			case "write-smoke":
+				opts, err := parseMemoryLanceDBWriteSmokeOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBWriteSmoke(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3738,6 +3747,82 @@ func runMemoryLanceDBFakeWrite(opts memoryLanceDBFakeWriteOptions, stdout io.Wri
 	fmt.Fprintf(stdout, "row_count: %d\n", result.Manifest.RowCount)
 	fmt.Fprintf(stdout, "dimensions: %d\n", result.Manifest.Dimensions)
 	fmt.Fprintf(stdout, "lancedb_written: %t\n", result.Manifest.LanceDBWritten)
+	return 0
+}
+
+type memoryLanceDBWriteSmokeOptions struct {
+	policyPath          string
+	artifactsDir        string
+	confirmLanceDBWrite bool
+	allowOverwriteSmoke bool
+}
+
+func parseMemoryLanceDBWriteSmokeOptions(args []string) (memoryLanceDBWriteSmokeOptions, error) {
+	var opts memoryLanceDBWriteSmokeOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBWriteSmokeOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return memoryLanceDBWriteSmokeOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		case "--confirm-lancedb-write":
+			opts.confirmLanceDBWrite = true
+		case "--allow-overwrite-smoke":
+			opts.allowOverwriteSmoke = true
+		default:
+			return memoryLanceDBWriteSmokeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBWriteSmokeOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.artifactsDir == "" {
+		return memoryLanceDBWriteSmokeOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	if !opts.confirmLanceDBWrite {
+		return memoryLanceDBWriteSmokeOptions{}, fmt.Errorf("missing --confirm-lancedb-write")
+	}
+	return opts, nil
+}
+
+func runMemoryLanceDBWriteSmoke(opts memoryLanceDBWriteSmokeOptions, stdout io.Writer, stderr io.Writer) int {
+	policyBytes, err := os.ReadFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb write-smoke failed: %v\n", err)
+		return 1
+	}
+	cfg, err := lancedbpolicy.Parse(policyBytes)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb write-smoke failed: %v\n", err)
+		return 1
+	}
+	result, err := lancedbpolicy.WriteSmoke(cfg, policyBytes, lancedbpolicy.WriteSmokeOptions{
+		ArtifactsDir:        opts.artifactsDir,
+		ConfirmLanceDBWrite: opts.confirmLanceDBWrite,
+		AllowOverwriteSmoke: opts.allowOverwriteSmoke,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb write-smoke failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory lancedb write-smoke: ok")
+	fmt.Fprintf(stdout, "manifest: %s\n", filepath.Join(opts.artifactsDir, "lancedb-write-smoke-manifest.json"))
+	fmt.Fprintf(stdout, "rows_summary: %s\n", filepath.Join(opts.artifactsDir, "lancedb-write-smoke-rows-summary.json"))
+	fmt.Fprintf(stdout, "log: %s\n", result.LogPath)
+	fmt.Fprintf(stdout, "database_path: %s\n", result.Manifest.DatabasePath)
+	fmt.Fprintf(stdout, "table: %s\n", result.Manifest.Table)
+	fmt.Fprintf(stdout, "row_count: %d\n", result.Manifest.RowCount)
+	fmt.Fprintf(stdout, "dimensions: %d\n", result.Manifest.Dimensions)
+	fmt.Fprintf(stdout, "lancedb_written: %t\n", result.Manifest.LanceDBWritten)
+	fmt.Fprintf(stdout, "retrieval_performed: %t\n", result.Manifest.RetrievalPerformed)
 	return 0
 }
 
