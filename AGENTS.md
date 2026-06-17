@@ -83,6 +83,7 @@ Implemented:
 - LanceDB fake-write artifact smoke (`memory lancedb fake-write`), without LanceDB SDK or real database creation
 - LanceDB real local write smoke (`memory lancedb write-smoke`) via Python adapter, without retrieval or runner integration
 - LanceDB structural readback doctor/report (`memory lancedb doctor/report`) over write-smoke databases, without search or runner integration
+- LanceDB controlled vector search smoke (`memory lancedb search-smoke`) with explicit query vector or chunk_id, without natural-language retrieval, provider APIs, or runner integration
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -93,7 +94,7 @@ Not implemented yet:
 - real fallback execution/retry
 - Codex Docker worker execution
 - MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, explicit proposal approval workflow with execution bundle, passive context attachments, worker proposal lint/preflight only, and run-scoped proposal review queue without execution
-- memory index/LanceDB retrieval in runner
+- memory index retrieval/LanceDB natural-language search in runner
 - UI/dashboard
 
 ## Non-goals for the MVP

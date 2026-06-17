@@ -96,13 +96,14 @@ Implemented:
 - LanceDB fake-write artifact smoke (`memory lancedb fake-write`), without LanceDB SDK or real database creation
 - LanceDB real local write smoke (`memory lancedb write-smoke`) via Python adapter, without retrieval or runner integration
 - LanceDB structural readback doctor/report (`memory lancedb doctor/report`) over write-smoke databases, without search or runner integration
+- LanceDB controlled vector search smoke (`memory lancedb search-smoke`) with explicit query vector or chunk_id, without natural-language retrieval, provider APIs, or runner integration
 
 Not implemented yet:
 
 - real fallback execution
 - Codex Docker worker runtime
 - MCP execution/manager for automatic real external MCP tool orchestration
-- memory index retrieval/LanceDB search in runner
+- memory index retrieval/LanceDB natural-language search in runner
 - UI/dashboard
 
 ## Quick command map

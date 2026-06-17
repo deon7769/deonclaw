@@ -1,6 +1,6 @@
 # Memory LanceDB
 
-Task 22.4 adds LanceDB write policy validation and a plan-only dry run over existing embedding vector artifacts. Task 22.4.1 hardens the embedding report gate and adds fake-write artifact smoke. Task 22.5 adds controlled real local LanceDB write smoke via a Python adapter. Task 22.6 adds structural readback doctor/report over write-smoke databases. None of these tasks run retrieval/search or integrate with the runner.
+Task 22.4 adds LanceDB write policy validation and a plan-only dry run over existing embedding vector artifacts. Task 22.4.1 hardens the embedding report gate and adds fake-write artifact smoke. Task 22.5 adds controlled real local LanceDB write smoke via a Python adapter. Task 22.6 adds structural readback doctor/report over write-smoke databases. Task 22.7 adds controlled vector search smoke with an explicit query vector or existing chunk row — not natural-language retrieval and not runner integration.
 
 ## Scope
 
@@ -8,7 +8,7 @@ Implemented now:
 
 - `lancedb-policy.yaml` loading and validation
 - modes: `plan_only`, `fake_write`, and `write_smoke`
-- `validate`, `plan`, `fake-write`, `write-smoke`, `doctor`, and `report` CLI commands
+- `validate`, `plan`, `fake-write`, `write-smoke`, `doctor`, `report`, and `search-smoke` CLI commands
 - embedding manifest and vector artifact loading
 - hardened `embeddingpolicy.Report` (provider/model consistency)
 - `embeddingpolicy.Report` consistency gate when `chunks_path` is configured
@@ -18,10 +18,11 @@ Implemented now:
 - real local LanceDB table write smoke through `scripts/lancedb_write_smoke.py` (Python `lancedb` + `pyarrow`)
 - write-smoke manifest, rows summary, and log artifacts
 - structural readback doctor/report through `scripts/lancedb_readback.py` (no search)
+- controlled vector search smoke through `scripts/lancedb_search_smoke.py` (explicit vector or chunk_id only; no natural-language retrieval)
 
 Not implemented yet:
 
-- retrieval/search CLI or runner integration
+- natural-language retrieval or runner integration
 - real embedding provider calls
 - MCP integration
 - UI/dashboard
@@ -54,9 +55,9 @@ For `write_smoke`, install local Python dependencies manually (no auto-install i
 pip install lancedb pyarrow
 ~~~
 
-`write-smoke` preflight checks `python3`, `import lancedb`, and `scripts/lancedb_write_smoke.py`. `doctor` and `report` preflight checks `python3`, `import lancedb`, and `scripts/lancedb_readback.py`. Override with `DEONCLAW_LANCEDB_PYTHON`, `DEONCLAW_LANCEDB_WRITE_SCRIPT`, or `DEONCLAW_LANCEDB_READBACK_SCRIPT` when needed.
+`write-smoke` preflight checks `python3`, `import lancedb`, and `scripts/lancedb_write_smoke.py`. `doctor` and `report` preflight checks `python3`, `import lancedb`, and `scripts/lancedb_readback.py`. `search-smoke` preflight checks `python3`, `import lancedb`, and `scripts/lancedb_search_smoke.py`. Override with `DEONCLAW_LANCEDB_PYTHON`, `DEONCLAW_LANCEDB_WRITE_SCRIPT`, `DEONCLAW_LANCEDB_READBACK_SCRIPT`, or `DEONCLAW_LANCEDB_SEARCH_SCRIPT` when needed.
 
-`--artifacts-dir` for `fake-write` and `write-smoke` must be a relative path under the policy input base (typically `artifacts`). Absolute paths, `..`, `secrets`, and `.env` segments are rejected. `database.path` must stay under `--artifacts-dir` for `write_smoke`.
+`--artifacts-dir` for `fake-write`, `write-smoke`, and `search-smoke` must be a relative path under the policy input base (typically `artifacts`). Absolute paths, `..`, `secrets`, and `.env` segments are rejected. `database.path` must stay under `--artifacts-dir` for `write_smoke` and `search-smoke`.
 
 ## Config
 
@@ -180,6 +181,24 @@ deonctl memory lancedb report \
   --output-format json
 ~~~
 
+Controlled vector search smoke (explicit query vector or existing chunk row; not natural-language retrieval):
+
+~~~bash
+deonctl memory lancedb search-smoke \
+  --policy configs/examples/lancedb-policy-write-smoke.yaml \
+  --query-vector '[0.01,0.02,0.03,0.04,0.05,0.06,0.07,0.08,0.09,0.10,0.11,0.12,0.13,0.14,0.15,0.16]' \
+  --top-k 5 \
+  --artifacts-dir artifacts \
+  --confirm-search-smoke
+
+deonctl memory lancedb search-smoke \
+  --policy configs/examples/lancedb-policy-write-smoke.yaml \
+  --query-chunk-id chunk-a \
+  --top-k 5 \
+  --artifacts-dir artifacts \
+  --confirm-search-smoke
+~~~
+
 ### Command roles
 
 | Command | Purpose |
@@ -190,6 +209,7 @@ deonctl memory lancedb report \
 | `write-smoke` | Run plan + embedding report + preflight, then write a real local LanceDB table |
 | `doctor` | Structural readback over an existing write-smoke database/table (no search) |
 | `report` | Cross-check write-smoke manifest against policy + readback metadata |
+| `search-smoke` | Controlled top-k vector search using `--query-vector` or `--query-chunk-id` after doctor passes |
 
 `write-smoke` requires:
 
@@ -213,26 +233,47 @@ Full vectors are stored only inside the LanceDB database directory, never in std
 
 `report` validates write-smoke manifest flags (`lancedb_written: true`, `retrieval_performed: false`, `runner_integration: false`), manifest/policy path alignment, and manifest/readback `row_count` and dimensions. Output includes `sample_chunk_ids` only — no full vectors or chunk text.
 
+`search-smoke` requires:
+
+- `--confirm-search-smoke`
+- exactly one of `--query-vector` (JSON array) or `--query-chunk-id`
+- `--top-k` between 1 and 50 inclusive
+- passing `memory lancedb doctor` (`status: ok`) before search runs
+- `database.path` under `--artifacts-dir`
+- `--query-vector` length must equal `limits.expected_dimensions`
+
+It does **not** generate embeddings from natural language, call a real embedding provider, or integrate with the runner.
+
+It writes:
+
+- `artifacts/lancedb-search-smoke-result.json` (ranked hits with metadata only)
+- `artifacts/lancedb-search-smoke-summary.md` (`retrieval_performed: true`, `runner_integration: false`)
+- `artifacts/lancedb-search-smoke.log` (step trace without vectors)
+
+Stdout and artifacts never include full vectors or chunk text.
+
 ## Adapters
 
 Go uses `internal/lancedbpolicy` adapter interfaces:
 
 - `LanceDBWriter` + `scripts/lancedb_write_smoke.py` for write-smoke
 - `LanceDBReader` + `scripts/lancedb_readback.py` for doctor/report readback
+- `LanceDBSearcher` + `scripts/lancedb_search_smoke.py` for search-smoke
 
 There is no Go LanceDB SDK dependency.
 
 ## Safety
 
-- no retrieval/search
-- no network calls from DeonClaw write-smoke path
+- search-smoke is controlled vector retrieval only (explicit vector or chunk row); not natural-language retrieval
+- no embedding provider API calls from DeonClaw LanceDB paths
 - no runner integration
 - memory apply/restore unchanged
 - `plan` and `fake-write` do not create `database.path`
 - stdout/summary/log never include full vectors or chunk text
 - preflight fails clearly when Python `lancedb` or the helper script is missing
 - no automatic dependency installation
+- no network calls from DeonClaw LanceDB paths
 
 ## Boundary
 
-Tasks 22.0–22.1 own chunk build and QA. Tasks 22.2–22.3.1 own embedding policy, fake vectors, and vector report. Tasks 22.4–22.5 own LanceDB write planning, fake-write artifact smoke, and real local write smoke. Task 22.6 owns structural readback doctor/report only. Retrieval and runner integration remain future work. See also docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_INDEX.md.
+Tasks 22.0–22.1 own chunk build and QA. Tasks 22.2–22.3.1 own embedding policy, fake vectors, and vector report. Tasks 22.4–22.5 own LanceDB write planning, fake-write artifact smoke, and real local write smoke. Task 22.6 owns structural readback doctor/report. Task 22.7 owns controlled vector search smoke with explicit query vectors or chunk rows — not natural-language retrieval and not runner integration. See also docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_INDEX.md.

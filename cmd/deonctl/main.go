@@ -105,6 +105,7 @@ Usage:
   deonctl memory lancedb write-smoke --policy <lancedb-policy-write-smoke.yaml> --artifacts-dir <dir> --confirm-lancedb-write [--allow-overwrite-smoke]
   deonctl memory lancedb doctor --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
   deonctl memory lancedb report --manifest <lancedb-write-smoke-manifest.json> --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
+  deonctl memory lancedb search-smoke --policy <lancedb-policy-write-smoke.yaml> (--query-vector <json-array>|--query-chunk-id <chunk-id>) --top-k <n> --artifacts-dir <dir> --confirm-search-smoke
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -654,6 +655,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryLanceDBReadbackReport(opts, stdout, stderr)
+			case "search-smoke":
+				opts, err := parseMemoryLanceDBSearchSmokeOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBSearchSmoke(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3946,6 +3955,116 @@ func runMemoryLanceDBDoctor(opts memoryLanceDBDoctorOptions, stdout io.Writer, s
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
 	}
+	return 0
+}
+
+type memoryLanceDBSearchSmokeOptions struct {
+	policyPath         string
+	artifactsDir       string
+	queryVectorJSON    string
+	queryChunkID       string
+	topK               int
+	confirmSearchSmoke bool
+}
+
+func parseMemoryLanceDBSearchSmokeOptions(args []string) (memoryLanceDBSearchSmokeOptions, error) {
+	var opts memoryLanceDBSearchSmokeOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		case "--query-vector":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing value for --query-vector")
+			}
+			opts.queryVectorJSON = args[i+1]
+			i++
+		case "--query-chunk-id":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing value for --query-chunk-id")
+			}
+			opts.queryChunkID = args[i+1]
+			i++
+		case "--top-k":
+			if i+1 >= len(args) {
+				return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing value for --top-k")
+			}
+			value, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("invalid --top-k %q", args[i+1])
+			}
+			opts.topK = value
+			i++
+		case "--confirm-search-smoke":
+			opts.confirmSearchSmoke = true
+		default:
+			return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.artifactsDir == "" {
+		return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	if !opts.confirmSearchSmoke {
+		return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing --confirm-search-smoke")
+	}
+	hasVector := strings.TrimSpace(opts.queryVectorJSON) != ""
+	hasChunk := strings.TrimSpace(opts.queryChunkID) != ""
+	if hasVector == hasChunk {
+		return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("exactly one of --query-vector or --query-chunk-id is required")
+	}
+	if opts.topK <= 0 {
+		return memoryLanceDBSearchSmokeOptions{}, fmt.Errorf("missing or invalid --top-k")
+	}
+	return opts, nil
+}
+
+func runMemoryLanceDBSearchSmoke(opts memoryLanceDBSearchSmokeOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := lancedbpolicy.Load(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb search-smoke failed: %v\n", err)
+		return 1
+	}
+	searchOpts := lancedbpolicy.SearchSmokeOptions{
+		ArtifactsDir:       opts.artifactsDir,
+		ConfirmSearchSmoke: opts.confirmSearchSmoke,
+		QueryChunkID:       opts.queryChunkID,
+		TopK:               opts.topK,
+	}
+	if strings.TrimSpace(opts.queryVectorJSON) != "" {
+		var queryVector []float64
+		if err := json.Unmarshal([]byte(opts.queryVectorJSON), &queryVector); err != nil {
+			fmt.Fprintf(stderr, "memory lancedb search-smoke failed: invalid --query-vector json: %v\n", err)
+			return 1
+		}
+		searchOpts.QueryVector = queryVector
+	}
+	result, err := lancedbpolicy.SearchSmoke(cfg, searchOpts)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb search-smoke failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory lancedb search-smoke: ok")
+	fmt.Fprintf(stdout, "result: %s\n", result.ResultPath)
+	fmt.Fprintf(stdout, "summary: %s\n", result.SummaryPath)
+	fmt.Fprintf(stdout, "log: %s\n", result.LogPath)
+	fmt.Fprintf(stdout, "query_mode: %s\n", result.Summary.QueryMode)
+	fmt.Fprintf(stdout, "top_k: %d\n", result.Summary.TopK)
+	fmt.Fprintf(stdout, "result_count: %d\n", result.Summary.ResultCount)
+	fmt.Fprintf(stdout, "retrieval_performed: %t\n", result.Summary.RetrievalPerformed)
+	fmt.Fprintf(stdout, "runner_integration: %t\n", result.Summary.RunnerIntegration)
 	return 0
 }
 

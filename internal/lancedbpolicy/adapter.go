@@ -67,3 +67,46 @@ type ReadbackResponse struct {
 
 // DefaultReader is the production LanceDB readback adapter.
 var DefaultReader LanceDBReader = PythonLanceDBReader{}
+
+// LanceDBSearcher performs controlled vector search against a local LanceDB table.
+type LanceDBSearcher interface {
+	Search(req SearchRequest) (SearchResponse, error)
+}
+
+// SearchRequest is the adapter-neutral search contract.
+type SearchRequest struct {
+	DatabasePath       string
+	Table              string
+	VectorColumn       string
+	TextRefColumn      string
+	TopK               int
+	QueryVector        []float64
+	QueryChunkID       string
+	ExpectedDimensions int
+}
+
+// SearchHit is one ranked search result without vector or chunk text payloads.
+type SearchHit struct {
+	Rank           int     `json:"rank"`
+	ChunkID        string  `json:"chunk_id"`
+	VectorID       string  `json:"vector_id"`
+	Distance       float64 `json:"distance"`
+	Domain         string  `json:"domain"`
+	SourcePath     string  `json:"source_path"`
+	SourceSHA256   string  `json:"source_sha256"`
+	TextSHA256     string  `json:"text_sha256"`
+	EmbeddingModel string  `json:"embedding_model"`
+	Provider       string  `json:"provider"`
+}
+
+// SearchResponse summarizes a controlled vector search run.
+type SearchResponse struct {
+	Status    string      `json:"status"`
+	QueryMode string      `json:"query_mode"`
+	TopK      int         `json:"top_k"`
+	Results   []SearchHit `json:"results"`
+	Message   string      `json:"message,omitempty"`
+}
+
+// DefaultSearcher is the production LanceDB search adapter.
+var DefaultSearcher LanceDBSearcher = PythonLanceDBSearcher{}
