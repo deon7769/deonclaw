@@ -182,8 +182,9 @@ A future task may transform these chunks into vectors or wire retrieval into the
 | 22.3 | Deterministic local fake vectors (`memory embedding build-fake`), no real embeddings |
 | 22.3.1 | Embedding vector report/QA (`memory embedding report`), no LanceDB |
 | 22.4 | LanceDB write plan-only (`memory lancedb validate/plan`), no database writes |
+| 22.4.1 | LanceDB fake-write artifact smoke (`memory lancedb fake-write`), no LanceDB SDK |
 
-22.3.1 validates fake vector artifacts read-only. Task 22.4 plans LanceDB writes from validated embedding artifacts but does not import LanceDB or create a database. See docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_LANCEDB.md.
+22.3.1 validates fake vector artifacts read-only. Task 22.4 plans LanceDB writes from validated embedding artifacts. Task 22.4.1 emits fake row/manifest artifacts for table-shape smoke but does not import LanceDB or create a database. See docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_LANCEDB.md.
 
 ## Boundary
 

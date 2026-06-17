@@ -62,3 +62,36 @@ func validateSafeIdentifier(field string, value string) error {
 	}
 	return nil
 }
+
+func artifactsDirFromInput(inputPath string) string {
+	return filepath.Dir(strings.TrimSpace(inputPath))
+}
+
+func validateArtifactsDirPath(artifactsDir string) error {
+	artifactsDir = strings.TrimSpace(artifactsDir)
+	if artifactsDir == "" {
+		return fmt.Errorf("artifacts dir is required")
+	}
+	if filepath.IsAbs(artifactsDir) {
+		return fmt.Errorf("artifacts dir must be a relative path")
+	}
+	slash := filepath.ToSlash(artifactsDir)
+	if strings.Contains(slash, "..") {
+		return fmt.Errorf("artifacts dir must not contain ..")
+	}
+	if isBlockedPath(slash) {
+		return fmt.Errorf("artifacts dir uses a blocked path")
+	}
+	return nil
+}
+
+func validateArtifactsDir(cfg Config, artifactsDir string) error {
+	if err := validateArtifactsDirPath(artifactsDir); err != nil {
+		return err
+	}
+	expected := artifactsDirFromInput(cfg.LanceDBPolicy.Input.VectorsPath)
+	if filepath.Clean(strings.TrimSpace(artifactsDir)) != filepath.Clean(expected) {
+		return fmt.Errorf("artifacts dir %q does not match policy input base %q", artifactsDir, expected)
+	}
+	return nil
+}

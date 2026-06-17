@@ -154,6 +154,20 @@ func Report(manifestPath string, vectorsPath string, chunksPath string) (VectorR
 		if strings.TrimSpace(vector.EmbeddingModel) == "" {
 			invalid = append(invalid, InvalidVectorReport{Line: line, ID: vector.ID, Reason: "missing embedding_model"})
 		}
+		if vector.Provider != manifest.Provider {
+			invalid = append(invalid, InvalidVectorReport{
+				Line:   line,
+				ID:     vector.ID,
+				Reason: fmt.Sprintf("provider %q != manifest provider %q", vector.Provider, manifest.Provider),
+			})
+		}
+		if vector.EmbeddingModel != manifest.Model {
+			invalid = append(invalid, InvalidVectorReport{
+				Line:   line,
+				ID:     vector.ID,
+				Reason: fmt.Sprintf("embedding_model %q != manifest model %q", vector.EmbeddingModel, manifest.Model),
+			})
+		}
 		if vector.Dimensions != manifest.Dimensions {
 			invalid = append(invalid, InvalidVectorReport{
 				Line:   line,

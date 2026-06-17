@@ -80,6 +80,7 @@ Implemented:
 - memory index foundation (`memory index validate/plan/build/doctor/report`) with auditable chunks, without runner retrieval
 - embedding policy dry-run and deterministic fake vector smoke (`memory embedding validate/doctor/plan/build-fake/report`), without real provider APIs or LanceDB writes
 - LanceDB write plan-only (`memory lancedb validate/plan`) over embedding artifacts, without LanceDB import or database writes
+- LanceDB fake-write artifact smoke (`memory lancedb fake-write`), without LanceDB SDK or real database creation
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

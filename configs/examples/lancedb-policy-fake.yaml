@@ -1,0 +1,22 @@
+lancedb_policy:
+  input:
+    embedding_manifest: artifacts/memory-embedding-manifest.json
+    vectors_path: artifacts/memory-index-vectors.jsonl
+    chunks_path: artifacts/memory-index-chunks.jsonl
+  database:
+    path: artifacts/lancedb-fake
+    table: memory_vectors
+  schema:
+    vector_column: vector
+    text_ref_column: chunk_id
+    metadata_columns:
+      - domain
+      - source_path
+      - source_sha256
+      - text_sha256
+      - embedding_model
+      - provider
+  limits:
+    max_vectors: 10000
+    expected_dimensions: 16
+  mode: fake_write

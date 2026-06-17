@@ -79,6 +79,60 @@ func TestVectorReportFailsWhenDimensionsDiffer(t *testing.T) {
 	}
 }
 
+func TestVectorReportFailsWhenProviderDiffers(t *testing.T) {
+	manifestPath, vectorsPath, _ := buildFakeArtifactPaths(t, 1)
+	vectors := readVectorsJSONL(t, vectorsPath)
+	vectors[0].Provider = "openai"
+	if err := writeVectorsJSONLFile(t, vectorsPath, vectors); err != nil {
+		t.Fatalf("writeVectorsJSONLFile() error = %v", err)
+	}
+
+	report, err := embeddingpolicy.Report(manifestPath, vectorsPath, "")
+	if err != nil {
+		t.Fatalf("Report() error = %v", err)
+	}
+	if report.Status != embeddingpolicy.StatusFailed {
+		t.Fatalf("status = %q, want failed", report.Status)
+	}
+	found := false
+	for _, item := range report.InvalidVectors {
+		if strings.Contains(item.Reason, "provider") && strings.Contains(item.Reason, "manifest provider") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("invalid_vectors = %#v, want provider mismatch", report.InvalidVectors)
+	}
+}
+
+func TestVectorReportFailsWhenEmbeddingModelDiffers(t *testing.T) {
+	manifestPath, vectorsPath, _ := buildFakeArtifactPaths(t, 1)
+	vectors := readVectorsJSONL(t, vectorsPath)
+	vectors[0].EmbeddingModel = "other-model"
+	if err := writeVectorsJSONLFile(t, vectorsPath, vectors); err != nil {
+		t.Fatalf("writeVectorsJSONLFile() error = %v", err)
+	}
+
+	report, err := embeddingpolicy.Report(manifestPath, vectorsPath, "")
+	if err != nil {
+		t.Fatalf("Report() error = %v", err)
+	}
+	if report.Status != embeddingpolicy.StatusFailed {
+		t.Fatalf("status = %q, want failed", report.Status)
+	}
+	found := false
+	for _, item := range report.InvalidVectors {
+		if strings.Contains(item.Reason, "embedding_model") && strings.Contains(item.Reason, "manifest model") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("invalid_vectors = %#v, want embedding_model mismatch", report.InvalidVectors)
+	}
+}
+
 func TestVectorReportDetectsDuplicateVectorIDs(t *testing.T) {
 	manifestPath, vectorsPath, _ := buildFakeArtifactPaths(t, 1)
 	data, err := os.ReadFile(vectorsPath)

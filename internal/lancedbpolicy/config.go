@@ -10,7 +10,8 @@ import (
 )
 
 const (
-	ModePlanOnly = "plan_only"
+	ModePlanOnly  = "plan_only"
+	ModeFakeWrite = "fake_write"
 
 	StatusOK      = "ok"
 	StatusWarning = "warning"
@@ -18,7 +19,8 @@ const (
 )
 
 var allowedModes = map[string]struct{}{
-	ModePlanOnly: {},
+	ModePlanOnly:  {},
+	ModeFakeWrite: {},
 }
 
 type Config struct {

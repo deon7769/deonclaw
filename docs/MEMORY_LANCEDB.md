@@ -1,42 +1,60 @@
 # Memory LanceDB
 
-Task 22.4 adds LanceDB write policy validation and a plan-only dry run over existing embedding vector artifacts. It does not import LanceDB, write a database, run retrieval, or integrate with the runner.
+Task 22.4 adds LanceDB write policy validation and a plan-only dry run over existing embedding vector artifacts. Task 22.4.1 hardens the embedding report gate and adds fake-write artifact smoke. Neither task imports LanceDB, writes a real database, runs retrieval, or integrates with the runner.
 
 ## Scope
 
 Implemented now:
 
 - `lancedb-policy.yaml` loading and validation
-- `validate` and `plan` CLI commands
+- modes: `plan_only` (contract validation) and `fake_write` (artifact smoke only)
+- `validate`, `plan`, and `fake-write` CLI commands
 - embedding manifest and vector artifact loading
+- hardened `embeddingpolicy.Report` (provider/model consistency)
 - `embeddingpolicy.Report` consistency gate when `chunks_path` is configured
 - row/dimension limit checks against policy
-- auditable plan output with `would_write_lancedb: false` and `plan_only: true`
+- auditable plan output with `would_write_lancedb: false`
+- fake-write manifest (`lancedb-fake-write-manifest.json`) and rows (`lancedb-fake-rows.jsonl`) under `artifacts-dir`
 
 Not implemented yet:
 
-- LanceDB SDK import or database writes
+- LanceDB SDK import or real database writes
 - retrieval CLI or runner integration
 - real embedding provider calls
 - MCP integration
 - UI/dashboard
 
+## Modes
+
+| Mode | Purpose |
+|------|---------|
+| `plan_only` | Validate policy and report a dry-run write plan; no artifacts beyond plan output |
+| `fake_write` | Run plan, then emit fake row/manifest artifacts for table-shape smoke; not a database |
+
+`fake_write` never imports LanceDB, never creates `database.path`, and never sets `lancedb_written: true`.
+
 ## Prerequisites
 
-Before planning a LanceDB write:
+Before planning or fake-writing LanceDB rows:
 
 1. Build memory index chunks (`memory index build`)
 2. Generate embedding vectors (`memory embedding build-fake` for smoke, or a future real embedding task)
-3. Pass embedding vector QA (`memory embedding report`)
+3. Pass embedding vector QA (`memory embedding report`), including provider/model consistency checks
 
-`memory lancedb plan` fails when the embedding report status is `failed`, when `vector_count` exceeds `max_vectors`, or when manifest dimensions differ from `expected_dimensions`.
+`memory lancedb plan` and `memory lancedb fake-write` fail when the embedding report status is `failed`, when `vector_count` exceeds `max_vectors`, or when manifest dimensions differ from `expected_dimensions`.
 
 ## Config
 
-Example:
+Plan-only example:
 
 ~~~bash
 configs/examples/lancedb-policy.yaml
+~~~
+
+Fake-write smoke example:
+
+~~~bash
+configs/examples/lancedb-policy-fake.yaml
 ~~~
 
 Shape:
@@ -48,7 +66,7 @@ lancedb_policy:
     vectors_path: artifacts/memory-index-vectors.jsonl
     chunks_path: artifacts/memory-index-chunks.jsonl
   database:
-    path: artifacts/lancedb
+    path: artifacts/lancedb-fake
     table: memory_vectors
   schema:
     vector_column: vector
@@ -68,7 +86,7 @@ lancedb_policy:
 
 Validation rules:
 
-- `mode` must be `plan_only` (only supported mode in this task)
+- `mode` must be `plan_only` or `fake_write`
 - `input.embedding_manifest` and `input.vectors_path` are required relative paths
 - `input.chunks_path` is optional; when set it must be a relative path
 - `database.path` must be relative and must not contain `..`, `secrets`, or `.env`
@@ -90,12 +108,22 @@ deonctl memory lancedb plan --policy configs/examples/lancedb-policy.yaml
 deonctl memory lancedb plan --policy configs/examples/lancedb-policy.yaml --output-format json
 ~~~
 
+Fake-write artifact smoke (no LanceDB import, no `database.path` creation):
+
+~~~bash
+deonctl memory lancedb fake-write \
+  --policy configs/examples/lancedb-policy-fake.yaml \
+  --artifacts-dir artifacts \
+  --confirm-fake-write
+~~~
+
 ### Command roles
 
 | Command | Purpose |
 |---------|---------|
 | `validate` | Policy schema, paths, limits, and identifier safety |
 | `plan` | Dry-run LanceDB write plan over validated embedding artifacts |
+| `fake-write` | Run plan, then write fake row/manifest artifacts for table-shape smoke |
 
 `plan` reports:
 
@@ -103,12 +131,23 @@ deonctl memory lancedb plan --policy configs/examples/lancedb-policy.yaml --outp
 - `vector_count`, `expected_dimensions`, `manifest_dimensions`
 - `provider`, `model`, `fake_vectors`, `lancedb_written`
 - `would_write_lancedb: false`
-- `plan_only: true`
+- `plan_only: true` when `mode: plan_only`
 - `estimated_rows`
 - `embedding_report_status`
 - `warnings`
 
-If `vector_count > max_vectors` or dimensions mismatch, `plan` returns `status: failed` and a non-zero exit code. The plan step never creates the database directory.
+`fake-write` requires:
+
+- `mode: fake_write`
+- `--confirm-fake-write`
+- passing `memory lancedb plan` first (`status: ok`)
+
+It writes:
+
+- `artifacts/lancedb-fake-write-manifest.json`
+- `artifacts/lancedb-fake-rows.jsonl`
+
+Each fake row includes metadata fields and `vector_sha256` only — not full vectors or chunk text.
 
 ## Planned row shape
 
@@ -118,17 +157,18 @@ Future LanceDB writes will map vector JSONL records into a table with:
 - `chunk_id` text reference column
 - metadata columns: `domain`, `source_path`, `source_sha256`, `text_sha256`, `embedding_model`, `provider`
 
-This task validates the contract only; no rows are written.
+`fake_write` validates the metadata/table contract via JSONL artifacts only.
 
 ## Safety
 
-- no LanceDB import or writes
+- no LanceDB import or real writes
 - no retrieval
 - no network calls
 - no runner integration
 - memory apply/restore unchanged
-- plan does not create `database.path`
+- `plan` and `fake-write` do not create `database.path`
+- fake rows/manifests never include full vectors or chunk text
 
 ## Boundary
 
-Tasks 22.0–22.1 own chunk build and QA. Tasks 22.2–22.3.1 own embedding policy, fake vectors, and vector report. Task 22.4 owns LanceDB write planning only. Real LanceDB writes and retrieval remain future work. See also docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_INDEX.md.
+Tasks 22.0–22.1 own chunk build and QA. Tasks 22.2–22.3.1 own embedding policy, fake vectors, and vector report. Tasks 22.4–22.4.1 own LanceDB write planning and fake-write artifact smoke. Real LanceDB writes and retrieval remain future work. See also docs/MEMORY_EMBEDDINGS.md and docs/MEMORY_INDEX.md.

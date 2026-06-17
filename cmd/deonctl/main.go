@@ -101,6 +101,7 @@ Usage:
   deonctl memory embedding report --manifest <memory-embedding-manifest.json> --vectors <memory-index-vectors.jsonl> [--chunks <memory-index-chunks.jsonl>] [--output-format text|json]
   deonctl memory lancedb validate --policy <lancedb-policy.yaml>
   deonctl memory lancedb plan --policy <lancedb-policy.yaml> [--output-format text|json]
+  deonctl memory lancedb fake-write --policy <lancedb-policy-fake.yaml> --artifacts-dir <dir> --confirm-fake-write
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -618,6 +619,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryLanceDBPlan(opts, stdout, stderr)
+			case "fake-write":
+				opts, err := parseMemoryLanceDBFakeWriteOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryLanceDBFakeWrite(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3664,6 +3673,71 @@ func runMemoryLanceDBPlan(opts memoryLanceDBPlanOptions, stdout io.Writer, stder
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
 	}
+	return 0
+}
+
+type memoryLanceDBFakeWriteOptions struct {
+	policyPath       string
+	artifactsDir     string
+	confirmFakeWrite bool
+}
+
+func parseMemoryLanceDBFakeWriteOptions(args []string) (memoryLanceDBFakeWriteOptions, error) {
+	var opts memoryLanceDBFakeWriteOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return memoryLanceDBFakeWriteOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--artifacts-dir":
+			if i+1 >= len(args) {
+				return memoryLanceDBFakeWriteOptions{}, fmt.Errorf("missing value for --artifacts-dir")
+			}
+			opts.artifactsDir = args[i+1]
+			i++
+		case "--confirm-fake-write":
+			opts.confirmFakeWrite = true
+		default:
+			return memoryLanceDBFakeWriteOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return memoryLanceDBFakeWriteOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.artifactsDir == "" {
+		return memoryLanceDBFakeWriteOptions{}, fmt.Errorf("missing --artifacts-dir")
+	}
+	if !opts.confirmFakeWrite {
+		return memoryLanceDBFakeWriteOptions{}, fmt.Errorf("missing --confirm-fake-write")
+	}
+	return opts, nil
+}
+
+func runMemoryLanceDBFakeWrite(opts memoryLanceDBFakeWriteOptions, stdout io.Writer, stderr io.Writer) int {
+	policyBytes, err := os.ReadFile(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb fake-write failed: %v\n", err)
+		return 1
+	}
+	cfg, err := lancedbpolicy.Parse(policyBytes)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb fake-write failed: %v\n", err)
+		return 1
+	}
+	result, err := lancedbpolicy.FakeWrite(cfg, policyBytes, opts.artifactsDir, opts.confirmFakeWrite)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory lancedb fake-write failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "memory lancedb fake-write: ok")
+	fmt.Fprintf(stdout, "manifest: %s\n", filepath.Join(opts.artifactsDir, "lancedb-fake-write-manifest.json"))
+	fmt.Fprintf(stdout, "rows: %s\n", result.Manifest.OutputRowsPath)
+	fmt.Fprintf(stdout, "row_count: %d\n", result.Manifest.RowCount)
+	fmt.Fprintf(stdout, "dimensions: %d\n", result.Manifest.Dimensions)
+	fmt.Fprintf(stdout, "lancedb_written: %t\n", result.Manifest.LanceDBWritten)
 	return 0
 }
 
