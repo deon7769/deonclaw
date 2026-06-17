@@ -269,7 +269,7 @@ Stdout and artifacts never include full vectors or chunk text.
 
 `search-report` validates a prior `search-smoke` result artifact without running a new search. It checks summary flags (`retrieval_performed: true`, `runner_integration: false`), `top_k`/`result_count` bounds, `query_mode`, ranked hit shape, forbidden payload fields (`vector`, `text`, `chunk_text`, `content`, `embedding`), and optional policy cross-checks for `database_path`/`table`. Output includes `status`, distance bounds, `unique_chunk_ids`, `invalid_results`, and `warnings` — never full vectors or chunk text.
 
-Task 22.8 uses a passing `search-report` as a prerequisite for passive runner attachment via `retrieval_context` on worker tasks. The runner does not execute LanceDB search; it re-runs `search-report` validation and injects metadata-only summaries. See docs/RETRIEVAL_CONTEXT.md.
+Task 22.8 uses a passing `search-report` as a prerequisite for passive runner attachment via `retrieval_context` on worker tasks. Task 22.8.1 adds `retrieval context inspect` and `runs retrieval-report` for auditing passive attachments without search. See docs/RETRIEVAL_CONTEXT.md.
 
 ## Adapters
 

@@ -188,8 +188,9 @@ A future task may transform these chunks into vectors or wire retrieval into the
 | 22.7 | LanceDB controlled vector search smoke (`memory lancedb search-smoke`), explicit vector/chunk_id only; no natural-language retrieval or runner integration |
 | 22.7.1 | LanceDB search-smoke result QA/report (`memory lancedb search-report`), no new search or runner integration |
 | 22.8 | Passive LanceDB retrieval context attachment in runner (`retrieval_context` task config), no search in runner |
+| 22.8.1 | Retrieval context inspect + runs retrieval-report (`retrieval context inspect`, `runs retrieval-report`), no active search |
 
-22.3.1 validates fake vector artifacts read-only. Task 22.4 plans LanceDB writes from validated embedding artifacts. Task 22.4.1 emits fake row/manifest artifacts for table-shape smoke. Task 22.5 writes a real local LanceDB table via a Python adapter. Task 22.6 validates write-smoke databases structurally via doctor/report. Task 22.7 runs controlled top-k vector search with an explicit query vector or existing chunk row after doctor passes. Task 22.7.1 validates search-smoke result artifacts. Task 22.8 attaches validated search metadata passively into worker prompts without runner search. See docs/MEMORY_EMBEDDINGS.md, docs/MEMORY_LANCEDB.md, and docs/RETRIEVAL_CONTEXT.md.
+22.3.1 validates fake vector artifacts read-only. Task 22.4 plans LanceDB writes from validated embedding artifacts. Task 22.4.1 emits fake row/manifest artifacts for table-shape smoke. Task 22.5 writes a real local LanceDB table via a Python adapter. Task 22.6 validates write-smoke databases structurally via doctor/report. Task 22.7 runs controlled top-k vector search with an explicit query vector or existing chunk row after doctor passes. Task 22.7.1 validates search-smoke result artifacts. Task 22.8 attaches validated search metadata passively into worker prompts. Task 22.8.1 inspects retrieval-context artifacts and reports runs with passive attachments. See docs/MEMORY_EMBEDDINGS.md, docs/MEMORY_LANCEDB.md, and docs/RETRIEVAL_CONTEXT.md.
 
 ## Boundary
 

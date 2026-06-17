@@ -1,6 +1,6 @@
 # Retrieval Context
 
-Task 22.8 adds passive LanceDB retrieval context attachment for worker runs. The runner validates prior `search-smoke` and `search-report` artifacts and injects metadata-only summaries into the worker prompt. It does not execute LanceDB search, call embedding providers, or read memory source files.
+Task 22.8 adds passive LanceDB retrieval context attachment for worker runs. Task 22.8.1 adds read-only inspection and run reporting over retrieval-context artifacts. Neither path executes LanceDB search, calls embedding providers, or reads memory source files.
 
 ## Scope
 
@@ -13,6 +13,8 @@ Implemented now:
 - passive prompt section `Retrieved context metadata only`
 - execution trace fields: `retrieval_context_attached`, `retrieval_context_count`, `retrieval_context_sha256`, `retrieval_context_status`
 - sanitized `RunSpec.Task` without attachment paths
+- `deonctl retrieval context inspect` for `retrieval-context.json` QA
+- `deonctl runs retrieval-report` for runs with `retrieval_context_attached` in execution traces
 
 Not implemented yet:
 
@@ -81,6 +83,44 @@ Per run (under `artifacts/<run-id>/`):
 - `retrieval-context.json` — machine-readable safe payload
 - `execution-trace.json` — attachment status and SHA256
 
+## Inspection and reporting
+
+Inspect a run artifact (no search, no provider calls):
+
+~~~bash
+deonctl retrieval context inspect \
+  --artifact artifacts/<run-id>/retrieval-context.json
+deonctl retrieval context inspect \
+  --artifact artifacts/<run-id>/retrieval-context.json \
+  --output-format json
+~~~
+
+`inspect` validates:
+
+- `status: ok`
+- `retrieval_context_attached` coherence with `hit_count`
+- allowed attachment kinds
+- hit shape (`rank`, `chunk_id`, `distance`)
+- forbidden fields absent (`vector`, `text`, `chunk_text`, `content`, `embedding`)
+
+Stdout never includes raw chunk text or full vectors.
+
+List runs that attached retrieval context from the SQLite store:
+
+~~~bash
+deonctl runs retrieval-report --store deonclaw.db
+deonctl runs retrieval-report --store deonclaw.db --run <run-id> --output-format json
+~~~
+
+`runs retrieval-report` reads execution traces and artifact paths only. It does not open memory source files and does not execute LanceDB search.
+
+### Debugging `status: failed`
+
+1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
+2. Re-run `memory lancedb search-report` on the upstream `lancedb-search-smoke-result.json`
+3. Confirm the worker run trace has `retrieval_context_status: ok` in `execution-trace.json`
+4. Use `deonctl runs retrieval-report --store ... --run <run-id>` to locate `retrieval-context.json` / `.md` paths
+
 ## Safety
 
 - passive attachment only; runner does not search LanceDB
@@ -91,4 +131,4 @@ Per run (under `artifacts/<run-id>/`):
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.

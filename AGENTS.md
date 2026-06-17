@@ -86,6 +86,7 @@ Implemented:
 - LanceDB controlled vector search smoke (`memory lancedb search-smoke`) with explicit query vector or chunk_id, without natural-language retrieval, provider APIs, or runner integration
 - LanceDB search-smoke result QA/report (`memory lancedb search-report`) over search artifacts, without new search or runner integration
 - passive LanceDB retrieval context attachment in runner (`retrieval_context` on tasks), without runner search or chunk text injection
+- retrieval context inspect and runs retrieval-report for passive attachment auditing, without active search
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

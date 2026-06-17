@@ -30,6 +30,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/mcpsmoke"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/memoryindex"
+	"github.com/deon7769/deonclaw/internal/retrievalcontext"
 	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runreport"
 	"github.com/deon7769/deonclaw/internal/runs"
@@ -108,6 +109,8 @@ Usage:
   deonctl memory lancedb search-smoke --policy <lancedb-policy-write-smoke.yaml> (--query-vector <json-array>|--query-chunk-id <chunk-id>) --top-k <n> --artifacts-dir <dir> --confirm-search-smoke
   deonctl memory lancedb search-report --result <lancedb-search-smoke-result.json> --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
+  deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
+  deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -838,6 +841,42 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runRunsReport(opts, stdout, stderr)
+		case "retrieval-report":
+			opts, err := parseRunsRetrievalReportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runRunsRetrievalReport(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "retrieval":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "context":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "inspect":
+				opts, err := parseRetrievalContextInspectOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextInspect(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -6681,6 +6720,131 @@ func runRunsReport(opts runsReportOptions, stdout io.Writer, stderr io.Writer) i
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "runs report failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+type runsRetrievalReportOptions struct {
+	storePath    string
+	runID        string
+	outputFormat string
+}
+
+func parseRunsRetrievalReportOptions(args []string) (runsRetrievalReportOptions, error) {
+	opts := runsRetrievalReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return runsRetrievalReportOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--run":
+			if i+1 >= len(args) {
+				return runsRetrievalReportOptions{}, fmt.Errorf("missing value for --run")
+			}
+			opts.runID = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return runsRetrievalReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return runsRetrievalReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" {
+		return runsRetrievalReportOptions{}, fmt.Errorf("missing --store")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return runsRetrievalReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRunsRetrievalReport(opts runsRetrievalReportOptions, stdout io.Writer, stderr io.Writer) int {
+	db, err := storepkg.OpenSQLite(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "runs retrieval-report failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+
+	report, err := retrievalcontext.BuildRetrievalReport(context.Background(), db, retrievalcontext.RetrievalReportOptions{
+		RunID: opts.runID,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "runs retrieval-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteRetrievalReportJSON(report, stdout)
+	default:
+		err = retrievalcontext.WriteRetrievalReportText(report, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "runs retrieval-report failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+type retrievalContextInspectOptions struct {
+	artifactPath string
+	outputFormat string
+}
+
+func parseRetrievalContextInspectOptions(args []string) (retrievalContextInspectOptions, error) {
+	opts := retrievalContextInspectOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--artifact":
+			if i+1 >= len(args) {
+				return retrievalContextInspectOptions{}, fmt.Errorf("missing value for --artifact")
+			}
+			opts.artifactPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextInspectOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextInspectOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.artifactPath == "" {
+		return retrievalContextInspectOptions{}, fmt.Errorf("missing --artifact")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextInspectOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextInspect(opts retrievalContextInspectOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.InspectArtifact(opts.artifactPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context inspect failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteInspectJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteInspectText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context inspect failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
 	}
 	return 0
