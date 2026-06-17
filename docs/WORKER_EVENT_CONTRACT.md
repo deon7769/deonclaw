@@ -101,6 +101,20 @@ The shared runner writes the standard run artifact set:
 - mcp-tool-call-preflight.json, when a worker proposal is checked with task.mcp_proposal_policy
 - memory-proposal-lint.json, when --memory-policy produces a lint artifact
 
+Worker-generated MCP proposal artifact flow:
+
+~~~text
+worker emits mcp-tool-call-proposal.json
+  -> runner validates schema and arguments_sha256
+  -> runner writes mcp-tool-call-proposal-lint.json
+  -> runner optionally writes mcp-tool-call-preflight.json from task.mcp_proposal_policy
+  -> SQLite stores artifact metadata
+  -> deonctl mcp proposals list/show/export reads persisted artifacts for human review
+  -> manual mcp proposal approve / mcp proposal execute remain separate and explicit
+~~~
+
+`mcp proposals list/show/export` is review-only. It does not start MCP servers, call tools, approve proposals, or execute proposals.
+
 Worker artifacts with names owned by the CLI are not duplicated. Additional worker artifacts are preserved with unique names.
 
 SQLite stores artifact metadata only. The filesystem remains the artifact body store.

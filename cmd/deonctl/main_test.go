@@ -6243,6 +6243,231 @@ func TestRunRunsReportFilters(t *testing.T) {
 	}
 }
 
+func TestRunMCPProposalsListEmpty(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	saveCLIRunsReportTask(t, ctx, db)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"mcp", "proposals", "list", "--store", storePath}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), "(empty)") {
+		t.Fatalf("stdout = %q, want empty proposals list", stdout.String())
+	}
+}
+
+func TestRunMCPProposalsListShowExportJSON(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	saveCLIMCPProposalsTask(t, ctx, db, "task-mcp-cli-001")
+	saveCLIMCPProposalsRun(t, ctx, db, "run-mcp-cli-001", "task-mcp-cli-001", "codex")
+	proposalPath := writeCLIMCPProposalArtifact(t, tempDir, "run-mcp-cli-001")
+	saveCLIProposalArtifactRecord(t, ctx, db, "run-mcp-cli-001", tempDir, "mcp-tool-call-proposal.json", string(readCLIFile(t, proposalPath)))
+	saveCLIProposalArtifactRecord(t, ctx, db, "run-mcp-cli-001", tempDir, "mcp-tool-call-proposal-lint.json", `{
+  "proposal_id": "mcp-call-cli-001",
+  "status": "passed",
+  "violations": [],
+  "warnings": []
+}`)
+	saveCLIProposalArtifactRecord(t, ctx, db, "run-mcp-cli-001", tempDir, "mcp-tool-call-preflight.json", `{
+  "proposal_id": "mcp-call-cli-001",
+  "status": "passed",
+  "warnings": [],
+  "failures": []
+}`)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var listStdout bytes.Buffer
+	var listStderr bytes.Buffer
+	listCode := run([]string{"mcp", "proposals", "list", "--store", storePath, "--output-format", "json"}, &listStdout, &listStderr)
+	if listCode != 0 {
+		t.Fatalf("list exit code = %d, stderr = %q", listCode, listStderr.String())
+	}
+	if !json.Valid(listStdout.Bytes()) {
+		t.Fatalf("list stdout is not valid JSON: %s", listStdout.String())
+	}
+	if strings.Contains(listStdout.String(), "super-secret-cli-argument") {
+		t.Fatalf("list leaked raw arguments: %s", listStdout.String())
+	}
+
+	var showStdout bytes.Buffer
+	var showStderr bytes.Buffer
+	showCode := run([]string{"mcp", "proposals", "show", "--store", storePath, "--run", "run-mcp-cli-001", "--output-format", "json"}, &showStdout, &showStderr)
+	if showCode != 0 {
+		t.Fatalf("show exit code = %d, stderr = %q", showCode, showStderr.String())
+	}
+	if !json.Valid(showStdout.Bytes()) {
+		t.Fatalf("show stdout is not valid JSON: %s", showStdout.String())
+	}
+	if strings.Contains(showStdout.String(), "super-secret-cli-argument") || strings.Contains(showStdout.String(), `"arguments"`) {
+		t.Fatalf("show leaked raw arguments: %s", showStdout.String())
+	}
+	if !strings.Contains(showStdout.String(), "arguments_sha256") || !strings.Contains(showStdout.String(), "mcp-call-cli-001") {
+		t.Fatalf("show stdout = %s, want sanitized proposal metadata", showStdout.String())
+	}
+	if !strings.Contains(showStdout.String(), "mcp proposal approve") || !strings.Contains(showStdout.String(), "mcp proposal execute") {
+		t.Fatalf("show stdout = %s, want suggested commands", showStdout.String())
+	}
+
+	exportPath := filepath.Join(tempDir, "exported.json")
+	var exportStdout bytes.Buffer
+	var exportStderr bytes.Buffer
+	exportCode := run([]string{"mcp", "proposals", "export", "--store", storePath, "--run", "run-mcp-cli-001", "--output", exportPath}, &exportStdout, &exportStderr)
+	if exportCode != 0 {
+		t.Fatalf("export exit code = %d, stderr = %q", exportCode, exportStderr.String())
+	}
+	if string(readCLIFile(t, exportPath)) != string(readCLIFile(t, proposalPath)) {
+		t.Fatalf("exported proposal differs from source artifact")
+	}
+}
+
+func TestRunMCPProposalsListRefusedApproval(t *testing.T) {
+	ctx := context.Background()
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	db, err := storepkg.OpenSQLite(storePath)
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	saveCLIMCPProposalsTask(t, ctx, db, "task-mcp-refused-001")
+	saveCLIMCPProposalsRun(t, ctx, db, "run-mcp-refused-001", "task-mcp-refused-001", "codex")
+	saveCLIProposalArtifactRecord(t, ctx, db, "run-mcp-refused-001", tempDir, "mcp-tool-call-approval.json", `{"decision":"approved"}`)
+	if err := db.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{"mcp", "proposals", "list", "--store", storePath, "--status", "refused", "--output-format", "json"}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"proposal_status": "refused"`) {
+		t.Fatalf("stdout = %s, want refused status", stdout.String())
+	}
+}
+
+func saveCLIMCPProposalsTask(t *testing.T, ctx context.Context, db storepkg.Store, taskID string) {
+	t.Helper()
+	task := &tasks.Task{
+		ID:     taskID,
+		Title:  "MCP proposals CLI task",
+		Domain: "general",
+		Worker: "codex",
+		Goal:   "queue cli test",
+		Mode:   "read_only",
+		Workspace: tasks.WorkspaceSpec{
+			Strategy: "local_repo",
+			Path:     ".",
+		},
+		Memory: tasks.MemorySpec{
+			Scope: "none",
+		},
+		ExpectedOutputs:  []string{"artifacts/summary.md"},
+		DefinitionOfDone: []string{"done"},
+	}
+	if err := db.SaveTask(ctx, task); err != nil {
+		t.Fatalf("SaveTask() error = %v", err)
+	}
+}
+
+func saveCLIMCPProposalsRun(t *testing.T, ctx context.Context, db storepkg.Store, runID string, taskID string, worker string) {
+	t.Helper()
+	now := time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC)
+	runRecord := &runs.Run{
+		ID:            runID,
+		TaskID:        taskID,
+		Status:        runs.StatusFailed,
+		Worker:        worker,
+		WorkspacePath: "workspace",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	}
+	if err := db.SaveRun(ctx, runRecord); err != nil {
+		t.Fatalf("SaveRun() error = %v", err)
+	}
+}
+
+func writeCLIMCPProposalArtifact(t *testing.T, root string, runID string) string {
+	t.Helper()
+	proposal, err := mcpapproval.NewProposal(mcpapproval.NewProposalOptions{
+		ID:          "mcp-call-cli-001",
+		Server:      "fake-stdio",
+		Tool:        "deonclaw.fake.echo",
+		Arguments:   []byte(`{"text":"super-secret-cli-argument"}`),
+		Reason:      "worker suggestion",
+		RequestedBy: "worker",
+		PolicyPath:  "configs/examples/mcp-call-policy-fake.yaml",
+		ConfigPath:  "configs/examples/mcp-fake.yaml",
+		Runtime:     "local",
+	})
+	if err != nil {
+		t.Fatalf("NewProposal() error = %v", err)
+	}
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("proposal.JSON() error = %v", err)
+	}
+	path := filepath.Join(root, "artifacts", runID, "mcp-tool-call-proposal.json")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return path
+}
+
+func saveCLIProposalArtifactRecord(t *testing.T, ctx context.Context, db storepkg.Store, runID string, root string, name string, content string) {
+	t.Helper()
+	path := filepath.Join(root, "artifacts", runID, name)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	artifact := &artifacts.Artifact{
+		ID:        runID + "-" + name,
+		RunID:     runID,
+		Path:      path,
+		Kind:      artifacts.KindOther,
+		SizeBytes: int64(len(content)),
+		SHA256:    strings.Repeat("b", 64),
+		CreatedAt: time.Date(2026, 6, 17, 12, 0, 0, 0, time.UTC),
+	}
+	if err := db.SaveArtifact(ctx, artifact); err != nil {
+		t.Fatalf("SaveArtifact() error = %v", err)
+	}
+}
+
+func readCLIFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	return data
+}
+
 func TestParseArtifactPruneOptions(t *testing.T) {
 	opts, err := parseArtifactPruneOptions([]string{"--store", "deonclaw.db", "--artifacts-dir", "artifacts", "--older-than", "30d", "--dry-run"})
 	if err != nil {

@@ -76,6 +76,7 @@ Implemented:
 - MCP read-only tool call proposal/preflight/approval workflow reusing call-smoke execution, with stale-hash checks and execution bundle
 - MCP passive context attachments for runner prompts from audited discovery/call artifacts, without worker tool execution
 - MCP worker-generated tool call proposal lint/preflight artifacts, without worker tool execution
+- MCP proposal review queue from runs (`mcp proposals list/show/export`), without automatic execution
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -85,7 +86,7 @@ Not implemented yet:
 
 - real fallback execution/retry
 - Codex Docker worker execution
-- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, explicit proposal approval workflow with execution bundle, passive context attachments, and worker proposal lint/preflight only
+- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, explicit proposal approval workflow with execution bundle, passive context attachments, worker proposal lint/preflight only, and run-scoped proposal review queue without execution
 - memory index/LanceDB
 - UI/dashboard
 

@@ -1,8 +1,8 @@
 # MCP Registry
 
-Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold. Task 21.4 adds a real read-only discovery smoke that lists tools only under a discovery policy. Task 21.5 adds a policy-gated real read-only call smoke with exactly one tool call. Task 21.6 adds an explicit proposal, preflight, approval, and execute workflow for read-only MCP tool calls. Task 21.6.1 hardens approval hashes and writes an auditable execution bundle. Task 21.7 allows worker runs to attach already-audited MCP artifacts as passive context only. Task 21.8 allows workers to emit MCP tool call proposals as artifacts for runner-side lint/preflight only, with no execution.
+Task 21.0 adds the MCP registry foundation. Task 21.1 adds operational diagnostics, risk reporting, and Docker launch planning. Task 21.2 adds a controlled fake/test stdio smoke with transcript artifacts. Task 21.2.1 enables the same fake/test smoke through the Docker runtime. Task 21.3 adds a fake read-only tool-call smoke plus a minimal tool policy scaffold. Task 21.4 adds a real read-only discovery smoke that lists tools only under a discovery policy. Task 21.5 adds a policy-gated real read-only call smoke with exactly one tool call. Task 21.6 adds an explicit proposal, preflight, approval, and execute workflow for read-only MCP tool calls. Task 21.6.1 hardens approval hashes and writes an auditable execution bundle. Task 21.7 allows worker runs to attach already-audited MCP artifacts as passive context only. Task 21.8 allows workers to emit MCP tool call proposals as artifacts for runner-side lint/preflight only, with no execution. Task 21.9 adds a run-scoped MCP proposal review queue for human review only, with no automatic execution.
 
-The registry records MCP server definitions so DeonClaw can validate and inspect them before any future worker integration exists. It can run fake/test smoke, fake/test tool smoke, policy-gated real read-only discovery, one policy-gated real read-only call smoke, the explicit proposal workflow for that same read-only call path, passive MCP context attachments in runner prompts, and runner-side validation of worker-generated MCP proposal artifacts. The proposal workflow records hashes for arguments, policy, optional MCP config, optional runtime config, proposal, approval, and execution bundle. MCP context attachments are passive and already audited. Worker-generated proposals are suggestions only. Approval remains manual, and execute remains a separate command. DeonClaw still does not give Codex or OpenCode permission to call MCP tools, does not automatically dispatch tools for agents, and does not participate in fallback execution.
+The registry records MCP server definitions so DeonClaw can validate and inspect them before any future worker integration exists. It can run fake/test smoke, fake/test tool smoke, policy-gated real read-only discovery, one policy-gated real read-only call smoke, the explicit proposal workflow for that same read-only call path, passive MCP context attachments in runner prompts, runner-side validation of worker-generated MCP proposal artifacts, and a run-scoped proposal review queue for human triage. The proposal workflow records hashes for arguments, policy, optional MCP config, optional runtime config, proposal, approval, and execution bundle. MCP context attachments are passive and already audited. Worker-generated proposals are suggestions only. The review queue helps humans inspect proposals produced by runs; it does not execute tools, approve proposals, or start MCP servers. Approval remains manual through `mcp proposal approve`, and execute remains a separate command through `mcp proposal execute --confirm-execute`. DeonClaw still does not give Codex or OpenCode permission to call MCP tools, does not automatically dispatch tools for agents, and does not participate in fallback execution.
 
 ## Config
 
@@ -538,6 +538,35 @@ If `mcp_proposal_policy` is absent, a structurally valid proposal is preserved a
 
 Workers must not emit approval artifacts such as `mcp-tool-call-approval.json`; the runner refuses the run if they do. The summary records only proposal status and hashes, never raw arguments. `execution-trace.json` records `mcp_tool_proposal_status` and `mcp_tool_proposal_sha256` when present.
 
+Review worker-generated proposals from persisted runs:
+
+~~~bash
+deonctl mcp proposals list --store deonclaw.db
+deonctl mcp proposals list --store deonclaw.db --status preflight_passed --worker codex --output-format json
+deonctl mcp proposals show --store deonclaw.db --run <run-id>
+deonctl mcp proposals export --store deonclaw.db --run <run-id> --output artifacts/review/proposal.json
+~~~
+
+`mcp proposals list` reads SQLite run and artifact metadata, finds `mcp-tool-call-proposal.json`, `mcp-tool-call-proposal-lint.json`, and `mcp-tool-call-preflight.json`, and reports run id, task id, worker, proposal status, proposal hash, proposal id, server, tool, preflight status, and artifact path. It never prints raw arguments or environment values.
+
+`mcp proposals show` loads the proposal plus lint/preflight artifacts for one run and prints a sanitized summary with `arguments_sha256`, violations, warnings, preflight failures, and suggested manual commands for `mcp proposal approve` and `mcp proposal execute`. Raw arguments are omitted in text and JSON output.
+
+`mcp proposals export` copies the run proposal artifact to a chosen path without modifying, approving, or executing it.
+
+If a worker emitted an MCP approval artifact, list/show mark the entry as `refused`.
+
+Preflight for exported proposals still uses the existing manual command:
+
+~~~bash
+deonctl mcp proposal preflight \
+  --proposal artifacts/review/proposal.json \
+  --config configs/examples/mcp.yaml \
+  --policy configs/examples/mcp-call-policy.yaml \
+  --output artifacts/review/preflight.json
+~~~
+
+No `mcp proposals` command starts an MCP server, calls MCP tools, approves proposals, or executes proposals.
+
 Run the built-in fake server directly:
 
 ~~~bash
@@ -559,8 +588,9 @@ Implemented smoke boundaries:
 - `mcp proposal execute`: one approved real read-only allowlisted `tools/call` through the same call-smoke path
 - `task.mcp_context`: passive summaries of audited discovery/call artifacts only
 - `task.mcp_proposal_policy`: runner-side lint/preflight for worker-generated `mcp-tool-call-proposal.json` only
+- `mcp proposals list/show/export`: run-scoped human review queue over persisted proposal artifacts only
 
-Not implemented through Task 21.8:
+Not implemented through Task 21.9:
 
 - MCP integration with Codex or OpenCode
 - automatic MCP tool dispatch by workers or agents

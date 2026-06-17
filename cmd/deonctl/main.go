@@ -24,6 +24,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/mcpapproval"
 	"github.com/deon7769/deonclaw/internal/mcpconfig"
+	"github.com/deon7769/deonclaw/internal/mcpproposalqueue"
 	"github.com/deon7769/deonclaw/internal/mcpsmoke"
 	"github.com/deon7769/deonclaw/internal/memory"
 	"github.com/deon7769/deonclaw/internal/runner"
@@ -72,6 +73,9 @@ Usage:
   deonctl mcp proposal approve --proposal <proposal.json> --policy <policy.yaml> --decision approved|rejected --reason <text> --output <approval.json> --confirm-read-only
   deonctl mcp proposal execute --proposal <proposal.json> --approval <approval.json> --config <mcp.yaml> --policy <policy.yaml> --artifacts-dir <dir> --confirm-execute
   deonctl mcp approval inspect --approval <approval.json> [--output-format text|json]
+  deonctl mcp proposals list --store <deonclaw.db> [--status valid|invalid|preflight_passed|preflight_failed|refused] [--worker codex|opencode] [--task <task-id>] [--output-format text|json]
+  deonctl mcp proposals show --store <deonclaw.db> --run <run-id> [--output-format text|json]
+  deonctl mcp proposals export --store <deonclaw.db> --run <run-id> --output <proposal.json>
   deonctl memory proposal new --run <run-id> --task <task-id> --domain <domain> --target <path> --operation <operation> --reason <text> --output <path>
   deonctl memory proposal lint --proposal <path> --policy <path>
   deonctl memory proposal apply --proposal <path> --policy <path> --dry-run [--output <path>]
@@ -411,6 +415,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMCPProposalExecute(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "proposals":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "list":
+				opts, err := parseMCPProposalsListOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMCPProposalsList(opts, stdout, stderr)
+			case "show":
+				opts, err := parseMCPProposalsShowOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMCPProposalsShow(opts, stdout, stderr)
+			case "export":
+				opts, err := parseMCPProposalsExportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMCPProposalsExport(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -2502,6 +2540,224 @@ func runMCPProposalExecute(opts mcpProposalExecuteOptions, stdout io.Writer, std
 	fmt.Fprintf(stdout, "transcript: %s\n", result.TranscriptPath)
 	fmt.Fprintf(stdout, "response: %s\n", result.ResponsePath)
 	fmt.Fprintf(stdout, "execution_bundle: %s\n", bundlePath)
+	return 0
+}
+
+type mcpProposalsListOptions struct {
+	storePath    string
+	status       string
+	worker       string
+	taskID       string
+	outputFormat string
+}
+
+func parseMCPProposalsListOptions(args []string) (mcpProposalsListOptions, error) {
+	opts := mcpProposalsListOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return mcpProposalsListOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--status":
+			if i+1 >= len(args) {
+				return mcpProposalsListOptions{}, fmt.Errorf("missing value for --status")
+			}
+			opts.status = args[i+1]
+			i++
+		case "--worker":
+			if i+1 >= len(args) {
+				return mcpProposalsListOptions{}, fmt.Errorf("missing value for --worker")
+			}
+			opts.worker = args[i+1]
+			i++
+		case "--task":
+			if i+1 >= len(args) {
+				return mcpProposalsListOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskID = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return mcpProposalsListOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return mcpProposalsListOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" {
+		return mcpProposalsListOptions{}, fmt.Errorf("missing --store")
+	}
+	if err := mcpproposalqueue.ValidateListStatus(opts.status); err != nil {
+		return mcpProposalsListOptions{}, err
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return mcpProposalsListOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+type mcpProposalsShowOptions struct {
+	storePath    string
+	runID        string
+	outputFormat string
+}
+
+func parseMCPProposalsShowOptions(args []string) (mcpProposalsShowOptions, error) {
+	opts := mcpProposalsShowOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return mcpProposalsShowOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--run":
+			if i+1 >= len(args) {
+				return mcpProposalsShowOptions{}, fmt.Errorf("missing value for --run")
+			}
+			opts.runID = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return mcpProposalsShowOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return mcpProposalsShowOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" {
+		return mcpProposalsShowOptions{}, fmt.Errorf("missing --store")
+	}
+	if opts.runID == "" {
+		return mcpProposalsShowOptions{}, fmt.Errorf("missing --run")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return mcpProposalsShowOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+type mcpProposalsExportOptions struct {
+	storePath  string
+	runID      string
+	outputPath string
+}
+
+func parseMCPProposalsExportOptions(args []string) (mcpProposalsExportOptions, error) {
+	var opts mcpProposalsExportOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return mcpProposalsExportOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--run":
+			if i+1 >= len(args) {
+				return mcpProposalsExportOptions{}, fmt.Errorf("missing value for --run")
+			}
+			opts.runID = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return mcpProposalsExportOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return mcpProposalsExportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" {
+		return mcpProposalsExportOptions{}, fmt.Errorf("missing --store")
+	}
+	if opts.runID == "" {
+		return mcpProposalsExportOptions{}, fmt.Errorf("missing --run")
+	}
+	if opts.outputPath == "" {
+		return mcpProposalsExportOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runMCPProposalsList(opts mcpProposalsListOptions, stdout io.Writer, stderr io.Writer) int {
+	db, err := storepkg.OpenSQLite(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "open store failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+
+	result, err := mcpproposalqueue.List(context.Background(), db, mcpproposalqueue.ListOptions{
+		Status: opts.status,
+		Worker: opts.worker,
+		TaskID: opts.taskID,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp proposals list failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = mcpproposalqueue.WriteListJSON(result, stdout)
+	default:
+		err = mcpproposalqueue.WriteListText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp proposals list failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runMCPProposalsShow(opts mcpProposalsShowOptions, stdout io.Writer, stderr io.Writer) int {
+	db, err := storepkg.OpenSQLite(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "open store failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+
+	detail, err := mcpproposalqueue.Show(context.Background(), db, opts.runID)
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp proposals show failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = mcpproposalqueue.WriteShowJSON(detail, stdout)
+	default:
+		err = mcpproposalqueue.WriteShowText(detail, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "mcp proposals show failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+func runMCPProposalsExport(opts mcpProposalsExportOptions, stdout io.Writer, stderr io.Writer) int {
+	db, err := storepkg.OpenSQLite(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "open store failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+
+	if err := mcpproposalqueue.Export(context.Background(), db, opts.runID, opts.outputPath); err != nil {
+		fmt.Fprintf(stderr, "mcp proposals export failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "mcp proposal exported: %s\n", opts.outputPath)
 	return 0
 }
 
