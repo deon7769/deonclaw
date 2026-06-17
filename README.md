@@ -91,7 +91,7 @@ Implemented:
 - real memory apply for create/append/update/archive
 - real restore execution
 - memory index foundation (`memory index validate/plan/build/doctor/report`) with auditable chunks, without runner retrieval or LanceDB writes
-- embedding policy dry-run and deterministic fake vector smoke (`memory embedding validate/doctor/plan/build-fake`), without real provider APIs or LanceDB writes
+- embedding policy dry-run and deterministic fake vector smoke (`memory embedding validate/doctor/plan/build-fake/report`), without real provider APIs or LanceDB writes
 
 Not implemented yet:
 

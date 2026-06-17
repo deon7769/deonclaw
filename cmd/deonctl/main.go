@@ -97,6 +97,7 @@ Usage:
   deonctl memory embedding doctor --policy <embedding-policy.yaml> [--output-format text|json]
   deonctl memory embedding plan --policy <embedding-policy.yaml> [--output-format text|json]
   deonctl memory embedding build-fake --policy <embedding-policy-fake.yaml> --artifacts-dir <dir> --confirm-fake-vectors
+  deonctl memory embedding report --manifest <memory-embedding-manifest.json> --vectors <memory-index-vectors.jsonl> [--chunks <memory-index-chunks.jsonl>] [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -580,6 +581,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runMemoryEmbeddingBuildFake(opts, stdout, stderr)
+			case "report":
+				opts, err := parseMemoryEmbeddingReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runMemoryEmbeddingReport(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -3454,6 +3463,79 @@ func runMemoryEmbeddingBuildFake(opts memoryEmbeddingBuildFakeOptions, stdout io
 	fmt.Fprintf(stdout, "manifest: %s\n", result.Manifest.OutputManifestPath)
 	fmt.Fprintf(stdout, "vector_count: %d\n", result.Manifest.VectorCount)
 	fmt.Fprintf(stdout, "dimensions: %d\n", result.Manifest.Dimensions)
+	return 0
+}
+
+type memoryEmbeddingReportOptions struct {
+	manifestPath string
+	vectorsPath  string
+	chunksPath   string
+	outputFormat string
+}
+
+func parseMemoryEmbeddingReportOptions(args []string) (memoryEmbeddingReportOptions, error) {
+	opts := memoryEmbeddingReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--manifest":
+			if i+1 >= len(args) {
+				return memoryEmbeddingReportOptions{}, fmt.Errorf("missing value for --manifest")
+			}
+			opts.manifestPath = args[i+1]
+			i++
+		case "--vectors":
+			if i+1 >= len(args) {
+				return memoryEmbeddingReportOptions{}, fmt.Errorf("missing value for --vectors")
+			}
+			opts.vectorsPath = args[i+1]
+			i++
+		case "--chunks":
+			if i+1 >= len(args) {
+				return memoryEmbeddingReportOptions{}, fmt.Errorf("missing value for --chunks")
+			}
+			opts.chunksPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return memoryEmbeddingReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return memoryEmbeddingReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.manifestPath == "" {
+		return memoryEmbeddingReportOptions{}, fmt.Errorf("missing --manifest")
+	}
+	if opts.vectorsPath == "" {
+		return memoryEmbeddingReportOptions{}, fmt.Errorf("missing --vectors")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return memoryEmbeddingReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runMemoryEmbeddingReport(opts memoryEmbeddingReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := embeddingpolicy.Report(opts.manifestPath, opts.vectorsPath, opts.chunksPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = embeddingpolicy.WriteVectorReportJSON(result, stdout)
+	default:
+		err = embeddingpolicy.WriteVectorReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "memory embedding report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == embeddingpolicy.StatusFailed {
+		return 1
+	}
 	return 0
 }
 

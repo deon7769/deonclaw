@@ -180,8 +180,9 @@ A future task may transform these chunks into vectors or wire retrieval into the
 | 22.1 | Index doctor and post-build report |
 | 22.2 | Embedding provider policy and dry-run (`memory embedding validate/doctor/plan`) |
 | 22.3 | Deterministic local fake vectors (`memory embedding build-fake`), no real embeddings |
+| 22.3.1 | Embedding vector report/QA (`memory embedding report`), no LanceDB |
 
-22.3 does not call embedding APIs, generate semantic vectors, write LanceDB, or integrate retrieval into the runner. See docs/MEMORY_EMBEDDINGS.md.
+22.3.1 validates fake vector artifacts read-only. It does not call embedding APIs, write LanceDB, or integrate retrieval into the runner. See docs/MEMORY_EMBEDDINGS.md.
 
 ## Boundary
 

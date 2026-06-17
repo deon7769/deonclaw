@@ -7,7 +7,7 @@ Task 22.2 adds embedding provider policy and dry-run diagnostics. Task 22.3 adds
 Implemented now:
 
 - `embedding-policy.yaml` loading and validation
-- `validate`, `doctor`, `plan`, and `build-fake` CLI commands
+- `validate`, `doctor`, `plan`, `build-fake`, and `report` CLI commands
 - env requirement checks (`set_masked` / `missing` only; never prints values)
 - input artifact existence and chunk counts
 - batch estimation (`estimated_batches`)
@@ -113,6 +113,19 @@ deonctl memory embedding build-fake \
   --confirm-fake-vectors
 ~~~
 
+Post-build QA over generated vector artifacts (read-only, no network):
+
+~~~bash
+deonctl memory embedding report \
+  --manifest artifacts/memory-embedding-manifest.json \
+  --vectors artifacts/memory-index-vectors.jsonl
+deonctl memory embedding report \
+  --manifest artifacts/memory-embedding-manifest.json \
+  --vectors artifacts/memory-index-vectors.jsonl \
+  --chunks artifacts/memory-index-chunks.jsonl \
+  --output-format json
+~~~
+
 ### Command roles
 
 | Command | Purpose |
@@ -121,6 +134,7 @@ deonctl memory embedding build-fake \
 | `doctor` | Provider/model/env/input readiness before any embedding work |
 | `plan` | Dry-run batch plan over validated index artifacts |
 | `build-fake` | Deterministic local vector smoke from validated chunks |
+| `report` | Post-build QA over embedding manifest and vectors JSONL |
 
 `doctor` reports provider, model, dimensions, env requirements (`set_masked` / `missing`), input file existence, `chunk_count`, `manifest_chunk_count`, `estimated_batches`, and warnings. It never prints environment values. For `provider: local`, missing env vars are warnings only when `env.required` is configured but not required for fake smoke.
 
@@ -142,6 +156,8 @@ If `chunk_count > max_chunks`, `plan` returns `status: failed` and a non-zero ex
 - `chunk_count <= max_chunks`
 
 It writes vector JSONL lines with deterministic hashes derived from `text_sha256` and `chunk_id`. Fake vectors are for pipeline smoke only; they are not semantically meaningful embeddings.
+
+`report` validates embedding manifest/vectors consistency (`vector_count`, unique vector IDs, `vector_sha256`, dimensions, `fake_vectors`, `lancedb_written: false`) and optional cross-checks against chunks when `--chunks` is provided. Text output prints aggregate stats only — not full vectors or chunk text.
 
 ## Vector contract
 
