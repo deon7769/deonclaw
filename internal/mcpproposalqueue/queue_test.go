@@ -79,6 +79,9 @@ func TestListFindsProposalLintPreflight(t *testing.T) {
 	if entry.ArtifactPath == "" || entry.ProposalSHA256 == "" {
 		t.Fatalf("entry = %#v, want artifact path and sha256", entry)
 	}
+	if !entry.ReadyForApproval {
+		t.Fatalf("entry = %#v, want ready_for_approval true", entry)
+	}
 	_ = lintPath
 	_ = preflightPath
 }
@@ -183,12 +186,138 @@ func TestExportPreservesProposalJSON(t *testing.T) {
 	writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalArtifactName, root, string(original))
 
 	exportPath := filepath.Join(root, "exported-proposal.json")
-	if err := mcpproposalqueue.Export(ctx, db, runID, exportPath); err != nil {
+	result, err := mcpproposalqueue.Export(ctx, db, runID, exportPath)
+	if err != nil {
 		t.Fatalf("Export() error = %v", err)
 	}
 	exported := readFileBytes(t, exportPath)
 	if string(exported) != string(original) {
 		t.Fatalf("exported content differs from original")
+	}
+	if result.ProposalSHA256 == "" {
+		t.Fatalf("result = %#v, want exported_proposal_sha256", result)
+	}
+	if result.NextStepHint == "" {
+		t.Fatalf("result = %#v, want next_step_hint", result)
+	}
+}
+
+func TestShowReadyForApprovalStates(t *testing.T) {
+	ctx := context.Background()
+	db := openTestStore(t)
+	root := t.TempDir()
+
+	t.Run("preflight_passed", func(t *testing.T) {
+		runID := "run-ready-pass"
+		saveTestTask(t, ctx, db, "task-ready-pass")
+		saveTestRun(t, ctx, db, runID, "task-ready-pass", "codex")
+		proposalPath := writeTestProposalArtifact(t, root, runID)
+		writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalArtifactName, root, readFileString(t, proposalPath))
+		writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalPreflightArtifactName, root, `{
+  "proposal_id": "mcp-call-test-001",
+  "status": "passed",
+  "warnings": [],
+  "failures": []
+}`)
+		detail, err := mcpproposalqueue.Show(ctx, db, runID)
+		if err != nil {
+			t.Fatalf("Show() error = %v", err)
+		}
+		if !detail.ReadyForApproval {
+			t.Fatalf("detail = %#v, want ready_for_approval true", detail)
+		}
+	})
+
+	t.Run("preflight_failed", func(t *testing.T) {
+		runID := "run-ready-fail"
+		saveTestTask(t, ctx, db, "task-ready-fail")
+		saveTestRun(t, ctx, db, runID, "task-ready-fail", "codex")
+		proposalPath := writeTestProposalArtifact(t, root, runID)
+		writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalArtifactName, root, readFileString(t, proposalPath))
+		writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalPreflightArtifactName, root, `{
+  "proposal_id": "mcp-call-test-001",
+  "status": "failed",
+  "warnings": [],
+  "failures": ["tool not allowlisted"]
+}`)
+		detail, err := mcpproposalqueue.Show(ctx, db, runID)
+		if err != nil {
+			t.Fatalf("Show() error = %v", err)
+		}
+		if detail.ReadyForApproval {
+			t.Fatalf("detail = %#v, want ready_for_approval false", detail)
+		}
+	})
+
+	t.Run("approval_refused", func(t *testing.T) {
+		runID := "run-ready-refused"
+		saveTestTask(t, ctx, db, "task-ready-refused")
+		saveTestRun(t, ctx, db, runID, "task-ready-refused", "codex")
+		writeTestArtifact(t, db, ctx, runID, "mcp-tool-call-approval.json", root, `{"decision":"approved"}`)
+		detail, err := mcpproposalqueue.Show(ctx, db, runID)
+		if err != nil {
+			t.Fatalf("Show() error = %v", err)
+		}
+		if detail.ReadyForApproval {
+			t.Fatalf("detail = %#v, want ready_for_approval false", detail)
+		}
+	})
+}
+
+func TestShowEmptyConfigPathSuggestsValidExecute(t *testing.T) {
+	ctx := context.Background()
+	db := openTestStore(t)
+	root := t.TempDir()
+	runID := "run-mcp-no-config-001"
+
+	saveTestTask(t, ctx, db, "task-no-config")
+	saveTestRun(t, ctx, db, runID, "task-no-config", "codex")
+	proposalPath := writeTestProposalArtifactWithoutConfig(t, root, runID)
+	writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalArtifactName, root, readFileString(t, proposalPath))
+
+	detail, err := mcpproposalqueue.Show(ctx, db, runID)
+	if err != nil {
+		t.Fatalf("Show() error = %v", err)
+	}
+	if len(detail.Suggested) != 2 {
+		t.Fatalf("suggested = %#v, want approve and execute commands", detail.Suggested)
+	}
+	execute := detail.Suggested[1]
+	if !strings.Contains(execute, "--config <mcp.yaml>") {
+		t.Fatalf("execute = %q, want explicit config placeholder", execute)
+	}
+	if strings.Contains(execute, "--config  ") || strings.Contains(execute, "--config --policy") {
+		t.Fatalf("execute = %q, want valid command shape", execute)
+	}
+}
+
+func TestListJSONIncludesReadyForApproval(t *testing.T) {
+	ctx := context.Background()
+	db := openTestStore(t)
+	root := t.TempDir()
+	runID := "run-list-ready-001"
+
+	saveTestTask(t, ctx, db, "task-list-ready")
+	saveTestRun(t, ctx, db, runID, "task-list-ready", "codex")
+	proposalPath := writeTestProposalArtifact(t, root, runID)
+	writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalArtifactName, root, readFileString(t, proposalPath))
+	writeTestArtifact(t, db, ctx, runID, mcpproposalqueue.ProposalPreflightArtifactName, root, `{
+  "proposal_id": "mcp-call-test-001",
+  "status": "passed",
+  "warnings": [],
+  "failures": []
+}`)
+
+	result, err := mcpproposalqueue.List(ctx, db, mcpproposalqueue.ListOptions{})
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	data, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if !strings.Contains(string(data), `"ready_for_approval":true`) {
+		t.Fatalf("json = %s, want ready_for_approval true", string(data))
 	}
 }
 
@@ -325,6 +454,46 @@ func saveTestRun(t *testing.T, ctx context.Context, db store.Store, runID string
 	if err := db.SaveRun(ctx, runRecord); err != nil {
 		t.Fatalf("SaveRun() error = %v", err)
 	}
+}
+
+func writeTestProposalArtifactWithoutConfig(t *testing.T, root string, runID string) string {
+	t.Helper()
+	proposal, err := mcpapproval.NewProposal(mcpapproval.NewProposalOptions{
+		ID:          "mcp-call-no-config-001",
+		Server:      "fake-stdio",
+		Tool:        "deonclaw.fake.echo",
+		Arguments:   []byte(`{"text":"hello"}`),
+		Reason:      "worker suggestion without config path",
+		RequestedBy: "worker",
+		PolicyPath:  "configs/examples/mcp-call-policy-fake.yaml",
+		Runtime:     mcpsmoke.RuntimeLocal,
+	})
+	if err != nil {
+		t.Fatalf("NewProposal() error = %v", err)
+	}
+	data, err := proposal.JSON()
+	if err != nil {
+		t.Fatalf("proposal.JSON() error = %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(data, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	delete(decoded, "config_path")
+	delete(decoded, "config_sha256")
+	data, err = json.MarshalIndent(decoded, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	data = append(data, '\n')
+	path := filepath.Join(root, "artifacts", runID, mcpproposalqueue.ProposalArtifactName)
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	return path
 }
 
 func writeTestProposalArtifact(t *testing.T, root string, runID string) string {

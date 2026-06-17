@@ -2753,11 +2753,14 @@ func runMCPProposalsExport(opts mcpProposalsExportOptions, stdout io.Writer, std
 	}
 	defer db.Close()
 
-	if err := mcpproposalqueue.Export(context.Background(), db, opts.runID, opts.outputPath); err != nil {
+	result, err := mcpproposalqueue.Export(context.Background(), db, opts.runID, opts.outputPath)
+	if err != nil {
 		fmt.Fprintf(stderr, "mcp proposals export failed: %v\n", err)
 		return 1
 	}
-	fmt.Fprintf(stdout, "mcp proposal exported: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "mcp proposal exported: %s\n", result.OutputPath)
+	fmt.Fprintf(stdout, "exported_proposal_sha256: %s\n", result.ProposalSHA256)
+	fmt.Fprintf(stdout, "next_step_hint: %s\n", result.NextStepHint)
 	return 0
 }
 

@@ -110,10 +110,11 @@ worker emits mcp-tool-call-proposal.json
   -> runner optionally writes mcp-tool-call-preflight.json from task.mcp_proposal_policy
   -> SQLite stores artifact metadata
   -> deonctl mcp proposals list/show/export reads persisted artifacts for human review
+  -> list/show report ready_for_approval when preflight_passed and proposal is parseable
   -> manual mcp proposal approve / mcp proposal execute remain separate and explicit
 ~~~
 
-`mcp proposals list/show/export` is review-only. It does not start MCP servers, call tools, approve proposals, or execute proposals.
+`mcp proposals list/show/export` is review-only. It does not start MCP servers, call tools, approve proposals, or execute proposals. `mcp proposals show` may suggest approve/execute command shapes, but those commands remain manual and separate.
 
 Worker artifacts with names owned by the CLI are not duplicated. Additional worker artifacts are preserved with unique names.
 

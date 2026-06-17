@@ -547,11 +547,18 @@ deonctl mcp proposals show --store deonclaw.db --run <run-id>
 deonctl mcp proposals export --store deonclaw.db --run <run-id> --output artifacts/review/proposal.json
 ~~~
 
-`mcp proposals list` reads SQLite run and artifact metadata, finds `mcp-tool-call-proposal.json`, `mcp-tool-call-proposal-lint.json`, and `mcp-tool-call-preflight.json`, and reports run id, task id, worker, proposal status, proposal hash, proposal id, server, tool, preflight status, and artifact path. It never prints raw arguments or environment values.
+`mcp proposals list` reads SQLite run and artifact metadata, finds `mcp-tool-call-proposal.json`, `mcp-tool-call-proposal-lint.json`, and `mcp-tool-call-preflight.json`, and reports run id, task id, worker, proposal status, `ready_for_approval`, proposal hash, proposal id, server, tool, preflight status, and proposal path. It never prints raw arguments or environment values.
 
-`mcp proposals show` loads the proposal plus lint/preflight artifacts for one run and prints a sanitized summary with `arguments_sha256`, violations, warnings, preflight failures, and suggested manual commands for `mcp proposal approve` and `mcp proposal execute`. Raw arguments are omitted in text and JSON output.
+`mcp proposals show` loads the proposal plus lint/preflight artifacts for one run and prints a sanitized summary with `proposal_path`, `lint_path`, `preflight_path`, `proposal_status`, `proposal_sha256`, `arguments_sha256`, `ready_for_approval`, violations, warnings, and preflight failures. When the proposal is parseable and was not refused, show may also print suggested manual commands for `mcp proposal approve` and `mcp proposal execute`. Suggested execute commands always include an explicit `--config` value or `<mcp.yaml>` placeholder because execute requires MCP config. Docker runtime config remains on the proposal JSON (`runtime_config_path`) because execute reads it from the proposal file rather than a separate CLI flag. Raw arguments are omitted in text and JSON output.
 
-`mcp proposals export` copies the run proposal artifact to a chosen path without modifying, approving, or executing it.
+`ready_for_approval` is `true` only when:
+
+- `proposal_status == preflight_passed`
+- no worker approval artifact was refused
+- the proposal parses successfully
+- `server` and `tool` are present
+
+`mcp proposals export` copies the run proposal artifact to a chosen path without modifying, approving, or executing it. After export it prints `exported_proposal_sha256` and a `next_step_hint` for manual preflight, approval, or execute.
 
 If a worker emitted an MCP approval artifact, list/show mark the entry as `refused`.
 

@@ -6326,6 +6326,9 @@ func TestRunMCPProposalsListShowExportJSON(t *testing.T) {
 	if !strings.Contains(showStdout.String(), "mcp proposal approve") || !strings.Contains(showStdout.String(), "mcp proposal execute") {
 		t.Fatalf("show stdout = %s, want suggested commands", showStdout.String())
 	}
+	if !strings.Contains(showStdout.String(), `"ready_for_approval": true`) {
+		t.Fatalf("show stdout = %s, want ready_for_approval true", showStdout.String())
+	}
 
 	exportPath := filepath.Join(tempDir, "exported.json")
 	var exportStdout bytes.Buffer
@@ -6336,6 +6339,12 @@ func TestRunMCPProposalsListShowExportJSON(t *testing.T) {
 	}
 	if string(readCLIFile(t, exportPath)) != string(readCLIFile(t, proposalPath)) {
 		t.Fatalf("exported proposal differs from source artifact")
+	}
+	if !strings.Contains(exportStdout.String(), "exported_proposal_sha256:") {
+		t.Fatalf("export stdout = %s, want exported_proposal_sha256", exportStdout.String())
+	}
+	if !strings.Contains(exportStdout.String(), "next_step_hint:") {
+		t.Fatalf("export stdout = %s, want next_step_hint", exportStdout.String())
 	}
 }
 
