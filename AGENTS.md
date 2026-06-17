@@ -74,6 +74,7 @@ Implemented:
 - MCP real read-only discovery smoke with policy scaffold, Docker-gated for real servers
 - MCP real read-only call-smoke with explicit policy, split fake/real policy examples, artifact leak scanning, and one Docker-gated tool call
 - MCP read-only tool call proposal/preflight/approval workflow reusing call-smoke execution, with stale-hash checks and execution bundle
+- MCP passive context attachments for runner prompts from audited discovery/call artifacts, without worker tool execution
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -83,7 +84,7 @@ Not implemented yet:
 
 - real fallback execution/retry
 - Codex Docker worker execution
-- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, and explicit proposal approval workflow with execution bundle only
+- MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, explicit proposal approval workflow with execution bundle, and passive context attachments only
 - memory index/LanceDB
 - UI/dashboard
 

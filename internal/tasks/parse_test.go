@@ -183,6 +183,50 @@ definition_of_done:
 	}
 }
 
+func TestParseMCPContext(t *testing.T) {
+	task, err := Parse([]byte(`id: mcp-context-task-001
+title: MCP context task
+domain: general
+worker: codex
+goal: Run with passive MCP context
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+mcp_context:
+  attachments:
+    - name: " filesystem-discovery "
+      kind: " discovery "
+      path: " artifacts/mcp-discovery/mcp-tools-list.json "
+    - name: filesystem-call
+      kind: call
+      path: artifacts/mcp-call-smoke/mcp-call-execution-bundle.json
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - MCP context is passive
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+	if len(task.MCPContext.Attachments) != 2 {
+		t.Fatalf("len(mcp_context.attachments) = %d, want 2", len(task.MCPContext.Attachments))
+	}
+	if task.MCPContext.Attachments[0].Name != "filesystem-discovery" ||
+		task.MCPContext.Attachments[0].Kind != "discovery" ||
+		task.MCPContext.Attachments[0].Path != "artifacts/mcp-discovery/mcp-tools-list.json" {
+		t.Fatalf("first attachment = %#v, want normalized discovery attachment", task.MCPContext.Attachments[0])
+	}
+	if err := Validate(task); err != nil {
+		t.Fatalf("Validate() error = %v", err)
+	}
+}
+
 func TestLoadCodexSmokeExample(t *testing.T) {
 	path := filepath.Join("..", "..", "..", "examples", "tasks", "codex-smoke.yaml")
 	if _, err := os.Stat(path); err != nil {

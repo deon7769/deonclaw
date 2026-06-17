@@ -15,6 +15,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/contextpack"
 	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/git"
+	"github.com/deon7769/deonclaw/internal/mcpcontext"
 	"github.com/deon7769/deonclaw/internal/policy"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
@@ -124,11 +125,25 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		}
 		contextPackMarkdown = pack.Markdown()
 		contextPackWarnings = append(contextPackWarnings, pack.Warnings...)
-		prompt = fmt.Sprintf("# Task Goal\n%s\n\n# Context Pack\n%s", task.Goal, contextPackMarkdown)
 		timeline.Mark("context_pack_built")
 	} else {
 		timeline.MarkStatus("context_pack_built", "skipped")
 	}
+	var mcpContextMarkdown []byte
+	var mcpContextCount int
+	if len(task.MCPContext.Attachments) > 0 {
+		mcpContext, err := mcpcontext.Load(task.MCPContext)
+		if err != nil {
+			fmt.Fprintf(stderr, "mcp context failed: %v\n", err)
+			return 1
+		}
+		mcpContextMarkdown = mcpContext.Markdown()
+		mcpContextCount = mcpContext.Count()
+		timeline.Mark("mcp_context_loaded")
+	} else {
+		timeline.MarkStatus("mcp_context_loaded", "skipped")
+	}
+	prompt = buildRunnerPrompt(task.Goal, contextPackMarkdown, mcpContextMarkdown)
 
 	runID := r.RunIDFactory()
 	runDir := filepath.Join(opts.ArtifactsDir, runID)
@@ -209,9 +224,10 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 	}
 
 	worker := r.WorkerFactory()
+	workerTask := taskForWorker(task)
 	timeline.Mark("worker_started")
 	result, runErr := runWorkerWithRuntime(ctx, worker, workers.RunSpec{
-		Task:      task,
+		Task:      workerTask,
 		Workspace: workspace,
 		Prompt:    prompt,
 	}, workerRuntime, opts.RuntimeConfig)
@@ -317,6 +333,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		FinishedAt:          finishedAt,
 		Prompt:              prompt,
 		ContextPackMarkdown: contextPackMarkdown,
+		MCPContextMarkdown:  mcpContextMarkdown,
 		MemoryPolicyPath:    opts.MemoryPolicyPath,
 		RuntimeConfigPath:   opts.RuntimeConfigPath,
 		EnvRequirements:     opts.EnvRequirements,
@@ -328,7 +345,7 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		Cleanup:             cleanup,
 		Timeline:            timeline.Events(),
 	}
-	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, memoryProposalCheck, trace, finishedAt)
+	runArtifacts, err := writeCodexRunArtifacts(workerName, runDir, runID, task, result, runRecord.Status, runErr, policySummary, len(changedPaths), cleanup, diffPatch, changedFiles, validationResult, contextPackMarkdown, contextPackWarnings, mcpContextMarkdown, mcpContextCount, memoryProposalCheck, trace, finishedAt)
 	if err != nil {
 		fmt.Fprintf(stderr, "write artifacts failed: %v\n", err)
 		return 1
@@ -390,6 +407,40 @@ func resolveValidationRunner(defaultRunner ValidationRunner, overrideRuntime str
 	default:
 		return nil, "", fmt.Errorf("validation.runtime %q is not supported", runtimeName)
 	}
+}
+
+func taskForWorker(task *tasks.Task) *tasks.Task {
+	if task == nil {
+		return nil
+	}
+	copied := *task
+	copied.MCPContext = tasks.MCPContextSpec{}
+	return &copied
+}
+
+func buildRunnerPrompt(goal string, contextPackMarkdown []byte, mcpContextMarkdown []byte) string {
+	if len(contextPackMarkdown) == 0 && len(mcpContextMarkdown) == 0 {
+		return ""
+	}
+	var builder strings.Builder
+	builder.WriteString("# Task Goal\n")
+	builder.WriteString(goal)
+	builder.WriteString("\n")
+	if len(contextPackMarkdown) > 0 {
+		builder.WriteString("\n# Context Pack\n")
+		builder.Write(contextPackMarkdown)
+		if !strings.HasSuffix(string(contextPackMarkdown), "\n") {
+			builder.WriteByte('\n')
+		}
+	}
+	if len(mcpContextMarkdown) > 0 {
+		builder.WriteByte('\n')
+		builder.Write(mcpContextMarkdown)
+		if !strings.HasSuffix(string(mcpContextMarkdown), "\n") {
+			builder.WriteByte('\n')
+		}
+	}
+	return builder.String()
 }
 
 func (r CodexRunner) withDefaults() CodexRunner {

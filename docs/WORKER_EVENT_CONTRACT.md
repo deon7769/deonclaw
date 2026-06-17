@@ -96,6 +96,7 @@ The shared runner writes the standard run artifact set:
 - execution-trace.json
 - artifact-manifest.json
 - context-pack.md, when --domains is used
+- mcp-context.md, when task.mcp_context attachments are configured
 - memory-proposal-lint.json, when --memory-policy produces a lint artifact
 
 Worker artifacts with names owned by the CLI are not duplicated. Additional worker artifacts are preserved with unique names.
@@ -114,6 +115,7 @@ The trace is an audit artifact for the runner lifecycle. It records:
 - command_display with the prompt masked as `<prompt>`
 - prompt_sha256 instead of raw prompt text
 - context_pack_sha256 when `--domains` built a context pack
+- mcp_context_sha256 when the task attached audited MCP context
 - memory_policy_sha256 when `--memory-policy` was configured and readable
 - worker_runtime as `local` or `docker`
 - validation_runtime as `local` or `docker`
@@ -125,6 +127,8 @@ The trace is an audit artifact for the runner lifecycle. It records:
 - timeline entries for task load/validation, profile and env checks, context pack build, workspace preparation, worker start/finish, validation, diff, path policy, artifact writing, and workspace cleanup
 
 The trace must not contain raw prompts, raw runtime config content, or environment variable values. Environment variable names can appear because they are part of the requirement contract and Docker env passthrough allowlist; values must not.
+
+Task `mcp_context.attachments` is passive context only. The shared runner validates referenced discovery/call artifacts before worker execution, writes `mcp-context.md`, appends a summarized `# MCP Context Attachments` section to the prompt, and records `mcp_context_sha256`. Workers do not receive permission to start MCP servers or call MCP tools, and the runner passes a sanitized task copy to workers without MCP attachment paths. Raw MCP transcripts and raw tool responses are not included in prompts by default.
 
 Task `model_strategy` is controlled selection metadata in the current OpenCode contract. Dry-run resolves it, selects `preferred[0]` as `planned_model_profile`, and can show an OpenCode `--model` command when that planned profile defines `model_arg`. Real OpenCode runs select `preferred[0]` as `selected_model_profile`, record `model_strategy: selected`, reuse `model_profile` for run report grouping, add `--model <model_arg>` when defined, and validate env requirements from the selected profile before worker execution.
 

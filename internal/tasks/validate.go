@@ -95,6 +95,20 @@ func Validate(task *Task) error {
 			errs = append(errs, fmt.Errorf("%s.timeout_seconds must not be negative", prefix))
 		}
 	}
+	for i, attachment := range task.MCPContext.Attachments {
+		prefix := fmt.Sprintf("mcp_context.attachments[%d]", i)
+		if strings.TrimSpace(attachment.Name) == "" {
+			errs = append(errs, fmt.Errorf("%s.name is required", prefix))
+		}
+		switch strings.TrimSpace(attachment.Kind) {
+		case "discovery", "call":
+		default:
+			errs = append(errs, fmt.Errorf("%s.kind %q is not supported", prefix, attachment.Kind))
+		}
+		if strings.TrimSpace(attachment.Path) == "" {
+			errs = append(errs, fmt.Errorf("%s.path is required", prefix))
+		}
+	}
 	if len(task.ForbiddenPaths) == 0 {
 		errs = append(errs, errors.New("forbidden_paths must not be empty"))
 	}

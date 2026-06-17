@@ -1,0 +1,28 @@
+id: mcp-context-attachment-001
+title: "MCP context attachment example"
+domain: general
+worker: codex
+goal: "Use the attached MCP discovery and approved call summaries as passive context only."
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+mcp_context:
+  attachments:
+    - name: filesystem-discovery
+      kind: discovery
+      path: artifacts/mcp-discovery/mcp-tools-list.json
+    - name: filesystem-call
+      kind: call
+      path: artifacts/mcp-call-smoke/mcp-call-execution-bundle.json
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - Worker received MCP context summaries only
+  - No MCP server was started by the worker
+  - No MCP tool was called by the worker

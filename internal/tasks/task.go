@@ -12,6 +12,7 @@ type Task struct {
 	Workspace        WorkspaceSpec  `yaml:"workspace" json:"workspace"`
 	Memory           MemorySpec     `yaml:"memory" json:"memory"`
 	Validation       ValidationSpec `yaml:"validation" json:"validation"`
+	MCPContext       MCPContextSpec `yaml:"mcp_context,omitempty" json:"mcp_context,omitempty"`
 	AllowedPaths     []string       `yaml:"allowed_paths" json:"allowed_paths"`
 	ForbiddenPaths   []string       `yaml:"forbidden_paths" json:"forbidden_paths"`
 	ExpectedOutputs  []string       `yaml:"expected_outputs" json:"expected_outputs"`
@@ -51,4 +52,14 @@ type ValidationCommand struct {
 	Command        string   `yaml:"command" json:"command"`
 	Args           []string `yaml:"args" json:"args"`
 	TimeoutSeconds int      `yaml:"timeout_seconds" json:"timeout_seconds"`
+}
+
+type MCPContextSpec struct {
+	Attachments []MCPContextAttachment `yaml:"attachments,omitempty" json:"attachments,omitempty"`
+}
+
+type MCPContextAttachment struct {
+	Name string `yaml:"name" json:"name"`
+	Kind string `yaml:"kind" json:"kind"`
+	Path string `yaml:"path" json:"path"`
 }

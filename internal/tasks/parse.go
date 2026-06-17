@@ -49,6 +49,11 @@ func normalize(task *Task) {
 		task.Validation.Commands[i].Name = strings.TrimSpace(task.Validation.Commands[i].Name)
 		task.Validation.Commands[i].Command = strings.TrimSpace(task.Validation.Commands[i].Command)
 	}
+	for i := range task.MCPContext.Attachments {
+		task.MCPContext.Attachments[i].Name = strings.TrimSpace(task.MCPContext.Attachments[i].Name)
+		task.MCPContext.Attachments[i].Kind = strings.TrimSpace(task.MCPContext.Attachments[i].Kind)
+		task.MCPContext.Attachments[i].Path = strings.TrimSpace(task.MCPContext.Attachments[i].Path)
+	}
 }
 
 func normalizeStringList(values []string) []string {

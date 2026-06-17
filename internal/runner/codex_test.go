@@ -327,6 +327,201 @@ func TestCodexRunnerRunWithGeneralContextPack(t *testing.T) {
 	assertPersistedArtifactWithMetadata(t, db, "run-general-context-001", contextPath)
 }
 
+func TestCodexRunnerRunWithMCPDiscoveryContextAttachment(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	discoveryPath := writeRunnerMCPAttachment(t, tempDir, "mcp-tools-list.json", `{
+  "tool_count": 1,
+  "tool_names": ["fs.read"],
+  "tools": [{"name":"fs.read","description":"super-secret-value"}]
+}`)
+	taskPath := writeTaskFileWithMCPContext(t, "codex", []tasks.MCPContextAttachment{{
+		Name: "filesystem-discovery",
+		Kind: "discovery",
+		Path: discoveryPath,
+	}})
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-mcp-discovery-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if len(spec.Task.MCPContext.Attachments) != 0 {
+						t.Fatalf("worker received MCP context attachment paths: %#v", spec.Task.MCPContext.Attachments)
+					}
+					if !strings.Contains(spec.Prompt, "# MCP Context Attachments") ||
+						!strings.Contains(spec.Prompt, "name: filesystem-discovery") ||
+						!strings.Contains(spec.Prompt, "tool_count: 1") ||
+						!strings.Contains(spec.Prompt, "fs.read") {
+						t.Fatalf("prompt = %q, want passive discovery MCP summary", spec.Prompt)
+					}
+					if strings.Contains(spec.Prompt, "super-secret-value") {
+						t.Fatalf("prompt leaked raw MCP attachment content: %q", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     taskPath,
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-mcp-discovery-context-001")
+	mcpContextPath := filepath.Join(runDir, "mcp-context.md")
+	assertFileContains(t, mcpContextPath, "# MCP Context Attachments")
+	assertFileContains(t, mcpContextPath, "tool_count: 1")
+	assertFileNotContains(t, mcpContextPath, "super-secret-value")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP context attachments: 1")
+	assertArtifactManifestContains(t, filepath.Join(runDir, "artifact-manifest.json"), mcpContextPath, artifacts.KindOther)
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceNonEmptyString(t, trace, "mcp_context_sha256")
+}
+
+func TestCodexRunnerRunWithMCPCallContextAttachment(t *testing.T) {
+	tempDir := t.TempDir()
+	storePath := filepath.Join(tempDir, "deonclaw.db")
+	artifactsDir := filepath.Join(tempDir, "artifacts")
+	bundlePath := writeRunnerMCPAttachment(t, tempDir, "mcp-call-execution-bundle.json", runnerCallBundleJSON(`"preflight_status":"passed",
+  "status":"succeeded",
+  "tool_calls":1,
+  "response_truncated":true,
+  "response_preview":"super-secret-value"`))
+	taskPath := writeTaskFileWithMCPContext(t, "codex", []tasks.MCPContextAttachment{{
+		Name: "filesystem-call",
+		Kind: "call",
+		Path: bundlePath,
+	}})
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-mcp-call-context-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if len(spec.Task.MCPContext.Attachments) != 0 {
+						t.Fatalf("worker received MCP context attachment paths: %#v", spec.Task.MCPContext.Attachments)
+					}
+					if !strings.Contains(spec.Prompt, "server: filesystem-readonly") ||
+						!strings.Contains(spec.Prompt, "tool: fs.read") ||
+						!strings.Contains(spec.Prompt, "tool_calls: 1") ||
+						!strings.Contains(spec.Prompt, "response_truncated: true") ||
+						!strings.Contains(spec.Prompt, "mcp-call-response.json") {
+						t.Fatalf("prompt = %q, want passive call bundle summary", spec.Prompt)
+					}
+					if strings.Contains(spec.Prompt, "super-secret-value") || strings.Contains(spec.Prompt, "response_preview") {
+						t.Fatalf("prompt leaked raw MCP call payload: %q", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     taskPath,
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	runDir := filepath.Join(artifactsDir, "run-mcp-call-context-001")
+	mcpContextPath := filepath.Join(runDir, "mcp-context.md")
+	assertFileContains(t, mcpContextPath, "status: succeeded")
+	assertFileContains(t, mcpContextPath, "preflight_status: passed")
+	assertFileContains(t, mcpContextPath, "tool_calls: 1")
+	assertFileNotContains(t, mcpContextPath, "super-secret-value")
+	assertFileContains(t, filepath.Join(runDir, "summary.md"), "MCP context attachments: 1")
+	trace := readExecutionTrace(t, filepath.Join(runDir, "execution-trace.json"))
+	assertTraceNonEmptyString(t, trace, "mcp_context_sha256")
+}
+
+func TestCodexRunnerRunRejectsInvalidMCPContextBeforeWorker(t *testing.T) {
+	tests := []struct {
+		name    string
+		path    string
+		content string
+		wantErr string
+	}{
+		{
+			name:    "missing path",
+			path:    filepath.Join(t.TempDir(), "missing.json"),
+			wantErr: "no such file",
+		},
+		{
+			name: "failed bundle",
+			content: runnerCallBundleJSON(`"preflight_status":"passed",
+  "status":"failed",
+  "tool_calls":1`),
+			wantErr: "status",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tempDir := t.TempDir()
+			attachmentPath := tt.path
+			if tt.content != "" {
+				attachmentPath = writeRunnerMCPAttachment(t, tempDir, "bundle.json", tt.content)
+			}
+			taskPath := writeTaskFileWithMCPContext(t, "codex", []tasks.MCPContextAttachment{{
+				Name: "filesystem-call",
+				Kind: "call",
+				Path: attachmentPath,
+			}})
+			workerCalled := false
+			runner := testCodexRunner(t, testCodexRunnerOptions{
+				RunID: "run-invalid-mcp-context-001",
+				WorkerFactory: func() workers.Worker {
+					return fakeWorker{
+						runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+							workerCalled = true
+							return &workers.RunResult{}, nil
+						},
+					}
+				},
+			})
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+			code := runner.Run(context.Background(), CodexRunOptions{
+				TaskPath:     taskPath,
+				StorePath:    filepath.Join(tempDir, "deonclaw.db"),
+				ArtifactsDir: filepath.Join(tempDir, "artifacts"),
+			}, &stdout, &stderr)
+			if code != 1 {
+				t.Fatalf("Run() exit code = %d, want 1", code)
+			}
+			if workerCalled {
+				t.Fatal("worker was called for invalid MCP context")
+			}
+			if !strings.Contains(stderr.String(), "mcp context failed") || !strings.Contains(stderr.String(), tt.wantErr) {
+				t.Fatalf("stderr = %q, want MCP context failure containing %q", stderr.String(), tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestCodexRunnerRunWithEscalasoftContextPack(t *testing.T) {
 	tempDir := t.TempDir()
 	storePath := filepath.Join(tempDir, "deonclaw.db")
@@ -1931,6 +2126,70 @@ expected_outputs:
 definition_of_done:
   - context pack is available
 `)
+}
+
+func writeTaskFileWithMCPContext(t *testing.T, worker string, attachments []tasks.MCPContextAttachment) string {
+	t.Helper()
+	var builder strings.Builder
+	builder.WriteString(`id: mcp-context-task-001
+title: "MCP context task"
+domain: general
+worker: ` + worker + `
+goal: "Use attached MCP context passively"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+mcp_context:
+  attachments:
+`)
+	for _, attachment := range attachments {
+		builder.WriteString("    - name: " + attachment.Name + "\n")
+		builder.WriteString("      kind: " + attachment.Kind + "\n")
+		builder.WriteString("      path: " + filepath.ToSlash(attachment.Path) + "\n")
+	}
+	builder.WriteString(`allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - MCP context is attached passively
+`)
+	return writeTaskFileContent(t, builder.String())
+}
+
+func writeRunnerMCPAttachment(t *testing.T, dir string, name string, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write MCP attachment: %v", err)
+	}
+	return path
+}
+
+func runnerCallBundleJSON(fields string) string {
+	return `{
+  "proposal_id":"proposal-001",
+  "approval_sha256":"approval-hash",
+  "proposal_sha256":"proposal-hash",
+  "policy_sha256":"policy-hash",
+  "server":"filesystem-readonly",
+  "tool":"fs.read",
+  "arguments_sha256":"arguments-hash",
+  "runtime":"docker",
+  ` + fields + `,
+  "artifacts":{
+    "mcp-call-smoke-summary.md":"artifacts/mcp-call-smoke-summary.md",
+    "mcp-call-transcript.jsonl":"artifacts/mcp-call-transcript.jsonl",
+    "mcp-call-result.json":"artifacts/mcp-call-result.json",
+    "mcp-call-stdout.log":"artifacts/mcp-call-stdout.log",
+    "mcp-call-stderr.log":"artifacts/mcp-call-stderr.log",
+    "mcp-call-response.json":"artifacts/mcp-call-response.json"
+  }
+}`
 }
 
 func writeDomainsConfigWithBridge(t *testing.T, bridgePath string) string {

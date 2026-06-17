@@ -42,6 +42,7 @@ type executionTraceOptions struct {
 	FinishedAt          time.Time
 	Prompt              string
 	ContextPackMarkdown []byte
+	MCPContextMarkdown  []byte
 	MemoryPolicyPath    string
 	RuntimeConfigPath   string
 	EnvRequirements     []workerconfig.EnvRequirementCheck
@@ -67,6 +68,7 @@ type executionTrace struct {
 	CommandDisplay       string                             `json:"command_display"`
 	PromptSHA256         string                             `json:"prompt_sha256"`
 	ContextPackSHA256    string                             `json:"context_pack_sha256,omitempty"`
+	MCPContextSHA256     string                             `json:"mcp_context_sha256,omitempty"`
 	MemoryPolicySHA256   string                             `json:"memory_policy_sha256,omitempty"`
 	RuntimeConfigSHA256  string                             `json:"runtime_config_sha256,omitempty"`
 	EnvRequirements      []workerconfig.EnvRequirementCheck `json:"env_requirements"`
@@ -190,6 +192,9 @@ func executionTraceJSON(opts executionTraceOptions) ([]byte, error) {
 	}
 	if len(opts.ContextPackMarkdown) > 0 {
 		trace.ContextPackSHA256 = sha256Hex(opts.ContextPackMarkdown)
+	}
+	if len(opts.MCPContextMarkdown) > 0 {
+		trace.MCPContextSHA256 = sha256Hex(opts.MCPContextMarkdown)
 	}
 	if hash := fileSHA256IfReadable(opts.MemoryPolicyPath); hash != "" {
 		trace.MemoryPolicySHA256 = hash

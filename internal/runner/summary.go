@@ -9,7 +9,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/workers"
 )
 
-func codexRunSummary(workerName string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, workerRuntime string, contextPackWarnings []string, memoryProposal memoryProposalCheck, artifactCount int) []byte {
+func codexRunSummary(workerName string, runID string, task *tasks.Task, result *workers.RunResult, status runs.RunStatus, runErr error, policySummary string, changedPathCount int, cleanup workspaceCleanup, validation ValidationResult, workerRuntime string, contextPackWarnings []string, mcpContextCount int, memoryProposal memoryProposalCheck, artifactCount int) []byte {
 	workspace := result.Workspace
 	if workspace == "" {
 		workspace = task.Workspace.Path
@@ -49,6 +49,9 @@ func codexRunSummary(workerName string, runID string, task *tasks.Task, result *
 	}
 	if workerName == "opencode" {
 		lines = append(lines, opencodeStdoutSummaryLines(result)...)
+	}
+	if mcpContextCount > 0 {
+		lines = append(lines, fmt.Sprintf("MCP context attachments: %d", mcpContextCount))
 	}
 	lines = appendSmallDetails(lines, "Memory proposal violation", memoryProposal.Violations)
 	lines = appendSmallDetails(lines, "Memory proposal warning", memoryProposal.Warnings)
