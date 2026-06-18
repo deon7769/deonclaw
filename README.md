@@ -100,6 +100,7 @@ Implemented:
 - LanceDB search-smoke result QA/report (`memory lancedb search-report`) over search artifacts, without new search or runner integration
 - passive LanceDB retrieval context attachment in runner (`retrieval_context` on tasks), without runner search or chunk text injection
 - retrieval context inspect and runs retrieval-report for passive attachment auditing, without active search
+- governed retrieval context chunk text materialize (`retrieval context materialize`), without runner auto-injection
 
 Not implemented yet:
 

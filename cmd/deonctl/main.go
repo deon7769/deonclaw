@@ -111,6 +111,7 @@ Usage:
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
+  deonctl retrieval context materialize --retrieval-context <retrieval-context.json> --chunks <memory-index-chunks.jsonl> --output <materialized.json> --summary <materialized.md> --max-chars-per-chunk <n> --max-total-chars <n> --confirm-include-chunk-text
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -873,6 +874,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextInspect(opts, stdout, stderr)
+			case "materialize":
+				opts, err := parseRetrievalContextMaterializeOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextMaterialize(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -6847,6 +6856,118 @@ func runRetrievalContextInspect(opts retrievalContextInspectOptions, stdout io.W
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
 	}
+	return 0
+}
+
+type retrievalContextMaterializeOptions struct {
+	retrievalContextPath    string
+	chunksPath              string
+	outputPath              string
+	summaryPath             string
+	maxCharsPerChunk        int
+	maxTotalChars           int
+	confirmIncludeChunkText bool
+}
+
+func parseRetrievalContextMaterializeOptions(args []string) (retrievalContextMaterializeOptions, error) {
+	opts := retrievalContextMaterializeOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--retrieval-context":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("missing value for --retrieval-context")
+			}
+			opts.retrievalContextPath = args[i+1]
+			i++
+		case "--chunks":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("missing value for --chunks")
+			}
+			opts.chunksPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--summary":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("missing value for --summary")
+			}
+			opts.summaryPath = args[i+1]
+			i++
+		case "--max-chars-per-chunk":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("missing value for --max-chars-per-chunk")
+			}
+			value, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("invalid --max-chars-per-chunk %q", args[i+1])
+			}
+			opts.maxCharsPerChunk = value
+			i++
+		case "--max-total-chars":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("missing value for --max-total-chars")
+			}
+			value, err := strconv.Atoi(args[i+1])
+			if err != nil {
+				return retrievalContextMaterializeOptions{}, fmt.Errorf("invalid --max-total-chars %q", args[i+1])
+			}
+			opts.maxTotalChars = value
+			i++
+		case "--confirm-include-chunk-text":
+			opts.confirmIncludeChunkText = true
+		default:
+			return retrievalContextMaterializeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.retrievalContextPath == "" {
+		return retrievalContextMaterializeOptions{}, fmt.Errorf("missing --retrieval-context")
+	}
+	if opts.chunksPath == "" {
+		return retrievalContextMaterializeOptions{}, fmt.Errorf("missing --chunks")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextMaterializeOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.summaryPath == "" {
+		return retrievalContextMaterializeOptions{}, fmt.Errorf("missing --summary")
+	}
+	if opts.maxCharsPerChunk <= 0 {
+		return retrievalContextMaterializeOptions{}, fmt.Errorf("missing or invalid --max-chars-per-chunk")
+	}
+	if opts.maxTotalChars <= 0 {
+		return retrievalContextMaterializeOptions{}, fmt.Errorf("missing or invalid --max-total-chars")
+	}
+	if !opts.confirmIncludeChunkText {
+		return retrievalContextMaterializeOptions{}, fmt.Errorf("missing --confirm-include-chunk-text")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextMaterialize(opts retrievalContextMaterializeOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.Materialize(retrievalcontext.MaterializeOptions{
+		RetrievalContextPath:    opts.retrievalContextPath,
+		ChunksPath:              opts.chunksPath,
+		OutputPath:              opts.outputPath,
+		SummaryPath:             opts.summaryPath,
+		MaxCharsPerChunk:        opts.maxCharsPerChunk,
+		MaxTotalChars:           opts.maxTotalChars,
+		ConfirmIncludeChunkText: opts.confirmIncludeChunkText,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context materialize failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context materialize: ok")
+	fmt.Fprintf(stdout, "status: %s\n", result.Status)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "summary: %s\n", opts.summaryPath)
+	fmt.Fprintf(stdout, "included_chunk_count: %d\n", result.IncludedChunkCount)
+	fmt.Fprintf(stdout, "omitted_chunk_count: %d\n", result.OmittedChunkCount)
+	fmt.Fprintf(stdout, "total_chars_included: %d\n", result.TotalCharsIncluded)
 	return 0
 }
 
