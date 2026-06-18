@@ -124,6 +124,7 @@ Usage:
   deonctl retrieval context injection-approval approve --request <retrieval-context-injection-approval-request.json> --output <retrieval-context-injection-approval.json> --confirm-allow-runner-injection
   deonctl retrieval context injection-approval inspect --approval <retrieval-context-injection-approval.json> [--request <retrieval-context-injection-approval-request.json>] [--output-format text|json]
   deonctl retrieval context injection-execution-plan --policy <retrieval-injection-policy.yaml> --governance-report <retrieval-context-governance-report.json> --injection-approval <retrieval-context-injection-approval.json> --injection-approval-request <retrieval-context-injection-approval-request.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-injection-execution-plan.json> --summary <retrieval-context-injection-execution-plan.md>
+  deonctl retrieval context prompt-preview --execution-plan <retrieval-context-injection-execution-plan.json> --policy <retrieval-injection-policy.yaml> --materialized <retrieval-context-materialized.json> --output <retrieval-context-prompt-preview.md> --manifest <retrieval-context-prompt-preview.json> --confirm-render-materialized-context
   deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1013,6 +1014,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextInjectionExecutionPlan(opts, stdout, stderr)
+			case "prompt-preview":
+				opts, err := parseRetrievalContextPromptPreviewOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextPromptPreview(opts, stdout, stderr)
 			case "injection-plan":
 				opts, err := parseRetrievalContextInjectionPlanOptions(args[3:])
 				if err != nil {
@@ -7634,6 +7643,100 @@ func runRetrievalContextInjectionExecutionPlan(opts retrievalContextInjectionExe
 	fmt.Fprintf(stdout, "reason: %s\n", result.Reason)
 	fmt.Fprintf(stdout, "total_chars_included: %d\n", result.TotalCharsIncluded)
 	fmt.Fprintf(stdout, "required_future_flag: %s\n", result.RequiredFutureFlag)
+	return 0
+}
+
+type retrievalContextPromptPreviewOptions struct {
+	executionPlanPath                string
+	policyPath                       string
+	materializedPath                 string
+	outputPath                       string
+	manifestPath                     string
+	confirmRenderMaterializedContext bool
+}
+
+func parseRetrievalContextPromptPreviewOptions(args []string) (retrievalContextPromptPreviewOptions, error) {
+	opts := retrievalContextPromptPreviewOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--execution-plan":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing value for --execution-plan")
+			}
+			opts.executionPlanPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--materialized":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing value for --materialized")
+			}
+			opts.materializedPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--manifest":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing value for --manifest")
+			}
+			opts.manifestPath = args[i+1]
+			i++
+		case "--confirm-render-materialized-context":
+			opts.confirmRenderMaterializedContext = true
+		default:
+			return retrievalContextPromptPreviewOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.executionPlanPath == "" {
+		return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing --execution-plan")
+	}
+	if opts.policyPath == "" {
+		return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.materializedPath == "" {
+		return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing --materialized")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.manifestPath == "" {
+		return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing --manifest")
+	}
+	if !opts.confirmRenderMaterializedContext {
+		return retrievalContextPromptPreviewOptions{}, fmt.Errorf("missing --confirm-render-materialized-context")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextPromptPreview(opts retrievalContextPromptPreviewOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.PromptPreview(retrievalcontext.PromptPreviewOptions{
+		ExecutionPlanPath:                opts.executionPlanPath,
+		PolicyPath:                       opts.policyPath,
+		MaterializedPath:                 opts.materializedPath,
+		OutputPath:                       opts.outputPath,
+		ManifestPath:                     opts.manifestPath,
+		ConfirmRenderMaterializedContext: opts.confirmRenderMaterializedContext,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context prompt-preview failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context prompt-preview: ok")
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "manifest: %s\n", opts.manifestPath)
+	fmt.Fprintf(stdout, "contains_text: %t\n", result.Manifest.ContainsText)
+	fmt.Fprintf(stdout, "preview_only: %t\n", result.Manifest.PreviewOnly)
+	fmt.Fprintf(stdout, "runner_execution: %t\n", result.Manifest.RunnerExecution)
+	fmt.Fprintf(stdout, "total_chars_rendered: %d\n", result.Manifest.TotalCharsRendered)
+	fmt.Fprintf(stdout, "chunk_count: %d\n", result.Manifest.ChunkCount)
 	return 0
 }
 

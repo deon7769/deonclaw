@@ -8101,6 +8101,8 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 		injectionApprovalPath        = "retrieval-context-injection-approval.json"
 		executionPlanPath            = "retrieval-context-injection-execution-plan.json"
 		executionPlanSummary         = "retrieval-context-injection-execution-plan.md"
+		previewOutputPath            = "retrieval-context-prompt-preview.md"
+		previewManifestPath          = "retrieval-context-prompt-preview.json"
 	)
 
 	steps := [][]string{
@@ -8300,6 +8302,37 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	executionSummaryData := readFixtureFileString(t, filepath.Join(dir, executionPlanSummary))
 	if strings.Contains(executionSummaryData, "text_excerpt") || strings.Contains(executionSummaryData, "alpha text") {
 		t.Fatal("execution plan summary must not contain materialized text")
+	}
+
+	var previewStdout, previewStderr bytes.Buffer
+	previewCode := run([]string{
+		"retrieval", "context", "prompt-preview",
+		"--execution-plan", executionPlanPath,
+		"--policy", injectionPolicyPath,
+		"--materialized", materializedPath,
+		"--output", previewOutputPath,
+		"--manifest", previewManifestPath,
+		"--confirm-render-materialized-context",
+	}, &previewStdout, &previewStderr)
+	if previewCode != 0 {
+		t.Fatalf("prompt-preview exit=%d stderr=%q stdout=%q", previewCode, previewStderr.String(), previewStdout.String())
+	}
+	if !strings.Contains(previewStdout.String(), "preview_only: true") {
+		t.Fatalf("prompt-preview stdout = %q, want preview_only true", previewStdout.String())
+	}
+	if !strings.Contains(previewStdout.String(), "runner_execution: false") {
+		t.Fatalf("prompt-preview stdout = %q, want runner_execution false", previewStdout.String())
+	}
+	previewData := readFixtureFileString(t, filepath.Join(dir, previewOutputPath))
+	if !strings.Contains(previewData, "text_excerpt:") {
+		t.Fatal("prompt preview must contain text_excerpt content")
+	}
+	manifestData := readFixtureFileString(t, filepath.Join(dir, previewManifestPath))
+	if strings.Contains(manifestData, "text_excerpt") {
+		t.Fatal("prompt preview manifest must not contain text_excerpt")
+	}
+	if !strings.Contains(manifestData, `"contains_text": true`) || !strings.Contains(manifestData, `"preview_only": true`) {
+		t.Fatalf("manifest = %q, want contains_text and preview_only true", manifestData)
 	}
 }
 

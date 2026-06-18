@@ -266,6 +266,46 @@ func assertFixtureInjectionExecutionPlanE2E(t *testing.T, governance retrievalco
 	for _, path := range []string{executionPlanPath, executionPlanSummary} {
 		assertNoTextExcerpt(t, path)
 	}
+
+	assertFixturePromptPreviewE2E(t, policyName, materializedPath, executionPlanPath)
+}
+
+func assertFixturePromptPreviewE2E(t *testing.T, policyName, materializedPath, executionPlanPath string) {
+	t.Helper()
+	const (
+		previewOutputPath   = "retrieval-context-prompt-preview.md"
+		previewManifestPath = "retrieval-context-prompt-preview.json"
+	)
+
+	result, err := retrievalcontext.PromptPreview(retrievalcontext.PromptPreviewOptions{
+		ExecutionPlanPath:                executionPlanPath,
+		PolicyPath:                       policyName,
+		MaterializedPath:                 materializedPath,
+		OutputPath:                       previewOutputPath,
+		ManifestPath:                     previewManifestPath,
+		ConfirmRenderMaterializedContext: true,
+	})
+	if err != nil {
+		t.Fatalf("PromptPreview() error = %v", err)
+	}
+	if !result.Manifest.ContainsText || !result.Manifest.PreviewOnly || result.Manifest.RunnerExecution {
+		t.Fatalf("manifest = %#v, want preview-only metadata", result.Manifest)
+	}
+
+	previewData, err := os.ReadFile(previewOutputPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if !strings.Contains(string(previewData), "text_excerpt:") {
+		t.Fatal("prompt preview must contain text_excerpt section")
+	}
+	manifestData, err := os.ReadFile(previewManifestPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(manifestData), "text_excerpt") {
+		t.Fatal("prompt preview manifest must not contain text_excerpt")
+	}
 }
 
 func assertFixtureInjectionPolicyE2E(t *testing.T, root, dir, policyName string) {
