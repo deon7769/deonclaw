@@ -99,6 +99,7 @@ Implemented:
 - retrieval context injection policy schema (`retrieval context injection-policy validate/plan`), no execution
 - retrieval injection policy e2e fixture (`configs/examples/retrieval-context-fixture/retrieval-injection-policy.yaml`), validate/plan only
 - runner injection approval artifact (`retrieval context injection-approval new/approve/inspect`), no execution
+- runner injection execution plan (`retrieval context injection-execution-plan`), no worker execution
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

@@ -8099,6 +8099,8 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 		governanceReportPath         = "retrieval-context-governance-report.json"
 		injectionApprovalRequestPath = "retrieval-context-injection-approval-request.json"
 		injectionApprovalPath        = "retrieval-context-injection-approval.json"
+		executionPlanPath            = "retrieval-context-injection-execution-plan.json"
+		executionPlanSummary         = "retrieval-context-injection-execution-plan.md"
 	)
 
 	steps := [][]string{
@@ -8269,6 +8271,35 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	oldApprovalData := readFixtureFileString(t, filepath.Join(dir, approvalPath))
 	if strings.Contains(oldApprovalData, `"runner_injection_allowed": true`) {
 		t.Fatal("materialized context approval must keep runner_injection_allowed false")
+	}
+
+	var executionStdout, executionStderr bytes.Buffer
+	executionCode := run([]string{
+		"retrieval", "context", "injection-execution-plan",
+		"--policy", injectionPolicyPath,
+		"--governance-report", governanceReportPath,
+		"--injection-approval", injectionApprovalPath,
+		"--injection-approval-request", injectionApprovalRequestPath,
+		"--materialized", materializedPath,
+		"--output", executionPlanPath,
+		"--summary", executionPlanSummary,
+	}, &executionStdout, &executionStderr)
+	if executionCode != 0 {
+		t.Fatalf("injection-execution-plan exit=%d stderr=%q stdout=%q", executionCode, executionStderr.String(), executionStdout.String())
+	}
+	if !strings.Contains(executionStdout.String(), "would_execute_runner: false") {
+		t.Fatalf("execution plan stdout = %q, want would_execute_runner false", executionStdout.String())
+	}
+	if !strings.Contains(executionStdout.String(), "execution_supported_now: false") {
+		t.Fatalf("execution plan stdout = %q, want execution_supported_now false", executionStdout.String())
+	}
+	executionPlanData := readFixtureFileString(t, filepath.Join(dir, executionPlanPath))
+	if strings.Contains(executionPlanData, "text_excerpt") {
+		t.Fatal("execution plan json must not contain text_excerpt")
+	}
+	executionSummaryData := readFixtureFileString(t, filepath.Join(dir, executionPlanSummary))
+	if strings.Contains(executionSummaryData, "text_excerpt") || strings.Contains(executionSummaryData, "alpha text") {
+		t.Fatal("execution plan summary must not contain materialized text")
 	}
 }
 

@@ -165,12 +165,26 @@ deonctl retrieval context injection-approval inspect \
   --output-format json
 ~~~
 
+### 15. Injection execution plan (no worker execution)
+
+~~~bash
+deonctl retrieval context injection-execution-plan \
+  --policy retrieval-injection-policy.yaml \
+  --governance-report retrieval-context-governance-report.json \
+  --injection-approval retrieval-context-injection-approval.json \
+  --injection-approval-request retrieval-context-injection-approval-request.json \
+  --materialized retrieval-context-materialized.json \
+  --output retrieval-context-injection-execution-plan.json \
+  --summary retrieval-context-injection-execution-plan.md
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
 - injection-policy validate returns ok after steps 1–9 generated the artifacts
 - injection-policy plan returns `would_inject: false`, `reason: schema_only_no_execution`, and `status: warning` while approval still has `runner_injection_allowed: false`
 - optional injection-approval inspect returns `runner_injection_allowed: true` and `allowed_use: runner_injection_policy_only` on the dedicated injection-approval artifact; Task 22.11 `retrieval-context-approval.json` stays `manual_review_only` with `runner_injection_allowed: false`
+- optional injection-execution-plan returns `would_execute_runner: false`, `execution_supported_now: false`, `would_inject_materialized_context: true`, and `reason: execution_plan_only`
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

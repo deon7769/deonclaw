@@ -38,6 +38,7 @@ retrieval-context (runner metadata attachment)
 | 22.13 | [RETRIEVAL_GOVERNANCE_CHECKLIST.md](RETRIEVAL_GOVERNANCE_CHECKLIST.md) |
 | 22.15 | `retrieval context injection-policy` validate/plan (schema only, no execution) |
 | 22.16 | `retrieval context injection-approval` new/approve/inspect (runner injection approval artifact, no execution) |
+| 22.17 | `retrieval context injection-execution-plan` (execution plan only, no worker execution) |
 
 ### What already exists
 
@@ -106,7 +107,9 @@ Future injection design and implementation must **not** include:
 
 **Task 22.16 (implemented):** *Runner injection approval artifact* — `deonctl retrieval context injection-approval new/approve/inspect` creates a dedicated approval artifact with `runner_injection_allowed: true` after governance-report and injection-policy validation. **Still no runner execution**, no prompt changes, no task schema wiring.
 
-**Task 22.17+ (proposal):** runner injection execution behind explicit confirm flag and governance gates satisfied at run dispatch time.
+**Task 22.17 (implemented):** *Runner injection execution-plan* — `deonctl retrieval context injection-execution-plan` binds injection-policy, governance-report, injection-approval, and materialized artifacts into a plan-only execution artifact with `would_execute_runner: false` and `execution_supported_now: false`. **Still no worker execution**, no prompt changes, no task schema wiring.
+
+**Task 22.18+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

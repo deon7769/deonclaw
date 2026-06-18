@@ -123,6 +123,7 @@ Usage:
   deonctl retrieval context injection-approval new --governance-report <retrieval-context-governance-report.json> --policy <retrieval-injection-policy.yaml> --output <retrieval-context-injection-approval-request.json>
   deonctl retrieval context injection-approval approve --request <retrieval-context-injection-approval-request.json> --output <retrieval-context-injection-approval.json> --confirm-allow-runner-injection
   deonctl retrieval context injection-approval inspect --approval <retrieval-context-injection-approval.json> [--request <retrieval-context-injection-approval-request.json>] [--output-format text|json]
+  deonctl retrieval context injection-execution-plan --policy <retrieval-injection-policy.yaml> --governance-report <retrieval-context-governance-report.json> --injection-approval <retrieval-context-injection-approval.json> --injection-approval-request <retrieval-context-injection-approval-request.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-injection-execution-plan.json> --summary <retrieval-context-injection-execution-plan.md>
   deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1004,6 +1005,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					fmt.Fprint(stderr, usage)
 					return 2
 				}
+			case "injection-execution-plan":
+				opts, err := parseRetrievalContextInjectionExecutionPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextInjectionExecutionPlan(opts, stdout, stderr)
 			case "injection-plan":
 				opts, err := parseRetrievalContextInjectionPlanOptions(args[3:])
 				if err != nil {
@@ -7513,6 +7522,117 @@ func runRetrievalContextInjectionPlan(opts retrievalContextInjectionPlanOptions,
 	fmt.Fprintf(stdout, "can_inject_now: %t\n", result.CanInjectNow)
 	fmt.Fprintf(stdout, "reason: %s\n", result.Reason)
 	fmt.Fprintf(stdout, "estimated_prompt_chars: %d\n", result.EstimatedPromptChars)
+	fmt.Fprintf(stdout, "required_future_flag: %s\n", result.RequiredFutureFlag)
+	return 0
+}
+
+type retrievalContextInjectionExecutionPlanOptions struct {
+	policyPath                   string
+	governanceReportPath         string
+	injectionApprovalPath        string
+	injectionApprovalRequestPath string
+	materializedPath             string
+	outputPath                   string
+	summaryPath                  string
+}
+
+func parseRetrievalContextInjectionExecutionPlanOptions(args []string) (retrievalContextInjectionExecutionPlanOptions, error) {
+	opts := retrievalContextInjectionExecutionPlanOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--governance-report":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing value for --governance-report")
+			}
+			opts.governanceReportPath = args[i+1]
+			i++
+		case "--injection-approval":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing value for --injection-approval")
+			}
+			opts.injectionApprovalPath = args[i+1]
+			i++
+		case "--injection-approval-request":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing value for --injection-approval-request")
+			}
+			opts.injectionApprovalRequestPath = args[i+1]
+			i++
+		case "--materialized":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing value for --materialized")
+			}
+			opts.materializedPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--summary":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing value for --summary")
+			}
+			opts.summaryPath = args[i+1]
+			i++
+		default:
+			return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.governanceReportPath == "" {
+		return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing --governance-report")
+	}
+	if opts.injectionApprovalPath == "" {
+		return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing --injection-approval")
+	}
+	if opts.injectionApprovalRequestPath == "" {
+		return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing --injection-approval-request")
+	}
+	if opts.materializedPath == "" {
+		return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing --materialized")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.summaryPath == "" {
+		return retrievalContextInjectionExecutionPlanOptions{}, fmt.Errorf("missing --summary")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextInjectionExecutionPlan(opts retrievalContextInjectionExecutionPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.InjectionExecutionPlan(retrievalcontext.InjectionExecutionPlanOptions{
+		PolicyPath:                   opts.policyPath,
+		GovernanceReportPath:         opts.governanceReportPath,
+		InjectionApprovalPath:        opts.injectionApprovalPath,
+		InjectionApprovalRequestPath: opts.injectionApprovalRequestPath,
+		MaterializedPath:             opts.materializedPath,
+		OutputPath:                   opts.outputPath,
+		SummaryPath:                  opts.summaryPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-execution-plan failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context injection-execution-plan: ok")
+	fmt.Fprintf(stdout, "status: %s\n", result.Status)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "summary: %s\n", opts.summaryPath)
+	fmt.Fprintf(stdout, "would_execute_runner: %t\n", result.WouldExecuteRunner)
+	fmt.Fprintf(stdout, "would_inject_materialized_context: %t\n", result.WouldInjectMaterializedContext)
+	fmt.Fprintf(stdout, "execution_supported_now: %t\n", result.ExecutionSupportedNow)
+	fmt.Fprintf(stdout, "reason: %s\n", result.Reason)
+	fmt.Fprintf(stdout, "total_chars_included: %d\n", result.TotalCharsIncluded)
 	fmt.Fprintf(stdout, "required_future_flag: %s\n", result.RequiredFutureFlag)
 	return 0
 }

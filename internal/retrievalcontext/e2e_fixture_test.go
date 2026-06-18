@@ -165,10 +165,10 @@ func TestRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	}
 
 	assertFixtureInjectionPolicyE2E(t, root, dir, "retrieval-injection-policy.yaml")
-	assertFixtureInjectionApprovalE2E(t, governance, "retrieval-injection-policy.yaml")
+	assertFixtureInjectionApprovalE2E(t, governance, "retrieval-injection-policy.yaml", materializedPath)
 }
 
-func assertFixtureInjectionApprovalE2E(t *testing.T, governance retrievalcontext.GovernanceReportResult, policyName string) {
+func assertFixtureInjectionApprovalE2E(t *testing.T, governance retrievalcontext.GovernanceReportResult, policyName, materializedPath string) {
 	t.Helper()
 	const (
 		governanceReportPath  = "retrieval-context-governance-report.json"
@@ -219,6 +219,51 @@ func assertFixtureInjectionApprovalE2E(t *testing.T, governance retrievalcontext
 	}
 
 	for _, path := range []string{injectionRequestPath, injectionApprovalPath} {
+		assertNoTextExcerpt(t, path)
+	}
+
+	assertFixtureInjectionExecutionPlanE2E(t, governance, policyName, injectionRequestPath, injectionApprovalPath, materializedPath)
+}
+
+func assertFixtureInjectionExecutionPlanE2E(t *testing.T, governance retrievalcontext.GovernanceReportResult, policyName, injectionRequestPath, injectionApprovalPath, materializedPath string) {
+	t.Helper()
+	const (
+		governanceReportPath = "retrieval-context-governance-report.json"
+		executionPlanPath    = "retrieval-context-injection-execution-plan.json"
+		executionPlanSummary = "retrieval-context-injection-execution-plan.md"
+	)
+
+	var governanceBuf bytes.Buffer
+	if err := retrievalcontext.WriteGovernanceReportJSON(governance, &governanceBuf); err != nil {
+		t.Fatalf("WriteGovernanceReportJSON() error = %v", err)
+	}
+	if err := os.WriteFile(governanceReportPath, governanceBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	result, err := retrievalcontext.InjectionExecutionPlan(retrievalcontext.InjectionExecutionPlanOptions{
+		PolicyPath:                   policyName,
+		GovernanceReportPath:         governanceReportPath,
+		InjectionApprovalPath:        injectionApprovalPath,
+		InjectionApprovalRequestPath: injectionRequestPath,
+		MaterializedPath:             materializedPath,
+		OutputPath:                   executionPlanPath,
+		SummaryPath:                  executionPlanSummary,
+	})
+	if err != nil {
+		t.Fatalf("InjectionExecutionPlan() error = %v", err)
+	}
+	if result.WouldExecuteRunner || result.ExecutionSupportedNow {
+		t.Fatalf("result = %#v, want no runner execution", result)
+	}
+	if !result.WouldInjectMaterializedContext {
+		t.Fatal("would_inject_materialized_context must be true")
+	}
+	if result.Reason != retrievalcontext.InjectionExecutionPlanReasonExecutionPlanOnly {
+		t.Fatalf("reason = %q", result.Reason)
+	}
+
+	for _, path := range []string{executionPlanPath, executionPlanSummary} {
 		assertNoTextExcerpt(t, path)
 	}
 }

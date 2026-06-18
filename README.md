@@ -112,6 +112,7 @@ Implemented:
 - retrieval context injection policy schema (`retrieval context injection-policy`), no execution
 - retrieval injection policy e2e fixture (`configs/examples/retrieval-context-fixture/retrieval-injection-policy.yaml`), validate/plan only
 - runner injection approval artifact (`retrieval context injection-approval`), no execution
+- runner injection execution plan (`retrieval context injection-execution-plan`), no worker execution
 
 Not implemented yet:
 
