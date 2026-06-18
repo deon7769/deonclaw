@@ -114,6 +114,9 @@ Usage:
   deonctl retrieval context materialize --retrieval-context <retrieval-context.json> --chunks <memory-index-chunks.jsonl> --output <materialized.json> --summary <materialized.md> --max-chars-per-chunk <n> --max-total-chars <n> --confirm-include-chunk-text
   deonctl retrieval context materialized-report --artifact <retrieval-context-materialized.json> [--output-format text|json]
   deonctl retrieval context bundle --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-bundle.json> --summary <retrieval-context-bundle.md> [--output-format text|json]
+  deonctl retrieval context approval new --bundle <retrieval-context-bundle.json> --output <retrieval-context-approval-request.json>
+  deonctl retrieval context approval approve --request <retrieval-context-approval-request.json> --output <retrieval-context-approval.json> --confirm-approve-materialized-context
+  deonctl retrieval context approval inspect --approval <retrieval-context-approval.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -900,6 +903,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextBundle(opts, stdout, stderr)
+			case "approval":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					opts, err := parseRetrievalContextApprovalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextApprovalNew(opts, stdout, stderr)
+				case "approve":
+					opts, err := parseRetrievalContextApprovalApproveOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextApprovalApprove(opts, stdout, stderr)
+				case "inspect":
+					opts, err := parseRetrievalContextApprovalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextApprovalInspect(opts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -7128,6 +7165,172 @@ func runRetrievalContextBundle(opts retrievalContextBundleOptions, stdout io.Wri
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "retrieval context bundle failed: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+type retrievalContextApprovalNewOptions struct {
+	bundlePath string
+	outputPath string
+}
+
+func parseRetrievalContextApprovalNewOptions(args []string) (retrievalContextApprovalNewOptions, error) {
+	opts := retrievalContextApprovalNewOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--bundle":
+			if i+1 >= len(args) {
+				return retrievalContextApprovalNewOptions{}, fmt.Errorf("missing value for --bundle")
+			}
+			opts.bundlePath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextApprovalNewOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return retrievalContextApprovalNewOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.bundlePath == "" {
+		return retrievalContextApprovalNewOptions{}, fmt.Errorf("missing --bundle")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextApprovalNewOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextApprovalNew(opts retrievalContextApprovalNewOptions, stdout io.Writer, stderr io.Writer) int {
+	request, err := retrievalcontext.NewApprovalRequest(retrievalcontext.NewApprovalRequestOptions{
+		BundlePath: opts.bundlePath,
+		OutputPath: opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context approval new failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context approval new: ok")
+	fmt.Fprintf(stdout, "status: %s\n", request.Status)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "bundle_sha256: %s\n", request.BundleSHA256)
+	fmt.Fprintf(stdout, "included_chunk_count: %d\n", request.IncludedChunkCount)
+	fmt.Fprintf(stdout, "omitted_chunk_count: %d\n", request.OmittedChunkCount)
+	return 0
+}
+
+type retrievalContextApprovalApproveOptions struct {
+	requestPath                       string
+	outputPath                        string
+	confirmApproveMaterializedContext bool
+}
+
+func parseRetrievalContextApprovalApproveOptions(args []string) (retrievalContextApprovalApproveOptions, error) {
+	opts := retrievalContextApprovalApproveOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--request":
+			if i+1 >= len(args) {
+				return retrievalContextApprovalApproveOptions{}, fmt.Errorf("missing value for --request")
+			}
+			opts.requestPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextApprovalApproveOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--confirm-approve-materialized-context":
+			opts.confirmApproveMaterializedContext = true
+		default:
+			return retrievalContextApprovalApproveOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.requestPath == "" {
+		return retrievalContextApprovalApproveOptions{}, fmt.Errorf("missing --request")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextApprovalApproveOptions{}, fmt.Errorf("missing --output")
+	}
+	if !opts.confirmApproveMaterializedContext {
+		return retrievalContextApprovalApproveOptions{}, fmt.Errorf("missing --confirm-approve-materialized-context")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextApprovalApprove(opts retrievalContextApprovalApproveOptions, stdout io.Writer, stderr io.Writer) int {
+	approval, err := retrievalcontext.ApproveMaterializedContext(retrievalcontext.ApproveMaterializedContextOptions{
+		RequestPath:                       opts.requestPath,
+		OutputPath:                        opts.outputPath,
+		ConfirmApproveMaterializedContext: opts.confirmApproveMaterializedContext,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context approval approve failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context approval approve: ok")
+	fmt.Fprintf(stdout, "approved: %t\n", approval.Approved)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "allowed_use: %s\n", approval.AllowedUse)
+	fmt.Fprintf(stdout, "runner_injection_allowed: %t\n", approval.RunnerInjectionAllowed)
+	return 0
+}
+
+type retrievalContextApprovalInspectOptions struct {
+	approvalPath string
+	outputFormat string
+}
+
+func parseRetrievalContextApprovalInspectOptions(args []string) (retrievalContextApprovalInspectOptions, error) {
+	opts := retrievalContextApprovalInspectOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--approval":
+			if i+1 >= len(args) {
+				return retrievalContextApprovalInspectOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextApprovalInspectOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextApprovalInspectOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.approvalPath == "" {
+		return retrievalContextApprovalInspectOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextApprovalInspectOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextApprovalInspect(opts retrievalContextApprovalInspectOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.InspectApproval(opts.approvalPath, retrievalcontext.InspectApprovalOptions{})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context approval inspect failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteInspectApprovalJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteInspectApprovalText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context approval inspect failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
 	}
 	return 0

@@ -18,6 +18,7 @@ Implemented now:
 - `deonctl retrieval context materialize` for governed chunk text excerpts from chunks JSONL (explicit confirm flag)
 - `deonctl retrieval context materialized-report` for QA over materialized chunk text artifacts
 - `deonctl retrieval context bundle` for audit bundle over retrieval + materialized artifacts
+- `deonctl retrieval context approval new/approve/inspect` for governed materialized context approval
 
 Not implemented yet:
 
@@ -189,6 +190,47 @@ Rules:
 - `contains_text: false` in bundle JSON; no `text_excerpt` in bundle JSON, summary, or stdout text output
 - all input/output paths must be relative safe paths
 
+## Approval workflow (Task 22.11)
+
+The audit bundle is the checkpoint before any governed use of materialized chunk text. Explicit human approval is a separate, auditable step. Approval does not enable runner text injection yet.
+
+Create an approval request from a validated bundle:
+
+~~~bash
+deonctl retrieval context approval new \
+  --bundle artifacts/<run-id>/retrieval-context-bundle.json \
+  --output artifacts/<run-id>/retrieval-context-approval-request.json
+~~~
+
+Approve for manual review only:
+
+~~~bash
+deonctl retrieval context approval approve \
+  --request artifacts/<run-id>/retrieval-context-approval-request.json \
+  --output artifacts/<run-id>/retrieval-context-approval.json \
+  --confirm-approve-materialized-context
+~~~
+
+Inspect an approval artifact:
+
+~~~bash
+deonctl retrieval context approval inspect \
+  --approval artifacts/<run-id>/retrieval-context-approval.json
+deonctl retrieval context approval inspect \
+  --approval artifacts/<run-id>/retrieval-context-approval.json \
+  --output-format json
+~~~
+
+Rules:
+
+- `approval new` fails when bundle status is `failed`
+- request and approval artifacts never include `text_excerpt`
+- `contains_text: false` on requests; `runner_injection_allowed: false` on approvals
+- `allowed_use: manual_review_only`
+- `--confirm-approve-materialized-context` is required for approve
+- inspect stdout never prints materialized text
+- all paths must be relative safe paths
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -206,4 +248,4 @@ Rules:
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
