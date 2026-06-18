@@ -45,6 +45,7 @@ git diff --check
 go test ./...
 go test ./internal/retrievalcontext -run GovernanceFixture
 go test ./cmd/deonctl -run RetrievalContextGovernanceFixture
+deonctl retrieval context injection-policy validate --policy configs/examples/retrieval-injection-policy.yaml
 ~~~
 
 Optional manual fixture walkthrough (from fixture directory):

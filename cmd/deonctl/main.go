@@ -118,6 +118,8 @@ Usage:
   deonctl retrieval context approval approve --request <retrieval-context-approval-request.json> --output <retrieval-context-approval.json> --confirm-approve-materialized-context
   deonctl retrieval context approval inspect --approval <retrieval-context-approval.json> [--output-format text|json]
   deonctl retrieval context injection-plan --approval <retrieval-context-approval.json> --request <retrieval-context-approval-request.json> --bundle <retrieval-context-bundle.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-injection-plan.json> --summary <retrieval-context-injection-plan.md>
+  deonctl retrieval context injection-policy validate --policy <retrieval-injection-policy.yaml>
+  deonctl retrieval context injection-policy plan --policy <retrieval-injection-policy.yaml> [--output-format text|json]
   deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -935,6 +937,32 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 						return 2
 					}
 					return runRetrievalContextApprovalInspect(opts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "injection-policy":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "validate":
+					opts, err := parseRetrievalContextInjectionPolicyOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextInjectionPolicyValidate(opts, stdout, stderr)
+				case "plan":
+					opts, err := parseRetrievalContextInjectionPolicyPlanOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextInjectionPolicyPlan(opts, stdout, stderr)
 				default:
 					fmt.Fprint(stderr, usage)
 					return 2
@@ -7557,6 +7585,105 @@ func runRetrievalContextGovernanceReport(opts retrievalContextGovernanceReportOp
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "retrieval context governance-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type retrievalContextInjectionPolicyOptions struct {
+	policyPath string
+}
+
+func parseRetrievalContextInjectionPolicyOptions(args []string) (retrievalContextInjectionPolicyOptions, error) {
+	opts := retrievalContextInjectionPolicyOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionPolicyOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		default:
+			return retrievalContextInjectionPolicyOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return retrievalContextInjectionPolicyOptions{}, fmt.Errorf("missing --policy")
+	}
+	return opts, nil
+}
+
+type retrievalContextInjectionPolicyPlanOptions struct {
+	policyPath   string
+	outputFormat string
+}
+
+func parseRetrievalContextInjectionPolicyPlanOptions(args []string) (retrievalContextInjectionPolicyPlanOptions, error) {
+	opts := retrievalContextInjectionPolicyPlanOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--policy":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionPolicyPlanOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionPolicyPlanOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextInjectionPolicyPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.policyPath == "" {
+		return retrievalContextInjectionPolicyPlanOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextInjectionPolicyPlanOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextInjectionPolicyValidate(opts retrievalContextInjectionPolicyOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := retrievalcontext.LoadInjectionPolicy(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-policy validate failed: %v\n", err)
+		return 1
+	}
+	if err := retrievalcontext.ValidateInjectionPolicy(cfg); err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-policy validate failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context injection-policy validate: ok")
+	return 0
+}
+
+func runRetrievalContextInjectionPolicyPlan(opts retrievalContextInjectionPolicyPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := retrievalcontext.LoadInjectionPolicy(opts.policyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-policy plan failed: %v\n", err)
+		return 1
+	}
+	result, err := retrievalcontext.InjectionPolicyPlan(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-policy plan failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteInjectionPolicyPlanJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteInjectionPolicyPlanText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-policy plan failed: %v\n", err)
 		return 1
 	}
 	if result.Status == lancedbpolicy.StatusFailed {

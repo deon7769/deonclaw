@@ -36,6 +36,7 @@ retrieval-context (runner metadata attachment)
 | 22.12.1 | `governance-report` (chain audit) |
 | 22.12.2 | `configs/examples/retrieval-context-fixture/` + e2e tests |
 | 22.13 | [RETRIEVAL_GOVERNANCE_CHECKLIST.md](RETRIEVAL_GOVERNANCE_CHECKLIST.md) |
+| 22.15 | `retrieval context injection-policy` validate/plan (schema only, no execution) |
 
 ### What already exists
 
@@ -100,9 +101,11 @@ Future injection design and implementation must **not** include:
 
 ## 7. Next implementation candidate
 
-**Task 22.15 (proposal):** *Runner injection policy schema only* — define YAML/JSON schema and validation for an injection policy artifact (caps, required approvals, forbidden fields). **Still no runner execution**, no prompt changes, no task schema wiring.
+**Task 22.15 (implemented):** *Runner injection policy schema only* — `configs/examples/retrieval-injection-policy.yaml` plus `deonctl retrieval context injection-policy validate/plan`. **Still no runner execution**, no prompt changes, no task schema wiring.
 
-Until 22.15 (or equivalent) is accepted and implemented, the codebase remains at metadata-only runner attachment plus governed offline artifacts.
+**Task 22.16+ (proposal):** runner injection execution behind explicit confirm flag, approval with `runner_injection_allowed: true`, and governance-report `ok`.
+
+Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 
 ## References
 
