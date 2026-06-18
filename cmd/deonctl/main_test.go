@@ -8334,6 +8334,24 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	if !strings.Contains(manifestData, `"contains_text": true`) || !strings.Contains(manifestData, `"preview_only": true`) {
 		t.Fatalf("manifest = %q, want contains_text and preview_only true", manifestData)
 	}
+
+	var reportStdout, reportStderr bytes.Buffer
+	reportCode := run([]string{
+		"retrieval", "context", "prompt-preview-report",
+		"--preview", previewOutputPath,
+		"--manifest", previewManifestPath,
+		"--execution-plan", executionPlanPath,
+		"--output-format", "json",
+	}, &reportStdout, &reportStderr)
+	if reportCode != 0 {
+		t.Fatalf("prompt-preview-report exit=%d stderr=%q stdout=%q", reportCode, reportStderr.String(), reportStdout.String())
+	}
+	if !strings.Contains(reportStdout.String(), `"status": "ok"`) {
+		t.Fatalf("prompt-preview-report stdout = %q, want status ok", reportStdout.String())
+	}
+	if strings.Contains(reportStdout.String(), "alpha text") || strings.Contains(reportStdout.String(), "text_excerpt:") {
+		t.Fatal("prompt-preview-report must not leak preview content")
+	}
 }
 
 func retrievalContextFixtureRoot(t *testing.T) string {

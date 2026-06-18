@@ -306,6 +306,25 @@ func assertFixturePromptPreviewE2E(t *testing.T, policyName, materializedPath, e
 	if strings.Contains(string(manifestData), "text_excerpt") {
 		t.Fatal("prompt preview manifest must not contain text_excerpt")
 	}
+
+	report, err := retrievalcontext.PromptPreviewReport(retrievalcontext.PromptPreviewReportOptions{
+		PreviewPath:       previewOutputPath,
+		ManifestPath:      previewManifestPath,
+		ExecutionPlanPath: executionPlanPath,
+	})
+	if err != nil {
+		t.Fatalf("PromptPreviewReport() error = %v", err)
+	}
+	if report.Status != lancedbpolicy.StatusOK {
+		t.Fatalf("report = %#v, want ok", report)
+	}
+	var reportBuf bytes.Buffer
+	if err := retrievalcontext.WritePromptPreviewReportText(report, &reportBuf); err != nil {
+		t.Fatalf("WritePromptPreviewReportText() error = %v", err)
+	}
+	if strings.Contains(reportBuf.String(), "alpha text") || strings.Contains(reportBuf.String(), "text_excerpt:") {
+		t.Fatal("prompt preview report leaked preview content")
+	}
 }
 
 func assertFixtureInjectionPolicyE2E(t *testing.T, root, dir, policyName string) {

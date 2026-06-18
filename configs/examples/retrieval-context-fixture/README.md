@@ -190,6 +190,16 @@ deonctl retrieval context prompt-preview \
   --confirm-render-materialized-context
 ~~~
 
+### 17. Prompt preview report (QA only)
+
+~~~bash
+deonctl retrieval context prompt-preview-report \
+  --preview retrieval-context-prompt-preview.md \
+  --manifest retrieval-context-prompt-preview.json \
+  --execution-plan retrieval-context-injection-execution-plan.json \
+  --output-format json
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
@@ -198,6 +208,7 @@ deonctl retrieval context prompt-preview \
 - optional injection-approval inspect returns `runner_injection_allowed: true` and `allowed_use: runner_injection_policy_only` on the dedicated injection-approval artifact; Task 22.11 `retrieval-context-approval.json` stays `manual_review_only` with `runner_injection_allowed: false`
 - optional injection-execution-plan returns `would_execute_runner: false`, `execution_supported_now: false`, `would_inject_materialized_context: true`, and `reason: execution_plan_only`
 - optional prompt-preview writes markdown with `text_excerpt` and a manifest with `contains_text: true`, `preview_only: true`, `runner_execution: false` (manifest must not repeat chunk text)
+- optional prompt-preview-report returns `status: ok` and does not print preview chunk text in report output
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

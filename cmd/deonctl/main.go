@@ -125,6 +125,7 @@ Usage:
   deonctl retrieval context injection-approval inspect --approval <retrieval-context-injection-approval.json> [--request <retrieval-context-injection-approval-request.json>] [--output-format text|json]
   deonctl retrieval context injection-execution-plan --policy <retrieval-injection-policy.yaml> --governance-report <retrieval-context-governance-report.json> --injection-approval <retrieval-context-injection-approval.json> --injection-approval-request <retrieval-context-injection-approval-request.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-injection-execution-plan.json> --summary <retrieval-context-injection-execution-plan.md>
   deonctl retrieval context prompt-preview --execution-plan <retrieval-context-injection-execution-plan.json> --policy <retrieval-injection-policy.yaml> --materialized <retrieval-context-materialized.json> --output <retrieval-context-prompt-preview.md> --manifest <retrieval-context-prompt-preview.json> --confirm-render-materialized-context
+  deonctl retrieval context prompt-preview-report --preview <retrieval-context-prompt-preview.md> --manifest <retrieval-context-prompt-preview.json> --execution-plan <retrieval-context-injection-execution-plan.json> [--output-format text|json]
   deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1022,6 +1023,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextPromptPreview(opts, stdout, stderr)
+			case "prompt-preview-report":
+				opts, err := parseRetrievalContextPromptPreviewReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextPromptPreviewReport(opts, stdout, stderr)
 			case "injection-plan":
 				opts, err := parseRetrievalContextInjectionPlanOptions(args[3:])
 				if err != nil {
@@ -7737,6 +7746,86 @@ func runRetrievalContextPromptPreview(opts retrievalContextPromptPreviewOptions,
 	fmt.Fprintf(stdout, "runner_execution: %t\n", result.Manifest.RunnerExecution)
 	fmt.Fprintf(stdout, "total_chars_rendered: %d\n", result.Manifest.TotalCharsRendered)
 	fmt.Fprintf(stdout, "chunk_count: %d\n", result.Manifest.ChunkCount)
+	return 0
+}
+
+type retrievalContextPromptPreviewReportOptions struct {
+	previewPath       string
+	manifestPath      string
+	executionPlanPath string
+	outputFormat      string
+}
+
+func parseRetrievalContextPromptPreviewReportOptions(args []string) (retrievalContextPromptPreviewReportOptions, error) {
+	opts := retrievalContextPromptPreviewReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--preview":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("missing value for --preview")
+			}
+			opts.previewPath = args[i+1]
+			i++
+		case "--manifest":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("missing value for --manifest")
+			}
+			opts.manifestPath = args[i+1]
+			i++
+		case "--execution-plan":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("missing value for --execution-plan")
+			}
+			opts.executionPlanPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.previewPath == "" {
+		return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("missing --preview")
+	}
+	if opts.manifestPath == "" {
+		return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("missing --manifest")
+	}
+	if opts.executionPlanPath == "" {
+		return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("missing --execution-plan")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextPromptPreviewReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextPromptPreviewReport(opts retrievalContextPromptPreviewReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.PromptPreviewReport(retrievalcontext.PromptPreviewReportOptions{
+		PreviewPath:       opts.previewPath,
+		ManifestPath:      opts.manifestPath,
+		ExecutionPlanPath: opts.executionPlanPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context prompt-preview-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WritePromptPreviewReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WritePromptPreviewReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context prompt-preview-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
 	return 0
 }
 

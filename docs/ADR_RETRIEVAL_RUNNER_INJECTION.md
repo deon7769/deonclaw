@@ -40,6 +40,7 @@ retrieval-context (runner metadata attachment)
 | 22.16 | `retrieval context injection-approval` new/approve/inspect (runner injection approval artifact, no execution) |
 | 22.17 | `retrieval context injection-execution-plan` (execution plan only, no worker execution) |
 | 22.18 | `retrieval context prompt-preview` (materialized prompt section preview, no worker execution) |
+| 22.18.1 | `retrieval context prompt-preview-report` (prompt preview QA, no worker execution) |
 
 ### What already exists
 
@@ -111,6 +112,8 @@ Future injection design and implementation must **not** include:
 **Task 22.17 (implemented):** *Runner injection execution-plan* — `deonctl retrieval context injection-execution-plan` binds injection-policy, governance-report, injection-approval, and materialized artifacts into a plan-only execution artifact with `would_execute_runner: false` and `execution_supported_now: false`. **Still no worker execution**, no prompt changes, no task schema wiring.
 
 **Task 22.18 (implemented):** *Materialized prompt section preview* — `deonctl retrieval context prompt-preview` renders a dry-run markdown preview and manifest from a valid execution-plan and materialized artifact. **Still no worker execution**, no runner prompt injection, no task schema wiring.
+
+**Task 22.18.1 (implemented):** *Prompt preview report/QA* — `deonctl retrieval context prompt-preview-report` validates preview markdown and manifest metadata without printing chunk text. **Still no worker execution**, no runner prompt injection, no task schema wiring.
 
 **Task 22.19+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
