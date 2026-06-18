@@ -33,7 +33,7 @@ Supporting references:
 | governance-report | `retrieval context governance-report` | Consolidated chain audit and troubleshooting (Task 22.12.1) |
 | fixture e2e | `configs/examples/retrieval-context-fixture/` | Reproducible local walkthrough and automated tests (Task 22.12.2) |
 
-Detailed behavior: [RETRIEVAL_CONTEXT.md](RETRIEVAL_CONTEXT.md). Fixture commands: [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md).
+Detailed behavior: [RETRIEVAL_CONTEXT.md](RETRIEVAL_CONTEXT.md). Fixture commands: [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md). Future injection design: [ADR_RETRIEVAL_RUNNER_INJECTION.md](ADR_RETRIEVAL_RUNNER_INJECTION.md).
 
 ## 2. Local validation commands
 
@@ -149,10 +149,12 @@ Before merging or tagging retrieval-governance work:
 - [ ] No `text_excerpt` leakage outside materialized artifacts (bundle, approval, injection-plan, governance-report outputs).
 - [ ] No runner prompt or `retrieval_context` task schema changes unless explicitly scoped to a future injection task.
 - [ ] No memory apply/restore chain changes.
+- [ ] [ADR_RETRIEVAL_RUNNER_INJECTION.md](ADR_RETRIEVAL_RUNNER_INJECTION.md) still reflects current non-injection decision if governance semantics changed.
+
 - [ ] CI green on `main` after push.
 
 ## Boundary
 
 Task 22.13 is documentation and operability only. Runner materialized text injection, active runner search, natural-language retrieval, provider APIs, MCP integration, fallback execution, and UI remain out of scope.
 
-See also: [MEMORY_INDEX.md](MEMORY_INDEX.md) (Task 22.x table), [MEMORY_LANCEDB.md](MEMORY_LANCEDB.md) (upstream search smoke).
+See also: [MEMORY_INDEX.md](MEMORY_INDEX.md) (Task 22.x table), [MEMORY_LANCEDB.md](MEMORY_LANCEDB.md) (upstream search smoke), [ADR_RETRIEVAL_RUNNER_INJECTION.md](ADR_RETRIEVAL_RUNNER_INJECTION.md) (future injection design).

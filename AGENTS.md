@@ -95,6 +95,7 @@ Implemented:
 - retrieval context governance report (`retrieval context governance-report`) without runner injection
 - retrieval context governance e2e fixture (`configs/examples/retrieval-context-fixture/`)
 - retrieval governance release checklist (`docs/RETRIEVAL_GOVERNANCE_CHECKLIST.md`)
+- retrieval runner injection design ADR (`docs/ADR_RETRIEVAL_RUNNER_INJECTION.md`)
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
