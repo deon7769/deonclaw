@@ -160,6 +160,28 @@ func MaterializedInjectionDryRun(opts MaterializedInjectionDryRunOptions) (Mater
 	return result, nil
 }
 
+func LoadMaterializedInjectionDryRun(path string) (MaterializedInjectionDryRunResult, []byte, error) {
+	if err := validateRelativeSafePath("dry-run path", path); err != nil {
+		return MaterializedInjectionDryRunResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MaterializedInjectionDryRunResult{}, nil, fmt.Errorf("read materialized injection dry-run %q: %w", path, err)
+	}
+	return ParseMaterializedInjectionDryRunJSON(data)
+}
+
+func ParseMaterializedInjectionDryRunJSON(data []byte) (MaterializedInjectionDryRunResult, []byte, error) {
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return MaterializedInjectionDryRunResult{}, nil, fmt.Errorf("materialized injection dry-run must not contain materialized preview text")
+	}
+	var result MaterializedInjectionDryRunResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return MaterializedInjectionDryRunResult{}, nil, fmt.Errorf("parse materialized injection dry-run json: %w", err)
+	}
+	return result, data, nil
+}
+
 func renderMaterializedInjectionDryRunPromptSection(previewMarkdown string) (string, error) {
 	section := strings.TrimSpace(previewMarkdown)
 	if section == "" {

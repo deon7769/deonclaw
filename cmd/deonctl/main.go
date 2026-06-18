@@ -132,6 +132,7 @@ Usage:
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex materialized-injection-preflight --task <path> --prompt-preview-report <retrieval-context-prompt-preview-report.json> --output <materialized-injection-preflight.json> [--output-format text|json]
   deonctl worker codex materialized-injection-dry-run --task <path> --preflight <materialized-injection-preflight.json> --prompt-preview <retrieval-context-prompt-preview.md> --output <materialized-injection-dry-run.json> --prompt-output <materialized-injection-prompt-section.md> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex materialized-injection-dry-run-report --dry-run <materialized-injection-dry-run.json> --prompt-output <materialized-injection-prompt-section.md> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -833,6 +834,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedInjectionDryRun(opts, stdout, stderr)
+			case "materialized-injection-dry-run-report":
+				opts, err := parseCodexMaterializedInjectionDryRunReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedInjectionDryRunReport(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -6529,6 +6538,75 @@ func runCodexMaterializedInjectionDryRun(opts codexMaterializedInjectionDryRunOp
 	if opts.outputFormat != "json" {
 		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
 		fmt.Fprintf(stdout, "prompt-output: %s\n", opts.promptOutputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedInjectionDryRunReportOptions struct {
+	dryRunPath       string
+	promptOutputPath string
+	outputFormat     string
+}
+
+func parseCodexMaterializedInjectionDryRunReportOptions(args []string) (codexMaterializedInjectionDryRunReportOptions, error) {
+	opts := codexMaterializedInjectionDryRunReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dry-run":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunReportOptions{}, fmt.Errorf("missing value for --dry-run")
+			}
+			opts.dryRunPath = args[i+1]
+			i++
+		case "--prompt-output":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunReportOptions{}, fmt.Errorf("missing value for --prompt-output")
+			}
+			opts.promptOutputPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedInjectionDryRunReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.dryRunPath == "" {
+		return codexMaterializedInjectionDryRunReportOptions{}, fmt.Errorf("missing --dry-run")
+	}
+	if opts.promptOutputPath == "" {
+		return codexMaterializedInjectionDryRunReportOptions{}, fmt.Errorf("missing --prompt-output")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedInjectionDryRunReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedInjectionDryRunReport(opts codexMaterializedInjectionDryRunReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedInjectionDryRunReport(retrievalcontext.MaterializedInjectionDryRunReportOptions{
+		DryRunPath:       opts.dryRunPath,
+		PromptOutputPath: opts.promptOutputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-dry-run-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedInjectionDryRunReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedInjectionDryRunReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-dry-run-report failed: %v\n", err)
+		return 1
 	}
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
