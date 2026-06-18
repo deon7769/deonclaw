@@ -134,6 +134,9 @@ Usage:
   deonctl worker codex materialized-injection-dry-run --task <path> --preflight <materialized-injection-preflight.json> --prompt-preview <retrieval-context-prompt-preview.md> --output <materialized-injection-dry-run.json> --prompt-output <materialized-injection-prompt-section.md> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex materialized-injection-dry-run-report --dry-run <materialized-injection-dry-run.json> --prompt-output <materialized-injection-prompt-section.md> [--output-format text|json]
   deonctl worker codex materialized-injection-readiness-report --preflight <materialized-injection-preflight.json> --dry-run <materialized-injection-dry-run.json> --dry-run-report <materialized-injection-dry-run-report.json> [--output-format text|json]
+  deonctl worker codex materialized-injection-execution-gate --task <path> --readiness-report <materialized-injection-readiness-report.json> --prompt-output <materialized-injection-prompt-section.md> --output <materialized-injection-execution-gate.json> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex materialized-prompt-assembly-dry-run --execution-gate <materialized-injection-execution-gate.json> --base-prompt-fixture <base-worker-prompt-fixture.md> --prompt-output <materialized-injection-prompt-section.md> --output <materialized-prompt-assembly-dry-run.json> --assembled-output <materialized-prompt-assembly.md> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex materialized-prompt-assembly-report --assembly-dry-run <materialized-prompt-assembly-dry-run.json> --assembled-output <materialized-prompt-assembly.md> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -851,6 +854,30 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedInjectionReadinessReport(opts, stdout, stderr)
+			case "materialized-injection-execution-gate":
+				opts, err := parseCodexMaterializedInjectionExecutionGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedInjectionExecutionGate(opts, stdout, stderr)
+			case "materialized-prompt-assembly-dry-run":
+				opts, err := parseCodexMaterializedPromptAssemblyDryRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedPromptAssemblyDryRun(opts, stdout, stderr)
+			case "materialized-prompt-assembly-report":
+				opts, err := parseCodexMaterializedPromptAssemblyReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedPromptAssemblyReport(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -6695,6 +6722,289 @@ func runCodexMaterializedInjectionReadinessReport(opts codexMaterializedInjectio
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "worker codex materialized-injection-readiness-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedInjectionExecutionGateOptions struct {
+	taskPath                         string
+	readinessReportPath              string
+	promptOutputPath                 string
+	outputPath                       string
+	confirmInjectMaterializedContext bool
+	outputFormat                     string
+}
+
+func parseCodexMaterializedInjectionExecutionGateOptions(args []string) (codexMaterializedInjectionExecutionGateOptions, error) {
+	opts := codexMaterializedInjectionExecutionGateOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--task":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskPath = args[i+1]
+			i++
+		case "--readiness-report":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing value for --readiness-report")
+			}
+			opts.readinessReportPath = args[i+1]
+			i++
+		case "--prompt-output":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing value for --prompt-output")
+			}
+			opts.promptOutputPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--confirm-inject-materialized-context":
+			opts.confirmInjectMaterializedContext = true
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.taskPath == "" {
+		return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing --task")
+	}
+	if opts.readinessReportPath == "" {
+		return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing --readiness-report")
+	}
+	if opts.promptOutputPath == "" {
+		return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing --prompt-output")
+	}
+	if opts.outputPath == "" {
+		return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing --output")
+	}
+	if !opts.confirmInjectMaterializedContext {
+		return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("missing --confirm-inject-materialized-context")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedInjectionExecutionGateOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedInjectionExecutionGate(opts codexMaterializedInjectionExecutionGateOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedInjectionExecutionGate(retrievalcontext.MaterializedInjectionExecutionGateOptions{
+		TaskPath:                         opts.taskPath,
+		ReadinessReportPath:              opts.readinessReportPath,
+		PromptOutputPath:                 opts.promptOutputPath,
+		ConfirmInjectMaterializedContext: opts.confirmInjectMaterializedContext,
+		OutputPath:                       opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-execution-gate failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedInjectionExecutionGateJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedInjectionExecutionGateText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-execution-gate failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedPromptAssemblyDryRunOptions struct {
+	executionGatePath                string
+	basePromptFixturePath            string
+	promptOutputPath                 string
+	outputPath                       string
+	assembledOutputPath              string
+	confirmInjectMaterializedContext bool
+	outputFormat                     string
+}
+
+func parseCodexMaterializedPromptAssemblyDryRunOptions(args []string) (codexMaterializedPromptAssemblyDryRunOptions, error) {
+	opts := codexMaterializedPromptAssemblyDryRunOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--execution-gate":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing value for --execution-gate")
+			}
+			opts.executionGatePath = args[i+1]
+			i++
+		case "--base-prompt-fixture":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing value for --base-prompt-fixture")
+			}
+			opts.basePromptFixturePath = args[i+1]
+			i++
+		case "--prompt-output":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing value for --prompt-output")
+			}
+			opts.promptOutputPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--assembled-output":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing value for --assembled-output")
+			}
+			opts.assembledOutputPath = args[i+1]
+			i++
+		case "--confirm-inject-materialized-context":
+			opts.confirmInjectMaterializedContext = true
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.executionGatePath == "" {
+		return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing --execution-gate")
+	}
+	if opts.basePromptFixturePath == "" {
+		return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing --base-prompt-fixture")
+	}
+	if opts.promptOutputPath == "" {
+		return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing --prompt-output")
+	}
+	if opts.outputPath == "" {
+		return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.assembledOutputPath == "" {
+		return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing --assembled-output")
+	}
+	if !opts.confirmInjectMaterializedContext {
+		return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("missing --confirm-inject-materialized-context")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedPromptAssemblyDryRunOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedPromptAssemblyDryRun(opts codexMaterializedPromptAssemblyDryRunOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedPromptAssembly(retrievalcontext.MaterializedPromptAssemblyOptions{
+		ExecutionGatePath:                opts.executionGatePath,
+		BasePromptFixturePath:            opts.basePromptFixturePath,
+		PromptOutputPath:                 opts.promptOutputPath,
+		OutputPath:                       opts.outputPath,
+		AssembledOutputPath:              opts.assembledOutputPath,
+		ConfirmInjectMaterializedContext: opts.confirmInjectMaterializedContext,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-prompt-assembly-dry-run failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedPromptAssemblyJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedPromptAssemblyText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-prompt-assembly-dry-run failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+		fmt.Fprintf(stdout, "assembled-output: %s\n", opts.assembledOutputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedPromptAssemblyReportOptions struct {
+	assemblyDryRunPath  string
+	assembledOutputPath string
+	outputFormat        string
+}
+
+func parseCodexMaterializedPromptAssemblyReportOptions(args []string) (codexMaterializedPromptAssemblyReportOptions, error) {
+	opts := codexMaterializedPromptAssemblyReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--assembly-dry-run":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyReportOptions{}, fmt.Errorf("missing value for --assembly-dry-run")
+			}
+			opts.assemblyDryRunPath = args[i+1]
+			i++
+		case "--assembled-output":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyReportOptions{}, fmt.Errorf("missing value for --assembled-output")
+			}
+			opts.assembledOutputPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedPromptAssemblyReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedPromptAssemblyReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.assemblyDryRunPath == "" {
+		return codexMaterializedPromptAssemblyReportOptions{}, fmt.Errorf("missing --assembly-dry-run")
+	}
+	if opts.assembledOutputPath == "" {
+		return codexMaterializedPromptAssemblyReportOptions{}, fmt.Errorf("missing --assembled-output")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedPromptAssemblyReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedPromptAssemblyReport(opts codexMaterializedPromptAssemblyReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedPromptAssemblyReport(retrievalcontext.MaterializedPromptAssemblyReportOptions{
+		AssemblyDryRunPath:  opts.assemblyDryRunPath,
+		AssembledOutputPath: opts.assembledOutputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-prompt-assembly-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedPromptAssemblyReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedPromptAssemblyReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-prompt-assembly-report failed: %v\n", err)
 		return 1
 	}
 	if result.Status == lancedbpolicy.StatusFailed {

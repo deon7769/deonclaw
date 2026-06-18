@@ -9,6 +9,8 @@ This fixture does **not** run LanceDB search, call embedding providers, or injec
 - `retrieval-context.json` — passive metadata-only retrieval artifact (one hit)
 - `memory-index-chunks.jsonl` — governed chunk text source for materialize
 - `retrieval-injection-policy.yaml` — plan-only injection policy over generated artifacts (Task 22.15.1)
+- `materialized-injection-task.yaml` — schema-only materialized injection task declaration (Task 22.19)
+- `base-worker-prompt-fixture.md` — dry-run base worker prompt fixture for materialized prompt assembly (Task 22.23)
 
 Generated artifacts (created by the steps below) stay in this directory when commands use `--output` paths here.
 
@@ -288,6 +290,39 @@ deonctl worker codex materialized-injection-readiness-report \
   --preflight retrieval-context-materialized-injection-preflight.json \
   --dry-run retrieval-context-materialized-injection-dry-run.json \
   --dry-run-report retrieval-context-materialized-injection-dry-run-report.json \
+  --output-format json > retrieval-context-materialized-injection-readiness-report.json
+~~~
+
+### 24. Materialized injection execution gate
+
+~~~bash
+deonctl worker codex materialized-injection-execution-gate \
+  --task materialized-injection-task.yaml \
+  --readiness-report retrieval-context-materialized-injection-readiness-report.json \
+  --prompt-output retrieval-context-materialized-injection-prompt-section.md \
+  --confirm-inject-materialized-context \
+  --output-format json > retrieval-context-materialized-injection-execution-gate.json
+~~~
+
+### 25. Materialized prompt assembly dry-run
+
+~~~bash
+deonctl worker codex materialized-prompt-assembly-dry-run \
+  --execution-gate retrieval-context-materialized-injection-execution-gate.json \
+  --base-prompt-fixture base-worker-prompt-fixture.md \
+  --prompt-output retrieval-context-materialized-injection-prompt-section.md \
+  --output retrieval-context-materialized-prompt-assembly-dry-run.json \
+  --assembled-output retrieval-context-materialized-prompt-assembly.md \
+  --confirm-inject-materialized-context \
+  --output-format json
+~~~
+
+### 26. Materialized prompt assembly report
+
+~~~bash
+deonctl worker codex materialized-prompt-assembly-report \
+  --assembly-dry-run retrieval-context-materialized-prompt-assembly-dry-run.json \
+  --assembled-output retrieval-context-materialized-prompt-assembly.md \
   --output-format json
 ~~~
 
@@ -307,6 +342,9 @@ deonctl worker codex materialized-injection-readiness-report \
 - optional materialized-injection-dry-run returns `worker_execution: false`, `prompt_changed_in_real_runner: false`, `prompt_section_rendered: true`, writes prompt-section markdown with dry-run notice and `text_excerpt` (stdout/json dry-run output must not contain chunk text)
 - optional materialized-injection-dry-run-report returns `status: ok`, validates prompt-section hash and dry-run flags, and does not print preview chunk text in report output
 - optional materialized-injection-readiness-report returns `governance_ready_for_future_execution: true`, `execution_allowed_now: false`, and does not print preview chunk text in report output
+- optional materialized-injection-execution-gate returns `execution_gate_ready: true`, `implementation_allows_execution_now: false`, `worker_execution_allowed: false`, `prompt_injection_allowed_now: false`, `blocked_reason: implementation_not_enabled`, and does not print preview chunk text in report output
+- optional materialized-prompt-assembly-dry-run returns `assembled_prompt_rendered: true`, `worker_execution: false`, `sent_to_worker: false`, `prompt_changed_in_real_runner: false`, writes assembled markdown with dry-run notice and `text_excerpt` (stdout/json assembly dry-run output must not contain chunk text)
+- optional materialized-prompt-assembly-report returns `status: ok`, `assembled_prompt_validated: true`, `worker_execution: false`, `sent_to_worker: false`, `prompt_changed_in_real_runner: false`, and does not print preview chunk text in report output
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`
@@ -314,5 +352,7 @@ deonctl worker codex materialized-injection-readiness-report \
 ## Safety
 
 - metadata-only runner attachment remains separate from this fixture workflow
+- the materialized prompt assembly is dry-run only and is never sent to Codex or OpenCode
+- the materialized injection execution gate keeps `worker_execution_allowed: false`, `prompt_injection_allowed_now: false`, and `blocked_reason: implementation_not_enabled`
 - no memory apply/restore changes
 - no LanceDB search or provider API calls

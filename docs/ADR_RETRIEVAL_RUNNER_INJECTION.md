@@ -48,6 +48,9 @@ retrieval-context (runner metadata attachment)
 | 22.21 | `worker codex materialized-injection-dry-run` (dry-run prompt section artifact, no worker execution) |
 | 22.21.1 | `worker codex materialized-injection-dry-run-report` (dry-run report/QA, no worker execution) |
 | 22.21.2 | `worker codex materialized-injection-readiness-report` (readiness report, no worker execution) |
+| 22.22 | `worker codex materialized-injection-execution-gate` (execution gate, no worker execution) |
+| 22.23 | `worker codex materialized-prompt-assembly-dry-run` (prompt assembly adapter, no worker execution) |
+| 22.24 | `worker codex materialized-prompt-assembly-report` (prompt assembly QA, no worker execution) |
 
 ### What already exists
 
@@ -136,7 +139,13 @@ Future injection design and implementation must **not** include:
 
 **Task 22.21.2 (implemented):** *Runner materialized injection readiness report* — `deonctl worker codex materialized-injection-readiness-report` consolidates preflight, dry-run, and dry-run-report gates and declares `governance_ready_for_future_execution` while keeping `execution_allowed_now: false`. **Still no runner execution**, no real prompt injection, no worker materialized text injection.
 
-**Task 22.22+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
+**Task 22.22 (implemented):** *Runner materialized injection execution gate* — `deonctl worker codex materialized-injection-execution-gate` loads task YAML, readiness report, and prompt-output, validates every execution/injection gate while keeping `worker_execution_allowed: false`, `prompt_injection_allowed_now: false`, and `blocked_reason: implementation_not_enabled`. **Still no runner execution**, no real prompt injection, no worker materialized text injection.
+
+**Task 22.23 (implemented):** *Materialized prompt assembly adapter* — `deonctl worker codex materialized-prompt-assembly-dry-run` builds a dry-run assembled markdown from the base worker prompt fixture and the materialized prompt-output, gated on Task 22.22 execution gate. Sets `assembled_prompt_rendered: true`, `worker_execution: false`, `sent_to_worker: false`, `prompt_changed_in_real_runner: false`. **Still no runner execution**, no real prompt injection, no worker materialized text injection; normal runner prompt unchanged.
+
+**Task 22.24 (implemented):** *Materialized prompt assembly report* — `deonctl worker codex materialized-prompt-assembly-report` validates Task 22.23 assembly dry-run JSON and assembled markdown without printing chunk text in report output. **Still no runner execution**, no real prompt injection, no worker materialized text injection.
+
+**Task 22.25+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

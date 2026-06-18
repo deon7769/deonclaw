@@ -154,7 +154,19 @@ Before merging or tagging retrieval-governance work:
 
 - [ ] CI green on `main` after push.
 
-## Boundary
+## 6. Boundary
+
+Task 22.13 is documentation and operability only. Runner materialized text injection, active runner search, natural-language retrieval, provider APIs, MCP integration, fallback execution, and UI remain out of scope.
+
+Tasks 22.22–22.24 add the runner materialized injection execution gate, materialized prompt assembly dry-run, and materialized prompt assembly report. They are **metadata-only and dry-run** artifacts:
+
+- worker execution with materialized text is still not implemented
+- normal runner prompt injection is still not implemented
+- task `enabled: true` is still blocked
+- the materialized prompt assembly is never sent to Codex or OpenCode
+- all metadata-only artifacts (gate, assembly dry-run JSON/text, assembly report JSON/text) must block `text_excerpt`, alpha text, prompt-output content, and assembled-output content
+
+Boundary
 
 Task 22.13 is documentation and operability only. Runner materialized text injection, active runner search, natural-language retrieval, provider APIs, MCP integration, fallback execution, and UI remain out of scope.
 

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/deon7769/deonclaw/internal/lancedbpolicy"
@@ -163,6 +164,28 @@ func MaterializedInjectionReadinessReport(opts MaterializedInjectionReadinessRep
 		result.GovernanceReadyForFutureExecution = true
 	}
 	return result, nil
+}
+
+func LoadMaterializedInjectionReadinessReport(path string) (MaterializedInjectionReadinessReportResult, []byte, error) {
+	if err := validateRelativeSafePath("readiness report path", path); err != nil {
+		return MaterializedInjectionReadinessReportResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MaterializedInjectionReadinessReportResult{}, nil, fmt.Errorf("read materialized injection readiness report %q: %w", path, err)
+	}
+	return ParseMaterializedInjectionReadinessReportJSON(data)
+}
+
+func ParseMaterializedInjectionReadinessReportJSON(data []byte) (MaterializedInjectionReadinessReportResult, []byte, error) {
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return MaterializedInjectionReadinessReportResult{}, nil, fmt.Errorf("materialized injection readiness report must not contain materialized preview text")
+	}
+	var result MaterializedInjectionReadinessReportResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return MaterializedInjectionReadinessReportResult{}, nil, fmt.Errorf("parse materialized injection readiness report json: %w", err)
+	}
+	return result, data, nil
 }
 
 func coherentMaterializedSHA256(sources ...string) (string, []string) {

@@ -122,6 +122,9 @@ Implemented:
 - runner materialized injection dry-run prompt artifact (`worker codex materialized-injection-dry-run`), no worker execution
 - runner materialized injection dry-run report (`worker codex materialized-injection-dry-run-report`), no worker execution
 - runner materialized injection readiness report (`worker codex materialized-injection-readiness-report`), no worker execution
+- runner materialized injection execution gate (`worker codex materialized-injection-execution-gate`), no worker execution
+- materialized prompt assembly dry-run (`worker codex materialized-prompt-assembly-dry-run`), no worker execution
+- materialized prompt assembly report (`worker codex materialized-prompt-assembly-report`), no worker execution
 
 Not implemented yet:
 
