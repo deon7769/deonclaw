@@ -17,6 +17,7 @@ Implemented now:
 - `deonctl runs retrieval-report` for runs with `retrieval_context_attached` in execution traces
 - `deonctl retrieval context materialize` for governed chunk text excerpts from chunks JSONL (explicit confirm flag)
 - `deonctl retrieval context materialized-report` for QA over materialized chunk text artifacts
+- `deonctl retrieval context bundle` for audit bundle over retrieval + materialized artifacts
 
 Not implemented yet:
 
@@ -159,6 +160,35 @@ deonctl retrieval context materialized-report \
 
 `materialized-report` validates JSON shape, hash fields, count coherence, per-item char limits, and forbidden fields (`vector`, `embedding`, `raw_embedding`, `env`, `secret`). It accepts artifact status `ok` or `warning`. Stdout text output never prints `text_excerpt` values.
 
+## Audit bundle (Task 22.10)
+
+The bundle is the checkpoint before any governed use of materialized chunk text. It consolidates validated retrieval metadata and materialized artifact references only. The bundle does not contain materialized text — only paths, hashes, counts, IDs, and warnings.
+
+~~~bash
+deonctl retrieval context bundle \
+  --retrieval-context artifacts/<run-id>/retrieval-context.json \
+  --materialized artifacts/<run-id>/retrieval-context-materialized.json \
+  --output artifacts/<run-id>/retrieval-context-bundle.json \
+  --summary artifacts/<run-id>/retrieval-context-bundle.md
+deonctl retrieval context bundle \
+  --retrieval-context artifacts/<run-id>/retrieval-context.json \
+  --materialized artifacts/<run-id>/retrieval-context-materialized.json \
+  --output artifacts/<run-id>/retrieval-context-bundle.json \
+  --summary artifacts/<run-id>/retrieval-context-bundle.md \
+  --output-format json
+~~~
+
+Rules:
+
+- runs `inspect` on retrieval context; fails when inspect status is not `ok`
+- runs `materialized-report` on the materialized artifact; fails when report status is `failed`
+- validates `source_retrieval_context_sha256` against the retrieval context file
+- materialized `chunk_id` values must be a subset of retrieval context chunk IDs
+- `included_chunk_count` must be `<=` retrieval `hit_count`
+- bundle status is `warning` when materialized report is `warning` or `omitted_chunk_count > 0`
+- `contains_text: false` in bundle JSON; no `text_excerpt` in bundle JSON, summary, or stdout text output
+- all input/output paths must be relative safe paths
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -176,4 +206,4 @@ deonctl retrieval context materialized-report \
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.

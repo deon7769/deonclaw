@@ -113,6 +113,7 @@ Usage:
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
   deonctl retrieval context materialize --retrieval-context <retrieval-context.json> --chunks <memory-index-chunks.jsonl> --output <materialized.json> --summary <materialized.md> --max-chars-per-chunk <n> --max-total-chars <n> --confirm-include-chunk-text
   deonctl retrieval context materialized-report --artifact <retrieval-context-materialized.json> [--output-format text|json]
+  deonctl retrieval context bundle --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-bundle.json> --summary <retrieval-context-bundle.md> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -891,6 +892,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextMaterializedReport(opts, stdout, stderr)
+			case "bundle":
+				opts, err := parseRetrievalContextBundleOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextBundle(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -7031,6 +7040,94 @@ func runRetrievalContextMaterializedReport(opts retrievalContextMaterializedRepo
 		return 1
 	}
 	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type retrievalContextBundleOptions struct {
+	retrievalContextPath string
+	materializedPath     string
+	outputPath           string
+	summaryPath          string
+	outputFormat         string
+}
+
+func parseRetrievalContextBundleOptions(args []string) (retrievalContextBundleOptions, error) {
+	opts := retrievalContextBundleOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--retrieval-context":
+			if i+1 >= len(args) {
+				return retrievalContextBundleOptions{}, fmt.Errorf("missing value for --retrieval-context")
+			}
+			opts.retrievalContextPath = args[i+1]
+			i++
+		case "--materialized":
+			if i+1 >= len(args) {
+				return retrievalContextBundleOptions{}, fmt.Errorf("missing value for --materialized")
+			}
+			opts.materializedPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextBundleOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--summary":
+			if i+1 >= len(args) {
+				return retrievalContextBundleOptions{}, fmt.Errorf("missing value for --summary")
+			}
+			opts.summaryPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextBundleOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextBundleOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.retrievalContextPath == "" {
+		return retrievalContextBundleOptions{}, fmt.Errorf("missing --retrieval-context")
+	}
+	if opts.materializedPath == "" {
+		return retrievalContextBundleOptions{}, fmt.Errorf("missing --materialized")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextBundleOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.summaryPath == "" {
+		return retrievalContextBundleOptions{}, fmt.Errorf("missing --summary")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextBundleOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextBundle(opts retrievalContextBundleOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.Bundle(retrievalcontext.BundleOptions{
+		RetrievalContextPath: opts.retrievalContextPath,
+		MaterializedPath:     opts.materializedPath,
+		OutputPath:           opts.outputPath,
+		SummaryPath:          opts.summaryPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context bundle failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteBundleJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteBundleText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context bundle failed: %v\n", err)
 		return 1
 	}
 	return 0

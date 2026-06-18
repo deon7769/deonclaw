@@ -102,6 +102,7 @@ Implemented:
 - retrieval context inspect and runs retrieval-report for passive attachment auditing, without active search
 - governed retrieval context chunk text materialize (`retrieval context materialize`), without runner auto-injection
 - retrieval context materialized-report for chunk text artifact QA, without runner auto-injection
+- retrieval context audit bundle (`retrieval context bundle`), without runner text injection
 
 Not implemented yet:
 

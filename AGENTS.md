@@ -89,6 +89,7 @@ Implemented:
 - retrieval context inspect and runs retrieval-report for passive attachment auditing, without active search
 - governed retrieval context chunk text materialize from memory-index chunks JSONL (`retrieval context materialize`), without runner auto-injection or source file reads
 - retrieval context materialized-report for governed chunk text artifact QA, without runner auto-injection
+- retrieval context audit bundle (`retrieval context bundle`) over retrieval + materialized artifacts, without runner text injection
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
