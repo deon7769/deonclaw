@@ -166,6 +166,28 @@ func MaterializedInjectionPreflight(opts MaterializedInjectionPreflightOptions) 
 	return result, nil
 }
 
+func LoadMaterializedInjectionPreflight(path string) (MaterializedInjectionPreflightResult, []byte, error) {
+	if err := validateRelativeSafePath("preflight path", path); err != nil {
+		return MaterializedInjectionPreflightResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MaterializedInjectionPreflightResult{}, nil, fmt.Errorf("read materialized injection preflight %q: %w", path, err)
+	}
+	return ParseMaterializedInjectionPreflightJSON(data)
+}
+
+func ParseMaterializedInjectionPreflightJSON(data []byte) (MaterializedInjectionPreflightResult, []byte, error) {
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return MaterializedInjectionPreflightResult{}, nil, fmt.Errorf("materialized injection preflight must not contain materialized preview text")
+	}
+	var result MaterializedInjectionPreflightResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return MaterializedInjectionPreflightResult{}, nil, fmt.Errorf("parse materialized injection preflight json: %w", err)
+	}
+	return result, data, nil
+}
+
 func writeMaterializedInjectionPreflightJSON(path string, result MaterializedInjectionPreflightResult) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create materialized injection preflight output dir: %w", err)

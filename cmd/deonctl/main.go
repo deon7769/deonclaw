@@ -131,6 +131,7 @@ Usage:
   deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex materialized-injection-preflight --task <path> --prompt-preview-report <retrieval-context-prompt-preview-report.json> --output <materialized-injection-preflight.json> [--output-format text|json]
+  deonctl worker codex materialized-injection-dry-run --task <path> --preflight <materialized-injection-preflight.json> --prompt-preview <retrieval-context-prompt-preview.md> --output <materialized-injection-dry-run.json> --prompt-output <materialized-injection-prompt-section.md> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -824,6 +825,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedInjectionPreflight(opts, stdout, stderr)
+			case "materialized-injection-dry-run":
+				opts, err := parseCodexMaterializedInjectionDryRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedInjectionDryRun(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -6407,6 +6416,119 @@ func runCodexMaterializedInjectionPreflight(opts codexMaterializedInjectionPrefl
 	}
 	if opts.outputFormat != "json" {
 		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedInjectionDryRunOptions struct {
+	taskPath                         string
+	preflightPath                    string
+	promptPreviewPath                string
+	outputPath                       string
+	promptOutputPath                 string
+	confirmInjectMaterializedContext bool
+	outputFormat                     string
+}
+
+func parseCodexMaterializedInjectionDryRunOptions(args []string) (codexMaterializedInjectionDryRunOptions, error) {
+	opts := codexMaterializedInjectionDryRunOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--task":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskPath = args[i+1]
+			i++
+		case "--preflight":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing value for --preflight")
+			}
+			opts.preflightPath = args[i+1]
+			i++
+		case "--prompt-preview":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing value for --prompt-preview")
+			}
+			opts.promptPreviewPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--prompt-output":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing value for --prompt-output")
+			}
+			opts.promptOutputPath = args[i+1]
+			i++
+		case "--confirm-inject-materialized-context":
+			opts.confirmInjectMaterializedContext = true
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.taskPath == "" {
+		return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing --task")
+	}
+	if opts.preflightPath == "" {
+		return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing --preflight")
+	}
+	if opts.promptPreviewPath == "" {
+		return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing --prompt-preview")
+	}
+	if opts.outputPath == "" {
+		return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.promptOutputPath == "" {
+		return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing --prompt-output")
+	}
+	if !opts.confirmInjectMaterializedContext {
+		return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("missing --confirm-inject-materialized-context")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedInjectionDryRunOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedInjectionDryRun(opts codexMaterializedInjectionDryRunOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedInjectionDryRun(retrievalcontext.MaterializedInjectionDryRunOptions{
+		TaskPath:                         opts.taskPath,
+		PreflightPath:                    opts.preflightPath,
+		PromptPreviewPath:                opts.promptPreviewPath,
+		OutputPath:                       opts.outputPath,
+		PromptOutputPath:                 opts.promptOutputPath,
+		ConfirmInjectMaterializedContext: opts.confirmInjectMaterializedContext,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-dry-run failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedInjectionDryRunJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedInjectionDryRunText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-dry-run failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+		fmt.Fprintf(stdout, "prompt-output: %s\n", opts.promptOutputPath)
 	}
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
