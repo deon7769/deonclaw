@@ -119,6 +119,28 @@ func MaterializedInjectionDryRunReport(opts MaterializedInjectionDryRunReportOpt
 	return result, nil
 }
 
+func LoadMaterializedInjectionDryRunReport(path string) (MaterializedInjectionDryRunReportResult, []byte, error) {
+	if err := validateRelativeSafePath("dry-run report path", path); err != nil {
+		return MaterializedInjectionDryRunReportResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MaterializedInjectionDryRunReportResult{}, nil, fmt.Errorf("read materialized injection dry-run report %q: %w", path, err)
+	}
+	return ParseMaterializedInjectionDryRunReportJSON(data)
+}
+
+func ParseMaterializedInjectionDryRunReportJSON(data []byte) (MaterializedInjectionDryRunReportResult, []byte, error) {
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return MaterializedInjectionDryRunReportResult{}, nil, fmt.Errorf("materialized injection dry-run report must not contain materialized preview text")
+	}
+	var result MaterializedInjectionDryRunReportResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return MaterializedInjectionDryRunReportResult{}, nil, fmt.Errorf("parse materialized injection dry-run report json: %w", err)
+	}
+	return result, data, nil
+}
+
 func WriteMaterializedInjectionDryRunReportText(result MaterializedInjectionDryRunReportResult, out io.Writer) error {
 	if _, err := fmt.Fprintln(out, "worker_codex_materialized_injection_dry_run_report:"); err != nil {
 		return err

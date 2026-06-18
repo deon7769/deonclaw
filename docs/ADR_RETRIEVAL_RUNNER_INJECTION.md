@@ -47,6 +47,7 @@ retrieval-context (runner metadata attachment)
 | 22.20 | `worker codex materialized-injection-preflight` (runner preflight, no worker execution) |
 | 22.21 | `worker codex materialized-injection-dry-run` (dry-run prompt section artifact, no worker execution) |
 | 22.21.1 | `worker codex materialized-injection-dry-run-report` (dry-run report/QA, no worker execution) |
+| 22.21.2 | `worker codex materialized-injection-readiness-report` (readiness report, no worker execution) |
 
 ### What already exists
 
@@ -132,6 +133,8 @@ Future injection design and implementation must **not** include:
 **Task 22.21 (implemented):** *Runner materialized injection dry-run prompt artifact* — `deonctl worker codex materialized-injection-dry-run` reads prompt-preview markdown only after explicit `--confirm-inject-materialized-context`, gates on preflight 22.20, and writes a dry-run prompt-section artifact plus metadata JSON. **Still no runner execution**, no real prompt injection, no worker materialized text injection.
 
 **Task 22.21.1 (implemented):** *Runner materialized injection dry-run report* — `deonctl worker codex materialized-injection-dry-run-report` validates dry-run JSON and prompt-section markdown metadata without printing chunk text. **Still no runner execution**, no real prompt injection, no worker materialized text injection.
+
+**Task 22.21.2 (implemented):** *Runner materialized injection readiness report* — `deonctl worker codex materialized-injection-readiness-report` consolidates preflight, dry-run, and dry-run-report gates and declares `governance_ready_for_future_execution` while keeping `execution_allowed_now: false`. **Still no runner execution**, no real prompt injection, no worker materialized text injection.
 
 **Task 22.22+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 

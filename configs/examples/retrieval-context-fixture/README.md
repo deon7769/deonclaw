@@ -278,6 +278,16 @@ deonctl worker codex materialized-injection-dry-run \
 deonctl worker codex materialized-injection-dry-run-report \
   --dry-run retrieval-context-materialized-injection-dry-run.json \
   --prompt-output retrieval-context-materialized-injection-prompt-section.md \
+  --output-format json > retrieval-context-materialized-injection-dry-run-report.json
+~~~
+
+### 23. Runner materialized injection readiness report (no worker execution)
+
+~~~bash
+deonctl worker codex materialized-injection-readiness-report \
+  --preflight retrieval-context-materialized-injection-preflight.json \
+  --dry-run retrieval-context-materialized-injection-dry-run.json \
+  --dry-run-report retrieval-context-materialized-injection-dry-run-report.json \
   --output-format json
 ~~~
 
@@ -296,6 +306,7 @@ deonctl worker codex materialized-injection-dry-run-report \
 - optional materialized-injection-preflight returns `worker_execution_allowed: false`, `prompt_injection_allowed_now: false`, and does not print preview chunk text
 - optional materialized-injection-dry-run returns `worker_execution: false`, `prompt_changed_in_real_runner: false`, `prompt_section_rendered: true`, writes prompt-section markdown with dry-run notice and `text_excerpt` (stdout/json dry-run output must not contain chunk text)
 - optional materialized-injection-dry-run-report returns `status: ok`, validates prompt-section hash and dry-run flags, and does not print preview chunk text in report output
+- optional materialized-injection-readiness-report returns `governance_ready_for_future_execution: true`, `execution_allowed_now: false`, and does not print preview chunk text in report output
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

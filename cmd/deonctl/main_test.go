@@ -66,6 +66,88 @@ func TestRunDoctorJSON(t *testing.T) {
 	}
 }
 
+func TestRunWorkerCodexMaterializedInjectionReadinessReportJSON(t *testing.T) {
+	dir := t.TempDir()
+	previous, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(previous); err != nil {
+			t.Fatalf("restore Chdir() error = %v", err)
+		}
+	})
+
+	const materializedSHA = "1111111111111111111111111111111111111111111111111111111111111111"
+	const promptSHA = "2222222222222222222222222222222222222222222222222222222222222222"
+	writeCLIJSON(t, "preflight.json", map[string]any{
+		"status":                          "ok",
+		"worker_execution_allowed":        false,
+		"prompt_injection_allowed_now":    false,
+		"materialized_injection_declared": true,
+		"materialized_sha256":             materializedSHA,
+		"required_future_flag":            retrievalcontext.RequiredFutureInjectFlag,
+	})
+	writeCLIJSON(t, "dry-run.json", map[string]any{
+		"status":                        "ok",
+		"worker_execution":              false,
+		"prompt_changed_in_real_runner": false,
+		"prompt_section_rendered":       true,
+		"prompt_output_sha256":          promptSHA,
+		"materialized_sha256":           materializedSHA,
+		"contains_text":                 true,
+		"preview_only":                  true,
+		"confirm_flag_used":             true,
+	})
+	writeCLIJSON(t, "dry-run-report.json", map[string]any{
+		"status":                        "ok",
+		"worker_execution":              false,
+		"prompt_changed_in_real_runner": false,
+		"prompt_section_rendered":       true,
+		"contains_text":                 true,
+		"preview_only":                  true,
+		"prompt_output_sha256":          promptSHA,
+		"materialized_sha256":           materializedSHA,
+	})
+
+	var stdout bytes.Buffer
+	var stderr bytes.Buffer
+	code := run([]string{
+		"worker",
+		"codex",
+		"materialized-injection-readiness-report",
+		"--preflight",
+		"preflight.json",
+		"--dry-run",
+		"dry-run.json",
+		"--dry-run-report",
+		"dry-run-report.json",
+		"--output-format",
+		"json",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+	if strings.Contains(stdout.String(), "text_excerpt") || strings.Contains(stdout.String(), "alpha text") {
+		t.Fatalf("stdout leaked materialized text marker: %q", stdout.String())
+	}
+	var decoded struct {
+		Status                            string `json:"status"`
+		GovernanceReadyForFutureExecution bool   `json:"governance_ready_for_future_execution"`
+		ExecutionAllowedNow               bool   `json:"execution_allowed_now"`
+		WorkerExecution                   bool   `json:"worker_execution"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v, stdout=%s", err, stdout.String())
+	}
+	if decoded.Status != "ok" || !decoded.GovernanceReadyForFutureExecution || decoded.ExecutionAllowedNow || decoded.WorkerExecution {
+		t.Fatalf("decoded = %#v, want readiness ok with execution disabled", decoded)
+	}
+}
+
 func TestRunWorkersDoctorWithWorkerFilterAndConfig(t *testing.T) {
 	tempDir := t.TempDir()
 	writeCLIPathFakeExecutable(t, tempDir, "fake-codex", 0)
@@ -6599,6 +6681,18 @@ func writeCLIWorkersConfig(t *testing.T, content string) string {
 		t.Fatalf("write workers config file: %v", err)
 	}
 	return path
+}
+
+func writeCLIJSON(t *testing.T, path string, payload map[string]any) {
+	t.Helper()
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("marshal %s: %v", path, err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("write %s: %v", path, err)
+	}
 }
 
 func saveCLIRunsReportTask(t *testing.T, ctx context.Context, db storepkg.Store) {

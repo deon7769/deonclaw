@@ -35,6 +35,7 @@ Implemented now:
 - `deonctl worker codex materialized-injection-preflight` (Task 22.20, runner preflight only)
 - `deonctl worker codex materialized-injection-dry-run` (Task 22.21, dry-run prompt section artifact only)
 - `deonctl worker codex materialized-injection-dry-run-report` (Task 22.21.1, dry-run report/QA only)
+- `deonctl worker codex materialized-injection-readiness-report` (Task 22.21.2, readiness report only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -606,6 +607,32 @@ Rules:
 
 Optional fixture step 22 exercises this path after materialized-injection-dry-run.
 
+## Runner materialized injection readiness report (Task 22.21.2)
+
+Consolidates preflight, dry-run, and dry-run-report gates before any future real execution. Declares governance readiness while keeping execution disabled.
+
+~~~bash
+deonctl worker codex materialized-injection-readiness-report \
+  --preflight artifacts/<run-id>/materialized-injection-preflight.json \
+  --dry-run artifacts/<run-id>/materialized-injection-dry-run.json \
+  --dry-run-report artifacts/<run-id>/materialized-injection-dry-run-report.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all three input JSON paths
+- loads preflight, dry-run, and dry-run-report artifacts; none may contain `text_excerpt` or preview chunk text
+- validates preflight `status` ok/warning, `worker_execution_allowed: false`, `prompt_injection_allowed_now: false`
+- validates dry-run `status` ok/warning, `worker_execution: false`, `prompt_changed_in_real_runner: false`, `prompt_section_rendered: true`, `confirm_flag_used: true`
+- validates dry-run-report `status` ok/warning, `worker_execution: false`, `prompt_changed_in_real_runner: false`, `prompt_section_rendered: true`
+- validates `materialized_sha256` coherence across artifacts when present and `prompt_output_sha256` match between dry-run and dry-run-report
+- sets `governance_ready_for_future_execution: true` on ok/warning, `execution_allowed_now: false`, `prompt_injection_allowed_now: false`, `worker_execution: false`, `required_future_flag: --confirm-inject-materialized-context`
+- report stdout/json must not contain `text_excerpt` or preview chunk text; exit code 1 on failures
+- runner prompt and worker execution remain unchanged
+
+Optional fixture step 23 exercises this path after materialized-injection-dry-run-report.
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -623,4 +650,4 @@ Optional fixture step 22 exercises this path after materialized-injection-dry-ru
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Task 22.15.1 extends the governance e2e fixture with injection-policy validate/plan over real chain artifacts. Task 22.16 owns runner injection approval artifacts without execution. Task 22.17 owns runner injection execution-plan artifacts without worker execution. Task 22.18 owns materialized prompt section preview render without worker execution. Task 22.18.1 owns prompt preview report/QA without worker execution. Task 22.18.2 owns injection governance release bundle consolidation without worker execution. Task 22.19 owns task YAML declaration for future materialized injection with governance bundle validation only. Task 22.19.1 owns materialized injection task declaration report/QA without runner execution. Task 22.20 owns runner materialized injection preflight without worker execution. Task 22.21 owns runner materialized injection dry-run prompt artifact without worker execution. Task 22.21.1 owns runner materialized injection dry-run report/QA without worker execution. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Task 22.15.1 extends the governance e2e fixture with injection-policy validate/plan over real chain artifacts. Task 22.16 owns runner injection approval artifacts without execution. Task 22.17 owns runner injection execution-plan artifacts without worker execution. Task 22.18 owns materialized prompt section preview render without worker execution. Task 22.18.1 owns prompt preview report/QA without worker execution. Task 22.18.2 owns injection governance release bundle consolidation without worker execution. Task 22.19 owns task YAML declaration for future materialized injection with governance bundle validation only. Task 22.19.1 owns materialized injection task declaration report/QA without runner execution. Task 22.20 owns runner materialized injection preflight without worker execution. Task 22.21 owns runner materialized injection dry-run prompt artifact without worker execution. Task 22.21.1 owns runner materialized injection dry-run report/QA without worker execution. Task 22.21.2 owns runner materialized injection readiness report without worker execution. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
