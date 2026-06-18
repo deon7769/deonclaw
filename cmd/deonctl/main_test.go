@@ -8103,6 +8103,9 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 		executionPlanSummary         = "retrieval-context-injection-execution-plan.md"
 		previewOutputPath            = "retrieval-context-prompt-preview.md"
 		previewManifestPath          = "retrieval-context-prompt-preview.json"
+		previewReportPath            = "retrieval-context-prompt-preview-report.json"
+		bundleOutputPath             = "retrieval-context-injection-governance-bundle.json"
+		bundleSummaryPath            = "retrieval-context-injection-governance-bundle.md"
 	)
 
 	steps := [][]string{
@@ -8351,6 +8354,38 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	}
 	if strings.Contains(reportStdout.String(), "alpha text") || strings.Contains(reportStdout.String(), "text_excerpt:") {
 		t.Fatal("prompt-preview-report must not leak preview content")
+	}
+	if err := os.WriteFile(filepath.Join(dir, previewReportPath), []byte(reportStdout.String()), 0o644); err != nil {
+		t.Fatalf("WriteFile(preview report) error = %v", err)
+	}
+
+	var bundleStdout, bundleStderr bytes.Buffer
+	bundleCode := run([]string{
+		"retrieval", "context", "injection-governance-bundle",
+		"--governance-report", governanceReportPath,
+		"--policy", injectionPolicyPath,
+		"--injection-approval-request", injectionApprovalRequestPath,
+		"--injection-approval", injectionApprovalPath,
+		"--execution-plan", executionPlanPath,
+		"--prompt-preview-manifest", previewManifestPath,
+		"--prompt-preview-report", previewReportPath,
+		"--output", bundleOutputPath,
+		"--summary", bundleSummaryPath,
+	}, &bundleStdout, &bundleStderr)
+	if bundleCode != 0 {
+		t.Fatalf("injection-governance-bundle exit=%d stderr=%q stdout=%q", bundleCode, bundleStderr.String(), bundleStdout.String())
+	}
+	if !strings.Contains(bundleStdout.String(), "injection_authorized_for_future: true") {
+		t.Fatalf("bundle stdout = %q, want injection_authorized_for_future true", bundleStdout.String())
+	}
+	if !strings.Contains(bundleStdout.String(), "runner_execution: false") {
+		t.Fatalf("bundle stdout = %q, want runner_execution false", bundleStdout.String())
+	}
+	for _, path := range []string{bundleOutputPath, bundleSummaryPath, previewReportPath} {
+		data := readFixtureFileString(t, filepath.Join(dir, path))
+		if strings.Contains(data, "text_excerpt") || strings.Contains(data, "alpha text") {
+			t.Fatalf("%s must not contain materialized text", path)
+		}
 	}
 }
 

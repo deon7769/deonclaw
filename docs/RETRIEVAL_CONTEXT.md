@@ -29,6 +29,7 @@ Implemented now:
 - `deonctl retrieval context injection-execution-plan` (Task 22.17, execution plan only)
 - `deonctl retrieval context prompt-preview` (Task 22.18, preview render only)
 - `deonctl retrieval context prompt-preview-report` (Task 22.18.1, preview QA only)
+- `deonctl retrieval context injection-governance-bundle` (Task 22.18.2, injection governance release bundle only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -454,6 +455,34 @@ Rules:
 
 Optional fixture step 17 exercises this path after prompt-preview.
 
+## Injection governance release bundle (Task 22.18.2)
+
+Metadata-only release bundle over the full injection governance chain. Does not include preview markdown or materialized chunk text.
+
+~~~bash
+deonctl retrieval context injection-governance-bundle \
+  --governance-report artifacts/<run-id>/retrieval-context-governance-report.json \
+  --policy configs/examples/retrieval-injection-policy.yaml \
+  --injection-approval-request artifacts/<run-id>/retrieval-context-injection-approval-request.json \
+  --injection-approval artifacts/<run-id>/retrieval-context-injection-approval.json \
+  --execution-plan artifacts/<run-id>/retrieval-context-injection-execution-plan.json \
+  --prompt-preview-manifest artifacts/<run-id>/retrieval-context-prompt-preview.json \
+  --prompt-preview-report artifacts/<run-id>/retrieval-context-prompt-preview-report.json \
+  --output artifacts/<run-id>/retrieval-context-injection-governance-bundle.json \
+  --summary artifacts/<run-id>/retrieval-context-injection-governance-bundle.md
+~~~
+
+Rules:
+
+- path hardening on all inputs and outputs
+- validates governance-report status `ok` or `warning`, injection-policy schema, injection-approval inspect with request binding, execution-plan plan-only flags, prompt-preview manifest flags, and prompt-preview-report status `ok`
+- validates hash coherence across approval, policy, governance-report, execution-plan, manifest, and prompt-preview-report
+- requires `approval.runner_injection_allowed: true`, `execution_plan.would_execute_runner: false`, `execution_plan.execution_supported_now: false`, `manifest.preview_only: true`, `manifest.runner_execution: false`
+- bundle output sets `contains_text: false`, `runner_execution: false`, `injection_authorized_for_future: true`, `execution_supported_now: false`
+- bundle json and summary must not contain `text_excerpt` or preview chunk text
+
+Optional fixture step 18 exercises this path after prompt-preview-report.
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -471,4 +500,4 @@ Optional fixture step 17 exercises this path after prompt-preview.
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Task 22.15.1 extends the governance e2e fixture with injection-policy validate/plan over real chain artifacts. Task 22.16 owns runner injection approval artifacts without execution. Task 22.17 owns runner injection execution-plan artifacts without worker execution. Task 22.18 owns materialized prompt section preview render without worker execution. Task 22.18.1 owns prompt preview report/QA without worker execution. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Task 22.15.1 extends the governance e2e fixture with injection-policy validate/plan over real chain artifacts. Task 22.16 owns runner injection approval artifacts without execution. Task 22.17 owns runner injection execution-plan artifacts without worker execution. Task 22.18 owns materialized prompt section preview render without worker execution. Task 22.18.1 owns prompt preview report/QA without worker execution. Task 22.18.2 owns injection governance release bundle consolidation without worker execution. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.

@@ -126,6 +126,7 @@ Usage:
   deonctl retrieval context injection-execution-plan --policy <retrieval-injection-policy.yaml> --governance-report <retrieval-context-governance-report.json> --injection-approval <retrieval-context-injection-approval.json> --injection-approval-request <retrieval-context-injection-approval-request.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-injection-execution-plan.json> --summary <retrieval-context-injection-execution-plan.md>
   deonctl retrieval context prompt-preview --execution-plan <retrieval-context-injection-execution-plan.json> --policy <retrieval-injection-policy.yaml> --materialized <retrieval-context-materialized.json> --output <retrieval-context-prompt-preview.md> --manifest <retrieval-context-prompt-preview.json> --confirm-render-materialized-context
   deonctl retrieval context prompt-preview-report --preview <retrieval-context-prompt-preview.md> --manifest <retrieval-context-prompt-preview.json> --execution-plan <retrieval-context-injection-execution-plan.json> [--output-format text|json]
+  deonctl retrieval context injection-governance-bundle --governance-report <retrieval-context-governance-report.json> --policy <retrieval-injection-policy.yaml> --injection-approval-request <retrieval-context-injection-approval-request.json> --injection-approval <retrieval-context-injection-approval.json> --execution-plan <retrieval-context-injection-execution-plan.json> --prompt-preview-manifest <retrieval-context-prompt-preview.json> --prompt-preview-report <retrieval-context-prompt-preview-report.json> --output <retrieval-context-injection-governance-bundle.json> --summary <retrieval-context-injection-governance-bundle.md>
   deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1031,6 +1032,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextPromptPreviewReport(opts, stdout, stderr)
+			case "injection-governance-bundle":
+				opts, err := parseRetrievalContextInjectionGovernanceBundleOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextInjectionGovernanceBundle(opts, stdout, stderr)
 			case "injection-plan":
 				opts, err := parseRetrievalContextInjectionPlanOptions(args[3:])
 				if err != nil {
@@ -7826,6 +7835,138 @@ func runRetrievalContextPromptPreviewReport(opts retrievalContextPromptPreviewRe
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1
 	}
+	return 0
+}
+
+type retrievalContextInjectionGovernanceBundleOptions struct {
+	governanceReportPath         string
+	policyPath                   string
+	injectionApprovalRequestPath string
+	injectionApprovalPath        string
+	executionPlanPath            string
+	promptPreviewManifestPath    string
+	promptPreviewReportPath      string
+	outputPath                   string
+	summaryPath                  string
+}
+
+func parseRetrievalContextInjectionGovernanceBundleOptions(args []string) (retrievalContextInjectionGovernanceBundleOptions, error) {
+	opts := retrievalContextInjectionGovernanceBundleOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--governance-report":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --governance-report")
+			}
+			opts.governanceReportPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--injection-approval-request":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --injection-approval-request")
+			}
+			opts.injectionApprovalRequestPath = args[i+1]
+			i++
+		case "--injection-approval":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --injection-approval")
+			}
+			opts.injectionApprovalPath = args[i+1]
+			i++
+		case "--execution-plan":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --execution-plan")
+			}
+			opts.executionPlanPath = args[i+1]
+			i++
+		case "--prompt-preview-manifest":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --prompt-preview-manifest")
+			}
+			opts.promptPreviewManifestPath = args[i+1]
+			i++
+		case "--prompt-preview-report":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --prompt-preview-report")
+			}
+			opts.promptPreviewReportPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--summary":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing value for --summary")
+			}
+			opts.summaryPath = args[i+1]
+			i++
+		default:
+			return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.governanceReportPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --governance-report")
+	}
+	if opts.policyPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.injectionApprovalRequestPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --injection-approval-request")
+	}
+	if opts.injectionApprovalPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --injection-approval")
+	}
+	if opts.executionPlanPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --execution-plan")
+	}
+	if opts.promptPreviewManifestPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --prompt-preview-manifest")
+	}
+	if opts.promptPreviewReportPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --prompt-preview-report")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.summaryPath == "" {
+		return retrievalContextInjectionGovernanceBundleOptions{}, fmt.Errorf("missing --summary")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextInjectionGovernanceBundle(opts retrievalContextInjectionGovernanceBundleOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.InjectionGovernanceBundle(retrievalcontext.InjectionGovernanceBundleOptions{
+		GovernanceReportPath:         opts.governanceReportPath,
+		PolicyPath:                   opts.policyPath,
+		InjectionApprovalRequestPath: opts.injectionApprovalRequestPath,
+		InjectionApprovalPath:        opts.injectionApprovalPath,
+		ExecutionPlanPath:            opts.executionPlanPath,
+		PromptPreviewManifestPath:    opts.promptPreviewManifestPath,
+		PromptPreviewReportPath:      opts.promptPreviewReportPath,
+		OutputPath:                   opts.outputPath,
+		SummaryPath:                  opts.summaryPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-governance-bundle failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context injection-governance-bundle: ok")
+	fmt.Fprintf(stdout, "status: %s\n", result.Status)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "summary: %s\n", opts.summaryPath)
+	fmt.Fprintf(stdout, "contains_text: %t\n", result.ContainsText)
+	fmt.Fprintf(stdout, "runner_execution: %t\n", result.RunnerExecution)
+	fmt.Fprintf(stdout, "injection_authorized_for_future: %t\n", result.InjectionAuthorizedForFuture)
+	fmt.Fprintf(stdout, "execution_supported_now: %t\n", result.ExecutionSupportedNow)
+	fmt.Fprintf(stdout, "materialized_sha256: %s\n", result.MaterializedSHA256)
 	return 0
 }
 

@@ -318,12 +318,66 @@ func assertFixturePromptPreviewE2E(t *testing.T, policyName, materializedPath, e
 	if report.Status != lancedbpolicy.StatusOK {
 		t.Fatalf("report = %#v, want ok", report)
 	}
-	var reportBuf bytes.Buffer
-	if err := retrievalcontext.WritePromptPreviewReportText(report, &reportBuf); err != nil {
+	var reportTextBuf bytes.Buffer
+	if err := retrievalcontext.WritePromptPreviewReportText(report, &reportTextBuf); err != nil {
 		t.Fatalf("WritePromptPreviewReportText() error = %v", err)
 	}
-	if strings.Contains(reportBuf.String(), "alpha text") || strings.Contains(reportBuf.String(), "text_excerpt:") {
+	if strings.Contains(reportTextBuf.String(), "alpha text") || strings.Contains(reportTextBuf.String(), "text_excerpt:") {
 		t.Fatal("prompt preview report leaked preview content")
+	}
+
+	const previewReportPath = "retrieval-context-prompt-preview-report.json"
+	var reportJSONBuf bytes.Buffer
+	if err := retrievalcontext.WritePromptPreviewReportJSON(report, &reportJSONBuf); err != nil {
+		t.Fatalf("WritePromptPreviewReportJSON() error = %v", err)
+	}
+	if err := os.WriteFile(previewReportPath, reportJSONBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	assertFixtureInjectionGovernanceBundleE2E(t, policyName, executionPlanPath, previewManifestPath, previewReportPath)
+}
+
+func assertFixtureInjectionGovernanceBundleE2E(t *testing.T, policyName, executionPlanPath, previewManifestPath, previewReportPath string) {
+	t.Helper()
+	const (
+		governanceReportPath         = "retrieval-context-governance-report.json"
+		injectionApprovalRequestPath = "retrieval-context-injection-approval-request.json"
+		injectionApprovalPath        = "retrieval-context-injection-approval.json"
+		bundleOutputPath             = "retrieval-context-injection-governance-bundle.json"
+		bundleSummaryPath            = "retrieval-context-injection-governance-bundle.md"
+	)
+
+	result, err := retrievalcontext.InjectionGovernanceBundle(retrievalcontext.InjectionGovernanceBundleOptions{
+		GovernanceReportPath:         governanceReportPath,
+		PolicyPath:                   policyName,
+		InjectionApprovalRequestPath: injectionApprovalRequestPath,
+		InjectionApprovalPath:        injectionApprovalPath,
+		ExecutionPlanPath:            executionPlanPath,
+		PromptPreviewManifestPath:    previewManifestPath,
+		PromptPreviewReportPath:      previewReportPath,
+		OutputPath:                   bundleOutputPath,
+		SummaryPath:                  bundleSummaryPath,
+	})
+	if err != nil {
+		t.Fatalf("InjectionGovernanceBundle() error = %v", err)
+	}
+	if result.ContainsText || result.RunnerExecution || result.ExecutionSupportedNow {
+		t.Fatalf("result = %#v, want metadata-only bundle", result)
+	}
+	if !result.InjectionAuthorizedForFuture {
+		t.Fatal("injection_authorized_for_future must be true")
+	}
+
+	for _, path := range []string{bundleOutputPath, bundleSummaryPath, previewReportPath} {
+		assertNoTextExcerpt(t, path)
+	}
+	bundleData, err := os.ReadFile(bundleSummaryPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	if strings.Contains(string(bundleData), "alpha text") {
+		t.Fatal("bundle summary leaked materialized text")
 	}
 }
 

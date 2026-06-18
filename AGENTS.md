@@ -102,6 +102,7 @@ Implemented:
 - runner injection execution plan (`retrieval context injection-execution-plan`), no worker execution
 - materialized prompt section preview (`retrieval context prompt-preview`), no worker execution
 - prompt preview report/QA (`retrieval context prompt-preview-report`), no worker execution
+- injection governance release bundle (`retrieval context injection-governance-bundle`), no worker execution
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

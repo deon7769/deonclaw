@@ -115,6 +115,7 @@ Implemented:
 - runner injection execution plan (`retrieval context injection-execution-plan`), no worker execution
 - materialized prompt section preview (`retrieval context prompt-preview`), no worker execution
 - prompt preview report/QA (`retrieval context prompt-preview-report`), no worker execution
+- injection governance release bundle (`retrieval context injection-governance-bundle`), no worker execution
 
 Not implemented yet:
 

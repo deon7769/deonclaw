@@ -200,6 +200,31 @@ deonctl retrieval context prompt-preview-report \
   --output-format json
 ~~~
 
+Save the report JSON from step 17 before running step 18:
+
+~~~bash
+deonctl retrieval context prompt-preview-report \
+  --preview retrieval-context-prompt-preview.md \
+  --manifest retrieval-context-prompt-preview.json \
+  --execution-plan retrieval-context-injection-execution-plan.json \
+  --output-format json > retrieval-context-prompt-preview-report.json
+~~~
+
+### 18. Injection governance release bundle (no worker execution)
+
+~~~bash
+deonctl retrieval context injection-governance-bundle \
+  --governance-report retrieval-context-governance-report.json \
+  --policy retrieval-injection-policy.yaml \
+  --injection-approval-request retrieval-context-injection-approval-request.json \
+  --injection-approval retrieval-context-injection-approval.json \
+  --execution-plan retrieval-context-injection-execution-plan.json \
+  --prompt-preview-manifest retrieval-context-prompt-preview.json \
+  --prompt-preview-report retrieval-context-prompt-preview-report.json \
+  --output retrieval-context-injection-governance-bundle.json \
+  --summary retrieval-context-injection-governance-bundle.md
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
@@ -209,6 +234,7 @@ deonctl retrieval context prompt-preview-report \
 - optional injection-execution-plan returns `would_execute_runner: false`, `execution_supported_now: false`, `would_inject_materialized_context: true`, and `reason: execution_plan_only`
 - optional prompt-preview writes markdown with `text_excerpt` and a manifest with `contains_text: true`, `preview_only: true`, `runner_execution: false` (manifest must not repeat chunk text)
 - optional prompt-preview-report returns `status: ok` and does not print preview chunk text in report output
+- optional injection-governance-bundle returns `injection_authorized_for_future: true`, `runner_execution: false`, `execution_supported_now: false`, and does not include preview markdown or chunk text
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

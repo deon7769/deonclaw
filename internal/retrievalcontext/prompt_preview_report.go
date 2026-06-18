@@ -220,3 +220,25 @@ func WritePromptPreviewReportJSON(result PromptPreviewReportResult, out io.Write
 	}
 	return nil
 }
+
+func LoadPromptPreviewReport(path string) (PromptPreviewReportResult, []byte, error) {
+	if err := validateRelativeSafePath("prompt preview report path", path); err != nil {
+		return PromptPreviewReportResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return PromptPreviewReportResult{}, nil, fmt.Errorf("read prompt preview report %q: %w", path, err)
+	}
+	return ParsePromptPreviewReportJSON(data)
+}
+
+func ParsePromptPreviewReportJSON(data []byte) (PromptPreviewReportResult, []byte, error) {
+	if strings.Contains(string(data), `"text_excerpt"`) {
+		return PromptPreviewReportResult{}, nil, fmt.Errorf("prompt preview report must not contain text_excerpt")
+	}
+	var result PromptPreviewReportResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return PromptPreviewReportResult{}, nil, fmt.Errorf("parse prompt preview report json: %w", err)
+	}
+	return result, data, nil
+}
