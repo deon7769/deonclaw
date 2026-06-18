@@ -74,7 +74,16 @@ type MCPProposalPolicySpec struct {
 }
 
 type RetrievalContextSpec struct {
-	Attachments []RetrievalContextAttachment `yaml:"attachments,omitempty" json:"attachments,omitempty"`
+	Attachments           []RetrievalContextAttachment `yaml:"attachments,omitempty" json:"attachments,omitempty"`
+	MaterializedInjection *MaterializedInjectionSpec   `yaml:"materialized_injection,omitempty" json:"materialized_injection,omitempty"`
+}
+
+type MaterializedInjectionSpec struct {
+	Enabled            bool   `yaml:"enabled" json:"enabled"`
+	GovernanceBundle   string `yaml:"governance_bundle" json:"governance_bundle"`
+	PromptPreview      string `yaml:"prompt_preview" json:"prompt_preview"`
+	RequireConfirmFlag bool   `yaml:"require_confirm_flag" json:"require_confirm_flag"`
+	MaxTotalChars      int    `yaml:"max_total_chars" json:"max_total_chars"`
 }
 
 type RetrievalContextAttachment struct {

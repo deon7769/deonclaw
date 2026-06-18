@@ -5706,7 +5706,20 @@ func runTaskValidate(path string, stdout io.Writer, stderr io.Writer) int {
 		fmt.Fprintf(stderr, "validation failed: %v\n", err)
 		return 1
 	}
+	materialized, err := retrievalcontext.ValidateTaskMaterializedInjection(task.RetrievalContext.MaterializedInjection)
+	if err != nil {
+		fmt.Fprintf(stderr, "validation failed: %v\n", err)
+		return 1
+	}
 	fmt.Fprintf(stdout, "task %s: valid\n", task.ID)
+	if materialized.Declared {
+		fmt.Fprintf(stdout, "materialized_injection_declared: %t\n", materialized.Declared)
+		fmt.Fprintf(stdout, "materialized_injection_enabled: %t\n", materialized.Enabled)
+		fmt.Fprintf(stdout, "materialized_injection_supported_now: %t\n", materialized.SupportedNow)
+		if materialized.GovernanceBundleSHA256 != "" {
+			fmt.Fprintf(stdout, "governance_bundle_sha256: %s\n", materialized.GovernanceBundleSHA256)
+		}
+	}
 	return 0
 }
 
@@ -6750,6 +6763,9 @@ func loadValidatedWorkerTask(taskPath string, worker string) (*tasks.Task, error
 		return nil, err
 	}
 	if err := tasks.Validate(task); err != nil {
+		return nil, fmt.Errorf("validation failed: %w", err)
+	}
+	if _, err := retrievalcontext.ValidateTaskMaterializedInjection(task.RetrievalContext.MaterializedInjection); err != nil {
 		return nil, fmt.Errorf("validation failed: %w", err)
 	}
 	if err := ensureTaskWorker(task, worker); err != nil {

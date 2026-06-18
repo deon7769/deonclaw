@@ -100,6 +100,10 @@ func (r CodexRunner) Run(ctx context.Context, opts CodexRunOptions, stdout io.Wr
 		fmt.Fprintf(stderr, "validation failed: %v\n", err)
 		return 1
 	}
+	if _, err := retrievalcontext.ValidateTaskMaterializedInjection(task.RetrievalContext.MaterializedInjection); err != nil {
+		fmt.Fprintf(stderr, "validation failed: %v\n", err)
+		return 1
+	}
 	if err := ensureTaskWorker(task, workerName); err != nil {
 		fmt.Fprintf(stderr, "%v\n", err)
 		return 1

@@ -1,0 +1,27 @@
+id: retrieval-context-materialized-injection-001
+title: "Retrieval context materialized injection declaration example"
+domain: general
+worker: codex
+goal: "Declare future governed materialized injection without runner execution."
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+retrieval_context:
+  materialized_injection:
+    enabled: false
+    governance_bundle: retrieval-context-injection-governance-bundle.json
+    prompt_preview: retrieval-context-prompt-preview.md
+    require_confirm_flag: true
+    max_total_chars: 6000
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - Task declares materialized injection schema only
+  - Runner does not inject preview markdown
+  - Worker does not execute materialized text injection

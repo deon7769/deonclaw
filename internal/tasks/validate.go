@@ -127,6 +127,7 @@ func Validate(task *Task) error {
 			errs = append(errs, fmt.Errorf("%s.max_results must be > 0 and <= 20", prefix))
 		}
 	}
+	errs = append(errs, validateMaterializedInjectionSchema(task.RetrievalContext.MaterializedInjection)...)
 	if usesMCPProposalPolicy(task.MCPProposalPolicy) {
 		if strings.TrimSpace(task.MCPProposalPolicy.Config) == "" {
 			errs = append(errs, errors.New("mcp_proposal_policy.config is required when mcp_proposal_policy is configured"))

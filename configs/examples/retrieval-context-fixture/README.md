@@ -225,6 +225,22 @@ deonctl retrieval context injection-governance-bundle \
   --summary retrieval-context-injection-governance-bundle.md
 ~~~
 
+## Optional: task declaration (Task 22.19)
+
+After step 18 produces `retrieval-context-injection-governance-bundle.json`, validate the example task declaration:
+
+~~~bash
+deonctl task validate materialized-injection-task.yaml
+~~~
+
+Expected output includes:
+
+- `task retrieval-context-materialized-injection-001: valid`
+- `materialized_injection_declared: true`
+- `materialized_injection_enabled: false`
+- `materialized_injection_supported_now: false`
+- `governance_bundle_sha256: ...`
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
@@ -235,6 +251,7 @@ deonctl retrieval context injection-governance-bundle \
 - optional prompt-preview writes markdown with `text_excerpt` and a manifest with `contains_text: true`, `preview_only: true`, `runner_execution: false` (manifest must not repeat chunk text)
 - optional prompt-preview-report returns `status: ok` and does not print preview chunk text in report output
 - optional injection-governance-bundle returns `injection_authorized_for_future: true`, `runner_execution: false`, `execution_supported_now: false`, and does not include preview markdown or chunk text
+- optional `materialized-injection-task.yaml` declares `retrieval_context.materialized_injection` with `enabled: false` for schema validation only (requires step 18 bundle artifact)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

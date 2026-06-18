@@ -226,6 +226,53 @@ func InjectionGovernanceBundle(opts InjectionGovernanceBundleOptions) (Injection
 	return result, nil
 }
 
+func LoadInjectionGovernanceBundle(path string) (InjectionGovernanceBundleResult, []byte, error) {
+	if err := validateRelativeSafePath("governance bundle path", path); err != nil {
+		return InjectionGovernanceBundleResult{}, nil, err
+	}
+	data, err := readArtifactBytesNoTextExcerpt("governance bundle", path)
+	if err != nil {
+		return InjectionGovernanceBundleResult{}, nil, err
+	}
+	return ParseInjectionGovernanceBundleJSON(data)
+}
+
+func ParseInjectionGovernanceBundleJSON(data []byte) (InjectionGovernanceBundleResult, []byte, error) {
+	if strings.Contains(string(data), `"text_excerpt"`) {
+		return InjectionGovernanceBundleResult{}, nil, fmt.Errorf("governance bundle must not contain text_excerpt")
+	}
+	var result InjectionGovernanceBundleResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return InjectionGovernanceBundleResult{}, nil, fmt.Errorf("parse governance bundle json: %w", err)
+	}
+	return result, data, nil
+}
+
+func ValidateInjectionGovernanceBundleForTaskDeclaration(bundle InjectionGovernanceBundleResult) error {
+	var failures []string
+	if bundle.ContainsText {
+		failures = append(failures, "governance bundle contains_text must be false")
+	}
+	if bundle.RunnerExecution {
+		failures = append(failures, "governance bundle runner_execution must be false")
+	}
+	if !bundle.InjectionAuthorizedForFuture {
+		failures = append(failures, "governance bundle injection_authorized_for_future must be true")
+	}
+	if bundle.ExecutionSupportedNow {
+		failures = append(failures, "governance bundle execution_supported_now must be false")
+	}
+	switch bundle.Status {
+	case lancedbpolicy.StatusOK, lancedbpolicy.StatusWarning:
+	default:
+		failures = append(failures, fmt.Sprintf("governance bundle status %q must be ok or warning", bundle.Status))
+	}
+	if len(failures) > 0 {
+		return fmt.Errorf("%s", strings.Join(failures, "; "))
+	}
+	return nil
+}
+
 func readArtifactBytesNoTextExcerpt(label, path string) ([]byte, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {

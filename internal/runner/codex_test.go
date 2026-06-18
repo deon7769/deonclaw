@@ -607,6 +607,176 @@ func TestCodexRunnerRunWithLanceDBRetrievalContextAttachment(t *testing.T) {
 	assertTraceNonEmptyString(t, trace, "retrieval_context_sha256")
 }
 
+func TestCodexRunnerRunWithMaterializedInjectionDeclarationDoesNotInjectPreviewText(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	resultPath, reportPath, policyPath := writeRunnerLanceDBRetrievalFixturesInDir(t, dir, runnerValidSearchEnvelope())
+	writeRunnerGovernanceBundleJSON(t, "retrieval-context-injection-governance-bundle.json")
+	if err := os.WriteFile("retrieval-context-prompt-preview.md", []byte("## preview\n- text_excerpt: alpha text\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	taskPath := filepath.Join(dir, "task.yaml")
+	taskContent := `id: materialized-injection-task-001
+title: "Materialized injection declaration"
+domain: general
+worker: codex
+goal: "Declare future materialized injection"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+retrieval_context:
+  materialized_injection:
+    enabled: false
+    governance_bundle: retrieval-context-injection-governance-bundle.json
+    prompt_preview: retrieval-context-prompt-preview.md
+    require_confirm_flag: true
+    max_total_chars: 6000
+  attachments:
+    - kind: lancedb_search_report
+      path: ` + filepath.ToSlash(filepath.Base(resultPath)) + `
+      report_path: ` + filepath.ToSlash(filepath.Base(reportPath)) + `
+      policy: ` + filepath.ToSlash(filepath.Base(policyPath)) + `
+      max_results: 5
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - schema declared only
+`
+	if err := os.WriteFile(taskPath, []byte(taskContent), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	storePath := filepath.Join(dir, "deonclaw.db")
+	artifactsDir := filepath.Join(dir, "artifacts")
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-materialized-injection-declaration-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(ctx context.Context, spec workers.RunSpec) (*workers.RunResult, error) {
+					if spec.Task.RetrievalContext.MaterializedInjection != nil {
+						t.Fatalf("worker received materialized_injection config: %#v", spec.Task.RetrievalContext.MaterializedInjection)
+					}
+					if strings.Contains(spec.Prompt, "alpha text") || strings.Contains(spec.Prompt, "text_excerpt:") {
+						t.Fatalf("prompt leaked materialized preview text: %q", spec.Prompt)
+					}
+					return &workers.RunResult{
+						Workspace: spec.Workspace,
+						Command:   []string{"codex", "exec", "--json", "--sandbox", "read-only", "--cd", spec.Workspace, "-"},
+					}, nil
+				},
+			}
+		},
+		Baseline: &git.Snapshot{},
+		PostRun:  &git.Snapshot{},
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     taskPath,
+		StorePath:    storePath,
+		ArtifactsDir: artifactsDir,
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("Run() exit code = %d, stderr = %q", code, stderr.String())
+	}
+
+	trace := readExecutionTrace(t, filepath.Join(artifactsDir, "run-materialized-injection-declaration-001", "execution-trace.json"))
+	traceJSON, err := json.Marshal(trace)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if strings.Contains(string(traceJSON), "text_excerpt") || strings.Contains(string(traceJSON), "alpha text") {
+		t.Fatal("execution trace must not contain materialized preview text")
+	}
+}
+
+func TestCodexRunnerRunRejectsMaterializedInjectionEnabledTrue(t *testing.T) {
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() { _ = os.Chdir(oldWD) })
+
+	writeRunnerGovernanceBundleJSON(t, "retrieval-context-injection-governance-bundle.json")
+	if err := os.WriteFile("retrieval-context-prompt-preview.md", []byte("preview\n"), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	taskPath := filepath.Join(dir, "task.yaml")
+	taskContent := `id: materialized-injection-task-001
+title: "Materialized injection declaration"
+domain: general
+worker: codex
+goal: "Declare future materialized injection"
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+retrieval_context:
+  materialized_injection:
+    enabled: true
+    governance_bundle: retrieval-context-injection-governance-bundle.json
+    prompt_preview: retrieval-context-prompt-preview.md
+    require_confirm_flag: true
+    max_total_chars: 6000
+allowed_paths: []
+forbidden_paths:
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+definition_of_done:
+  - schema declared only
+`
+	if err := os.WriteFile(taskPath, []byte(taskContent), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	runner := testCodexRunner(t, testCodexRunnerOptions{
+		RunID: "run-materialized-injection-enabled-001",
+		WorkerFactory: func() workers.Worker {
+			return fakeWorker{
+				runFunc: func(context.Context, workers.RunSpec) (*workers.RunResult, error) {
+					t.Fatal("worker must not run when materialized injection is enabled")
+					return nil, nil
+				},
+			}
+		},
+	})
+
+	var stdout, stderr bytes.Buffer
+	code := runner.Run(context.Background(), CodexRunOptions{
+		TaskPath:     taskPath,
+		StorePath:    filepath.Join(dir, "deonclaw.db"),
+		ArtifactsDir: filepath.Join(dir, "artifacts"),
+	}, &stdout, &stderr)
+	if code == 0 {
+		t.Fatal("Run() expected validation failure")
+	}
+	if !strings.Contains(stderr.String(), tasks.MaterializedInjectionNotSupportedYet) {
+		t.Fatalf("stderr = %q, want not supported yet", stderr.String())
+	}
+}
+
 func TestCodexRunnerRunRejectsInvalidRetrievalContextBeforeWorker(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -2649,6 +2819,37 @@ definition_of_done:
 	return writeTaskFileContent(t, builder.String())
 }
 
+func writeRunnerGovernanceBundleJSON(t *testing.T, path string) {
+	t.Helper()
+	payload := map[string]any{
+		"status":                          "ok",
+		"contains_text":                   false,
+		"runner_execution":                false,
+		"injection_authorized_for_future": true,
+		"execution_supported_now":         false,
+		"materialized_sha256":             strings.Repeat("a", 64),
+		"policy_sha256":                   strings.Repeat("b", 64),
+		"governance_report_sha256":        strings.Repeat("c", 64),
+		"approval_sha256":                 strings.Repeat("d", 64),
+		"execution_plan_sha256":           strings.Repeat("e", 64),
+		"prompt_preview_manifest_sha256":  strings.Repeat("f", 64),
+		"prompt_preview_sha256":           strings.Repeat("1", 64),
+		"caps": map[string]any{
+			"max_total_chars":     6000,
+			"max_chars_per_chunk": 1200,
+			"max_chunks":          5,
+		},
+	}
+	data, err := json.MarshalIndent(payload, "", "  ")
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	data = append(data, '\n')
+	if err := os.WriteFile(path, data, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+}
+
 type runnerSearchEnvelopeFixture struct {
 	GeneratedAt string `json:"generated_at"`
 	Search      struct {
@@ -2689,6 +2890,11 @@ func runnerMarshalSearchHit(hit lancedbpolicy.SearchHit) json.RawMessage {
 func writeRunnerLanceDBRetrievalFixtures(t *testing.T, envelope runnerSearchEnvelopeFixture) (string, string, string) {
 	t.Helper()
 	dir := t.TempDir()
+	return writeRunnerLanceDBRetrievalFixturesInDir(t, dir, envelope)
+}
+
+func writeRunnerLanceDBRetrievalFixturesInDir(t *testing.T, dir string, envelope runnerSearchEnvelopeFixture) (string, string, string) {
+	t.Helper()
 	policyPath := filepath.Join(dir, "lancedb-policy.yaml")
 	resultPath := filepath.Join(dir, "lancedb-search-smoke-result.json")
 	reportPath := filepath.Join(dir, "lancedb-search-report.json")

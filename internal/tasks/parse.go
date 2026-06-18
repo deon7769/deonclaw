@@ -61,6 +61,10 @@ func normalize(task *Task) {
 		task.RetrievalContext.Attachments[i].ReportPath = strings.TrimSpace(task.RetrievalContext.Attachments[i].ReportPath)
 		task.RetrievalContext.Attachments[i].Policy = strings.TrimSpace(task.RetrievalContext.Attachments[i].Policy)
 	}
+	if task.RetrievalContext.MaterializedInjection != nil {
+		task.RetrievalContext.MaterializedInjection.GovernanceBundle = strings.TrimSpace(task.RetrievalContext.MaterializedInjection.GovernanceBundle)
+		task.RetrievalContext.MaterializedInjection.PromptPreview = strings.TrimSpace(task.RetrievalContext.MaterializedInjection.PromptPreview)
+	}
 	task.MCPProposalPolicy.Config = strings.TrimSpace(task.MCPProposalPolicy.Config)
 	task.MCPProposalPolicy.Policy = strings.TrimSpace(task.MCPProposalPolicy.Policy)
 	task.MCPProposalPolicy.RuntimeConfig = strings.TrimSpace(task.MCPProposalPolicy.RuntimeConfig)

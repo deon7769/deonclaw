@@ -42,6 +42,7 @@ retrieval-context (runner metadata attachment)
 | 22.18 | `retrieval context prompt-preview` (materialized prompt section preview, no worker execution) |
 | 22.18.1 | `retrieval context prompt-preview-report` (prompt preview QA, no worker execution) |
 | 22.18.2 | `retrieval context injection-governance-bundle` (injection governance release bundle, no worker execution) |
+| 22.19 | Task YAML `retrieval_context.materialized_injection` declaration (schema validation only, no runner execution) |
 
 ### What already exists
 
@@ -118,7 +119,9 @@ Future injection design and implementation must **not** include:
 
 **Task 22.18.2 (implemented):** *Injection governance release bundle* — `deonctl retrieval context injection-governance-bundle` consolidates the full injection governance chain into a metadata-only release bundle JSON and summary. **Still no worker execution**, no runner prompt injection, no task schema wiring.
 
-**Task 22.19+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
+**Task 22.19 (implemented):** *Task schema declaration for materialized injection* — task YAML `retrieval_context.materialized_injection` declares future governed injection with governance bundle binding and schema validation only. **Still no runner execution**, no prompt changes, no worker materialized text injection.
+
+**Task 22.20+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 
