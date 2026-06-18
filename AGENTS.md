@@ -105,6 +105,7 @@ Implemented:
 - injection governance release bundle (`retrieval context injection-governance-bundle`), no worker execution
 - task schema declaration for materialized injection (`retrieval_context.materialized_injection`), no runner execution
 - materialized injection task declaration report (`task materialized-injection-report`), no runner execution
+- runner materialized injection preflight (`worker codex materialized-injection-preflight`), no runner execution
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
