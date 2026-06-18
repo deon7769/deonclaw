@@ -8074,7 +8074,7 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	})
 
 	fixtureSrc := filepath.Join(root, "configs", "examples", "retrieval-context-fixture")
-	for _, name := range []string{"retrieval-context.json", "memory-index-chunks.jsonl"} {
+	for _, name := range []string{"retrieval-context.json", "memory-index-chunks.jsonl", "retrieval-injection-policy.yaml"} {
 		data, err := os.ReadFile(filepath.Join(fixtureSrc, name))
 		if err != nil {
 			t.Fatalf("ReadFile(%q) error = %v", name, err)
@@ -8095,6 +8095,7 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 		approvalPath         = "retrieval-context-approval.json"
 		injectionPlanPath    = "retrieval-context-injection-plan.json"
 		injectionPlanSummary = "retrieval-context-injection-plan.md"
+		injectionPolicyPath  = "retrieval-injection-policy.yaml"
 	)
 
 	steps := [][]string{
@@ -8143,12 +8144,18 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 			"--approval", approvalPath,
 			"--injection-plan", injectionPlanPath,
 		},
+		{"retrieval", "context", "injection-policy", "validate", "--policy", injectionPolicyPath},
+		{"retrieval", "context", "injection-policy", "plan", "--policy", injectionPolicyPath, "--output-format", "json"},
 	}
 
+	var injectionPolicyPlanJSON string
 	for i, step := range steps {
 		var stdout, stderr bytes.Buffer
 		if code := run(step, &stdout, &stderr); code != 0 {
 			t.Fatalf("step %d %v exit=%d stderr=%q stdout=%q", i+1, step, code, stderr.String(), stdout.String())
+		}
+		if len(step) >= 5 && step[2] == "injection-policy" && step[3] == "plan" {
+			injectionPolicyPlanJSON = stdout.String()
 		}
 	}
 
@@ -8200,6 +8207,16 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	materializedData := readFixtureFileString(t, filepath.Join(dir, materializedPath))
 	if !strings.Contains(materializedData, "text_excerpt") {
 		t.Fatal("materialized artifact should contain text_excerpt")
+	}
+
+	if !strings.Contains(injectionPolicyPlanJSON, `"would_inject": false`) {
+		t.Fatalf("injection policy plan json = %q, want would_inject false", injectionPolicyPlanJSON)
+	}
+	if !strings.Contains(injectionPolicyPlanJSON, "runner_injection_allowed") {
+		t.Fatalf("injection policy plan json = %q, want runner_injection_allowed warning", injectionPolicyPlanJSON)
+	}
+	if strings.Contains(injectionPolicyPlanJSON, "text_excerpt") {
+		t.Fatal("injection policy plan json must not contain text_excerpt")
 	}
 }
 

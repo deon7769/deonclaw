@@ -163,6 +163,55 @@ func TestRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	if strings.Contains(governanceStdout.String(), "alpha text") || strings.Contains(governanceStdout.String(), "text_excerpt") {
 		t.Fatal("governance report text leaked materialized content")
 	}
+
+	assertFixtureInjectionPolicyE2E(t, root, dir, "retrieval-injection-policy.yaml")
+}
+
+func assertFixtureInjectionPolicyE2E(t *testing.T, root, dir, policyName string) {
+	t.Helper()
+	policyPath := filepath.Join(dir, policyName)
+	copyFixtureFile(t, filepath.Join(root, "configs", "examples", "retrieval-context-fixture", policyName), policyPath)
+
+	cfg, err := retrievalcontext.LoadInjectionPolicy(policyPath)
+	if err != nil {
+		t.Fatalf("LoadInjectionPolicy() error = %v", err)
+	}
+	if err := retrievalcontext.ValidateInjectionPolicy(cfg); err != nil {
+		t.Fatalf("ValidateInjectionPolicy() error = %v", err)
+	}
+
+	plan, err := retrievalcontext.InjectionPolicyPlan(cfg)
+	if err != nil {
+		t.Fatalf("InjectionPolicyPlan() error = %v", err)
+	}
+	if plan.WouldInject {
+		t.Fatal("would_inject must be false")
+	}
+	if plan.Reason != retrievalcontext.InjectionPolicyReasonSchemaOnly {
+		t.Fatalf("reason = %q, want %q", plan.Reason, retrievalcontext.InjectionPolicyReasonSchemaOnly)
+	}
+	if plan.Status != lancedbpolicy.StatusWarning {
+		t.Fatalf("status = %q, want warning", plan.Status)
+	}
+	if !strings.Contains(strings.Join(plan.Warnings, "; "), "runner_injection_allowed is false") {
+		t.Fatalf("warnings = %#v, want runner_injection_allowed warning", plan.Warnings)
+	}
+
+	var textBuf bytes.Buffer
+	if err := retrievalcontext.WriteInjectionPolicyPlanText(plan, &textBuf); err != nil {
+		t.Fatalf("WriteInjectionPolicyPlanText() error = %v", err)
+	}
+	if strings.Contains(textBuf.String(), "text_excerpt") || strings.Contains(textBuf.String(), "alpha text") {
+		t.Fatal("injection policy plan text leaked materialized content")
+	}
+
+	var jsonBuf bytes.Buffer
+	if err := retrievalcontext.WriteInjectionPolicyPlanJSON(plan, &jsonBuf); err != nil {
+		t.Fatalf("WriteInjectionPolicyPlanJSON() error = %v", err)
+	}
+	if strings.Contains(jsonBuf.String(), "text_excerpt") {
+		t.Fatal("injection policy plan json contains text_excerpt")
+	}
 }
 
 func copyRetrievalContextFixtureFrom(t *testing.T, root, dstDir string) {

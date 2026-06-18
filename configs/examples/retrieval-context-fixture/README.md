@@ -8,6 +8,7 @@ This fixture does **not** run LanceDB search, call embedding providers, or injec
 
 - `retrieval-context.json` — passive metadata-only retrieval artifact (one hit)
 - `memory-index-chunks.jsonl` — governed chunk text source for materialize
+- `retrieval-injection-policy.yaml` — plan-only injection policy over generated artifacts (Task 22.15.1)
 
 Generated artifacts (created by the steps below) stay in this directory when commands use `--output` paths here.
 
@@ -107,9 +108,26 @@ deonctl retrieval context governance-report \
   --injection-plan retrieval-context-injection-plan.json
 ~~~
 
+### 10. Injection policy validate (schema only)
+
+~~~bash
+deonctl retrieval context injection-policy validate \
+  --policy retrieval-injection-policy.yaml
+~~~
+
+### 11. Injection policy plan (no execution)
+
+~~~bash
+deonctl retrieval context injection-policy plan \
+  --policy retrieval-injection-policy.yaml \
+  --output-format json
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
+- injection-policy validate returns ok after steps 1–9 generated the artifacts
+- injection-policy plan returns `would_inject: false`, `reason: schema_only_no_execution`, and `status: warning` while approval still has `runner_injection_allowed: false`
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

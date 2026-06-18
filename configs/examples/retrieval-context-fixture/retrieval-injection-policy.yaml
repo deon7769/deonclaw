@@ -1,0 +1,26 @@
+retrieval_injection_policy:
+  mode: plan_only
+  approval:
+    required: true
+    require_runner_injection_allowed: true
+    approval_path: retrieval-context-approval.json
+    request_path: retrieval-context-approval-request.json
+  bundle:
+    path: retrieval-context-bundle.json
+  materialized:
+    path: retrieval-context-materialized.json
+  limits:
+    max_total_chars: 6000
+    max_chars_per_chunk: 1200
+    max_chunks: 8
+  prompt:
+    section_title: Governed materialized retrieval context
+    include_metadata: true
+    include_source_path: true
+    include_hashes: true
+  safety:
+    require_governance_report_ok: true
+    forbid_active_search: true
+    forbid_provider_calls: true
+    forbid_source_file_reads: true
+    forbid_memory_apply: true

@@ -301,15 +301,16 @@ Reproducible fixture at `configs/examples/retrieval-context-fixture/`:
 
 - `retrieval-context.json` — metadata-only retrieval artifact
 - `memory-index-chunks.jsonl` — chunk text source for materialize
+- `retrieval-injection-policy.yaml` — plan-only injection policy over generated artifacts (Task 22.15.1)
 - `README.md` — step-by-step `deonctl` commands for the full chain
 
 Chain:
 
 ~~~text
-inspect -> materialize -> materialized-report -> bundle -> approval new -> approval approve -> approval inspect -> injection-plan -> governance-report
+inspect -> materialize -> materialized-report -> bundle -> approval new -> approval approve -> approval inspect -> injection-plan -> governance-report -> injection-policy validate -> injection-policy plan
 ~~~
 
-The fixture validates documentation and CLI behavior without LanceDB search, provider calls, or runner text injection. Only materialized artifacts may contain `text_excerpt`.
+The fixture validates documentation and CLI behavior without LanceDB search, provider calls, or runner text injection. Only materialized artifacts may contain `text_excerpt`. Task 22.15.1 extends the fixture with `retrieval-injection-policy.yaml` so validate/plan run against real artifacts from the governed chain (`would_inject: false`, `reason: schema_only_no_execution`, warning while `runner_injection_allowed` remains false).
 
 Before releasing governance changes, use [RETRIEVAL_GOVERNANCE_CHECKLIST.md](RETRIEVAL_GOVERNANCE_CHECKLIST.md). For future runner injection scope, see [ADR_RETRIEVAL_RUNNER_INJECTION.md](ADR_RETRIEVAL_RUNNER_INJECTION.md).
 
@@ -337,6 +338,8 @@ Rules:
 - plan may probe approval/bundle/materialized-report when configured paths exist; never prints `text_excerpt`
 - plan warns when probed approval still has `runner_injection_allowed: false`
 
+The e2e fixture at `configs/examples/retrieval-context-fixture/` includes `retrieval-injection-policy.yaml` with paths to artifacts produced by the README chain; see steps 10–11 in the fixture README.
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -354,4 +357,4 @@ Rules:
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Task 22.15.1 extends the governance e2e fixture with injection-policy validate/plan over real chain artifacts. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.

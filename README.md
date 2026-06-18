@@ -110,6 +110,7 @@ Implemented:
 - retrieval governance release checklist (`docs/RETRIEVAL_GOVERNANCE_CHECKLIST.md`)
 - retrieval runner injection design ADR (`docs/ADR_RETRIEVAL_RUNNER_INJECTION.md`)
 - retrieval context injection policy schema (`retrieval context injection-policy`), no execution
+- retrieval injection policy e2e fixture (`configs/examples/retrieval-context-fixture/retrieval-injection-policy.yaml`), validate/plan only
 
 Not implemented yet:
 
