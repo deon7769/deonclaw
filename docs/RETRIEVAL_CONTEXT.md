@@ -19,6 +19,7 @@ Implemented now:
 - `deonctl retrieval context materialized-report` for QA over materialized chunk text artifacts
 - `deonctl retrieval context bundle` for audit bundle over retrieval + materialized artifacts
 - `deonctl retrieval context approval new/approve/inspect` for governed materialized context approval
+- `deonctl retrieval context injection-plan` for runner injection planning without execution
 
 Not implemented yet:
 
@@ -231,6 +232,34 @@ Rules:
 - inspect stdout never prints materialized text
 - all paths must be relative safe paths
 
+## Injection plan (Task 22.12)
+
+Current approvals allow `manual_review_only` and keep `runner_injection_allowed: false`. The injection plan describes what a future runner prompt integration would require without injecting text or changing task schema.
+
+~~~bash
+deonctl retrieval context injection-plan \
+  --approval artifacts/<run-id>/retrieval-context-approval.json \
+  --request artifacts/<run-id>/retrieval-context-approval-request.json \
+  --bundle artifacts/<run-id>/retrieval-context-bundle.json \
+  --materialized artifacts/<run-id>/retrieval-context-materialized.json \
+  --output artifacts/<run-id>/retrieval-context-injection-plan.json \
+  --summary artifacts/<run-id>/retrieval-context-injection-plan.md
+~~~
+
+Rules:
+
+- runs `approval inspect` with request binding; fails when inspect status is not `ok`
+- requires `approved: true`, `allowed_use: manual_review_only`, and `runner_injection_allowed: false`
+- fails when `runner_injection_allowed: true` (injection not supported in this task)
+- validates approval/bundle/materialized SHA256 coherence
+- runs `materialized-report`; fails when report status is `failed`
+- plan JSON sets `can_inject_now: false` and `reason: runner_injection_allowed_false`
+- records `required_future_flag: --confirm-inject-materialized-context` for a future explicit injection step
+- plan and summary never include `text_excerpt` or materialized text
+- does not alter runner prompts or task schema
+
+A future task would need a separate approval artifact with `runner_injection_allowed: true` or another explicit gate before any prompt injection.
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -248,4 +277,4 @@ Rules:
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.

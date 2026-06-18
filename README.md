@@ -104,6 +104,7 @@ Implemented:
 - retrieval context materialized-report for chunk text artifact QA, without runner auto-injection
 - retrieval context audit bundle (`retrieval context bundle`), without runner text injection
 - retrieval context approval workflow (`retrieval context approval`), without runner text injection
+- retrieval context injection plan (`retrieval context injection-plan`), without runner execution
 
 Not implemented yet:
 
