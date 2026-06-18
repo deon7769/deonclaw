@@ -1,0 +1,26 @@
+{
+  "status": "ok",
+  "retrieval_context_attached": true,
+  "hit_count": 1,
+  "attachments": [
+    {
+      "name": "lancedb-search-1",
+      "kind": "lancedb_search_report",
+      "query_mode": "vector",
+      "hit_count": 1,
+      "hits": [
+        {
+          "rank": 1,
+          "chunk_id": "chunk-a",
+          "distance": 0.12,
+          "domain": "general",
+          "source_path": "notes/a.md",
+          "source_sha256": "sha-source",
+          "text_sha256": "89a17ed624e1586515338bb4f8481788424c93f9836d1e1e382aeb7da5334b0f",
+          "embedding_model": "deterministic-hash-v1",
+          "provider": "local"
+        }
+      ]
+    }
+  ]
+}

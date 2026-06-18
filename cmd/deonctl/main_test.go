@@ -19,6 +19,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/git"
 	"github.com/deon7769/deonclaw/internal/mcpapproval"
 	"github.com/deon7769/deonclaw/internal/memory"
+	"github.com/deon7769/deonclaw/internal/retrievalcontext"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/runtime"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
@@ -8056,4 +8057,175 @@ func runApplyPreflight(t *testing.T, proposalPath string, approvalPath string, o
 		args = append(args, "--output", outputPath)
 	}
 	return run(args, stdout, stderr)
+}
+
+func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
+	root := retrievalContextFixtureRoot(t)
+	dir := t.TempDir()
+	oldWD, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Chdir() error = %v", err)
+	}
+	t.Cleanup(func() {
+		_ = os.Chdir(oldWD)
+	})
+
+	fixtureSrc := filepath.Join(root, "configs", "examples", "retrieval-context-fixture")
+	for _, name := range []string{"retrieval-context.json", "memory-index-chunks.jsonl"} {
+		data, err := os.ReadFile(filepath.Join(fixtureSrc, name))
+		if err != nil {
+			t.Fatalf("ReadFile(%q) error = %v", name, err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, name), data, 0o644); err != nil {
+			t.Fatalf("WriteFile(%q) error = %v", name, err)
+		}
+	}
+
+	const (
+		retrievalContextPath = "retrieval-context.json"
+		chunksPath           = "memory-index-chunks.jsonl"
+		materializedPath     = "retrieval-context-materialized.json"
+		materializedSummary  = "retrieval-context-materialized.md"
+		bundlePath           = "retrieval-context-bundle.json"
+		bundleSummary        = "retrieval-context-bundle.md"
+		requestPath          = "retrieval-context-approval-request.json"
+		approvalPath         = "retrieval-context-approval.json"
+		injectionPlanPath    = "retrieval-context-injection-plan.json"
+		injectionPlanSummary = "retrieval-context-injection-plan.md"
+	)
+
+	steps := [][]string{
+		{"retrieval", "context", "inspect", "--artifact", retrievalContextPath},
+		{
+			"retrieval", "context", "materialize",
+			"--retrieval-context", retrievalContextPath,
+			"--chunks", chunksPath,
+			"--output", materializedPath,
+			"--summary", materializedSummary,
+			"--max-chars-per-chunk", "1200",
+			"--max-total-chars", "6000",
+			"--confirm-include-chunk-text",
+		},
+		{"retrieval", "context", "materialized-report", "--artifact", materializedPath},
+		{
+			"retrieval", "context", "bundle",
+			"--retrieval-context", retrievalContextPath,
+			"--materialized", materializedPath,
+			"--output", bundlePath,
+			"--summary", bundleSummary,
+		},
+		{"retrieval", "context", "approval", "new", "--bundle", bundlePath, "--output", requestPath},
+		{
+			"retrieval", "context", "approval", "approve",
+			"--request", requestPath,
+			"--output", approvalPath,
+			"--confirm-approve-materialized-context",
+		},
+		{"retrieval", "context", "approval", "inspect", "--approval", approvalPath},
+		{
+			"retrieval", "context", "injection-plan",
+			"--approval", approvalPath,
+			"--request", requestPath,
+			"--bundle", bundlePath,
+			"--materialized", materializedPath,
+			"--output", injectionPlanPath,
+			"--summary", injectionPlanSummary,
+		},
+		{
+			"retrieval", "context", "governance-report",
+			"--retrieval-context", retrievalContextPath,
+			"--materialized", materializedPath,
+			"--bundle", bundlePath,
+			"--request", requestPath,
+			"--approval", approvalPath,
+			"--injection-plan", injectionPlanPath,
+		},
+	}
+
+	for i, step := range steps {
+		var stdout, stderr bytes.Buffer
+		if code := run(step, &stdout, &stderr); code != 0 {
+			t.Fatalf("step %d %v exit=%d stderr=%q stdout=%q", i+1, step, code, stderr.String(), stdout.String())
+		}
+	}
+
+	injectionPlanData := readFixtureFileString(t, filepath.Join(dir, injectionPlanPath))
+	if strings.Contains(injectionPlanData, `"can_inject_now": true`) {
+		t.Fatal("injection plan must keep can_inject_now false")
+	}
+	if !strings.Contains(injectionPlanData, retrievalcontext.RequiredFutureInjectFlag) {
+		t.Fatalf("injection plan missing %q", retrievalcontext.RequiredFutureInjectFlag)
+	}
+
+	var stdout, stderr bytes.Buffer
+	code := run([]string{
+		"retrieval", "context", "governance-report",
+		"--retrieval-context", retrievalContextPath,
+		"--materialized", materializedPath,
+		"--bundle", bundlePath,
+		"--request", requestPath,
+		"--approval", approvalPath,
+		"--injection-plan", injectionPlanPath,
+		"--output-format", "json",
+	}, &stdout, &stderr)
+	if code != 0 {
+		t.Fatalf("governance-report json exit=%d stderr=%q", code, stderr.String())
+	}
+	if !strings.Contains(stdout.String(), `"status": "ok"`) {
+		t.Fatalf("governance stdout = %q, want status ok", stdout.String())
+	}
+	if strings.Contains(stdout.String(), "text_excerpt") {
+		t.Fatal("governance json must not contain text_excerpt")
+	}
+	if strings.Contains(stdout.String(), `"can_inject_now": true`) {
+		t.Fatal("governance report must keep can_inject_now false")
+	}
+
+	for _, path := range []string{
+		retrievalContextPath,
+		bundlePath,
+		bundleSummary,
+		requestPath,
+		approvalPath,
+		injectionPlanPath,
+		injectionPlanSummary,
+	} {
+		if strings.Contains(readFixtureFileString(t, filepath.Join(dir, path)), "text_excerpt") {
+			t.Fatalf("%s must not contain text_excerpt", path)
+		}
+	}
+	materializedData := readFixtureFileString(t, filepath.Join(dir, materializedPath))
+	if !strings.Contains(materializedData, "text_excerpt") {
+		t.Fatal("materialized artifact should contain text_excerpt")
+	}
+}
+
+func retrievalContextFixtureRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Getwd() error = %v", err)
+	}
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("go.mod not found")
+		}
+		dir = parent
+	}
+}
+
+func readFixtureFileString(t *testing.T, path string) string {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%q) error = %v", path, err)
+	}
+	return string(data)
 }

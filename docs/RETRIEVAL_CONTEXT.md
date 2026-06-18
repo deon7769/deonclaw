@@ -21,6 +21,7 @@ Implemented now:
 - `deonctl retrieval context approval new/approve/inspect` for governed materialized context approval
 - `deonctl retrieval context injection-plan` for runner injection planning without execution
 - `deonctl retrieval context governance-report` for consolidated chain audit and troubleshooting
+- `configs/examples/retrieval-context-fixture/` end-to-end governance chain fixture
 
 Not implemented yet:
 
@@ -290,6 +291,22 @@ Rules:
 
 Use this report for auditing and troubleshooting before any future injection task.
 
+## End-to-end fixture (Task 22.12.2)
+
+Reproducible fixture at `configs/examples/retrieval-context-fixture/`:
+
+- `retrieval-context.json` — metadata-only retrieval artifact
+- `memory-index-chunks.jsonl` — chunk text source for materialize
+- `README.md` — step-by-step `deonctl` commands for the full chain
+
+Chain:
+
+~~~text
+inspect -> materialize -> materialized-report -> bundle -> approval new -> approval approve -> approval inspect -> injection-plan -> governance-report
+~~~
+
+The fixture validates documentation and CLI behavior without LanceDB search, provider calls, or runner text injection. Only materialized artifacts may contain `text_excerpt`.
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -307,4 +324,4 @@ Use this report for auditing and troubleshooting before any future injection tas
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.

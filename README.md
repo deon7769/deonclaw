@@ -106,6 +106,7 @@ Implemented:
 - retrieval context approval workflow (`retrieval context approval`), without runner text injection
 - retrieval context injection plan (`retrieval context injection-plan`), without runner execution
 - retrieval context governance report (`retrieval context governance-report`), without runner injection
+- retrieval context governance e2e fixture (`configs/examples/retrieval-context-fixture/`)
 
 Not implemented yet:
 
