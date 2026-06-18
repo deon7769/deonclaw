@@ -241,6 +241,14 @@ Expected output includes:
 - `materialized_injection_supported_now: false`
 - `governance_bundle_sha256: ...`
 
+### 19. Materialized injection task report (QA only)
+
+~~~bash
+deonctl task materialized-injection-report \
+  --task materialized-injection-task.yaml \
+  --output-format json
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
@@ -252,6 +260,7 @@ Expected output includes:
 - optional prompt-preview-report returns `status: ok` and does not print preview chunk text in report output
 - optional injection-governance-bundle returns `injection_authorized_for_future: true`, `runner_execution: false`, `execution_supported_now: false`, and does not include preview markdown or chunk text
 - optional `materialized-injection-task.yaml` declares `retrieval_context.materialized_injection` with `enabled: false` for schema validation only (requires step 18 bundle artifact)
+- optional materialized-injection-report returns `status: ok`, `prompt_preview_read: false`, `runner_prompt_changed: false`, and does not print preview chunk text
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

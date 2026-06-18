@@ -53,6 +53,7 @@ Usage:
   deonctl workers smoke --worker opencode --task <task.yaml> --store <path> --artifacts-dir <path> --workers-config <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--dry-run]
   deonctl config env [--output-format text|json]
   deonctl task validate <path>
+  deonctl task materialized-injection-report --task <path> [--output-format text|json]
   deonctl domains validate --config <path>
   deonctl domains list --config <path>
   deonctl context build --task <task.yaml> --domains <domains.yaml> --output <path>
@@ -234,6 +235,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runTaskValidate(args[2], stdout, stderr)
+		case "materialized-injection-report":
+			opts, err := parseTaskMaterializedInjectionReportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runTaskMaterializedInjectionReport(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
@@ -5719,6 +5728,67 @@ func runTaskValidate(path string, stdout io.Writer, stderr io.Writer) int {
 		if materialized.GovernanceBundleSHA256 != "" {
 			fmt.Fprintf(stdout, "governance_bundle_sha256: %s\n", materialized.GovernanceBundleSHA256)
 		}
+	}
+	return 0
+}
+
+type taskMaterializedInjectionReportOptions struct {
+	taskPath     string
+	outputFormat string
+}
+
+func parseTaskMaterializedInjectionReportOptions(args []string) (taskMaterializedInjectionReportOptions, error) {
+	opts := taskMaterializedInjectionReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--task":
+			if i+1 >= len(args) {
+				return taskMaterializedInjectionReportOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return taskMaterializedInjectionReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return taskMaterializedInjectionReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.taskPath == "" {
+		return taskMaterializedInjectionReportOptions{}, fmt.Errorf("missing --task")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return taskMaterializedInjectionReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runTaskMaterializedInjectionReport(opts taskMaterializedInjectionReportOptions, stdout io.Writer, stderr io.Writer) int {
+	task, err := tasks.LoadFromFile(opts.taskPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "task materialized-injection-report failed: %v\n", err)
+		return 1
+	}
+	result, err := retrievalcontext.MaterializedInjectionTaskReport(task)
+	if err != nil {
+		fmt.Fprintf(stderr, "task materialized-injection-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedInjectionTaskReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedInjectionTaskReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "task materialized-injection-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
 	}
 	return 0
 }

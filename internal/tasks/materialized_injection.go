@@ -12,6 +12,14 @@ func HasMaterializedInjection(task *Task) bool {
 	return task != nil && task.RetrievalContext.MaterializedInjection != nil
 }
 
+func ValidateMaterializedInjectionGovernanceBundlePath(path string) error {
+	return validateTaskRelativeSafePath("retrieval_context.materialized_injection.governance_bundle", path)
+}
+
+func ValidateMaterializedInjectionPromptPreviewPath(path string) error {
+	return validateTaskRelativeSafePath("retrieval_context.materialized_injection.prompt_preview", path)
+}
+
 func validateMaterializedInjectionSchema(spec *MaterializedInjectionSpec) []error {
 	if spec == nil {
 		return nil

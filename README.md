@@ -117,6 +117,7 @@ Implemented:
 - prompt preview report/QA (`retrieval context prompt-preview-report`), no worker execution
 - injection governance release bundle (`retrieval context injection-governance-bundle`), no worker execution
 - task schema declaration for materialized injection (`retrieval_context.materialized_injection`), no runner execution
+- materialized injection task declaration report (`task materialized-injection-report`), no runner execution
 
 Not implemented yet:
 
