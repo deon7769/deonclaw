@@ -165,6 +165,62 @@ func TestRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	}
 
 	assertFixtureInjectionPolicyE2E(t, root, dir, "retrieval-injection-policy.yaml")
+	assertFixtureInjectionApprovalE2E(t, governance, "retrieval-injection-policy.yaml")
+}
+
+func assertFixtureInjectionApprovalE2E(t *testing.T, governance retrievalcontext.GovernanceReportResult, policyName string) {
+	t.Helper()
+	const (
+		governanceReportPath  = "retrieval-context-governance-report.json"
+		injectionRequestPath  = "retrieval-context-injection-approval-request.json"
+		injectionApprovalPath = "retrieval-context-injection-approval.json"
+	)
+
+	var governanceBuf bytes.Buffer
+	if err := retrievalcontext.WriteGovernanceReportJSON(governance, &governanceBuf); err != nil {
+		t.Fatalf("WriteGovernanceReportJSON() error = %v", err)
+	}
+	if err := os.WriteFile(governanceReportPath, governanceBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	request, err := retrievalcontext.NewInjectionApprovalRequest(retrievalcontext.NewInjectionApprovalRequestOptions{
+		GovernanceReportPath: governanceReportPath,
+		PolicyPath:           policyName,
+		OutputPath:           injectionRequestPath,
+	})
+	if err != nil {
+		t.Fatalf("NewInjectionApprovalRequest() error = %v", err)
+	}
+	if request.ContainsText {
+		t.Fatal("injection approval request must not contain text")
+	}
+
+	approval, err := retrievalcontext.ApproveRunnerInjection(retrievalcontext.ApproveRunnerInjectionOptions{
+		RequestPath:                 injectionRequestPath,
+		OutputPath:                  injectionApprovalPath,
+		ConfirmAllowRunnerInjection: true,
+	})
+	if err != nil {
+		t.Fatalf("ApproveRunnerInjection() error = %v", err)
+	}
+	if !approval.RunnerInjectionAllowed || approval.AllowedUse != retrievalcontext.AllowedUseRunnerInjectionPolicyOnly {
+		t.Fatalf("approval = %#v, want runner injection authorized", approval)
+	}
+
+	inspect, err := retrievalcontext.InspectInjectionApproval(injectionApprovalPath, retrievalcontext.InspectInjectionApprovalOptions{
+		RequestPath: injectionRequestPath,
+	})
+	if err != nil {
+		t.Fatalf("InspectInjectionApproval() error = %v", err)
+	}
+	if inspect.Status != lancedbpolicy.StatusOK {
+		t.Fatalf("inspect status = %q, want ok", inspect.Status)
+	}
+
+	for _, path := range []string{injectionRequestPath, injectionApprovalPath} {
+		assertNoTextExcerpt(t, path)
+	}
 }
 
 func assertFixtureInjectionPolicyE2E(t *testing.T, root, dir, policyName string) {

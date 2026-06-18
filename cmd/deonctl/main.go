@@ -120,6 +120,9 @@ Usage:
   deonctl retrieval context injection-plan --approval <retrieval-context-approval.json> --request <retrieval-context-approval-request.json> --bundle <retrieval-context-bundle.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-injection-plan.json> --summary <retrieval-context-injection-plan.md>
   deonctl retrieval context injection-policy validate --policy <retrieval-injection-policy.yaml>
   deonctl retrieval context injection-policy plan --policy <retrieval-injection-policy.yaml> [--output-format text|json]
+  deonctl retrieval context injection-approval new --governance-report <retrieval-context-governance-report.json> --policy <retrieval-injection-policy.yaml> --output <retrieval-context-injection-approval-request.json>
+  deonctl retrieval context injection-approval approve --request <retrieval-context-injection-approval-request.json> --output <retrieval-context-injection-approval.json> --confirm-allow-runner-injection
+  deonctl retrieval context injection-approval inspect --approval <retrieval-context-injection-approval.json> [--request <retrieval-context-injection-approval-request.json>] [--output-format text|json]
   deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -963,6 +966,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 						return 2
 					}
 					return runRetrievalContextInjectionPolicyPlan(opts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "injection-approval":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					opts, err := parseRetrievalContextInjectionApprovalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextInjectionApprovalNew(opts, stdout, stderr)
+				case "approve":
+					opts, err := parseRetrievalContextInjectionApprovalApproveOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextInjectionApprovalApprove(opts, stdout, stderr)
+				case "inspect":
+					opts, err := parseRetrievalContextInjectionApprovalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runRetrievalContextInjectionApprovalInspect(opts, stdout, stderr)
 				default:
 					fmt.Fprint(stderr, usage)
 					return 2
@@ -7684,6 +7721,193 @@ func runRetrievalContextInjectionPolicyPlan(opts retrievalContextInjectionPolicy
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "retrieval context injection-policy plan failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type retrievalContextInjectionApprovalNewOptions struct {
+	governanceReportPath string
+	policyPath           string
+	outputPath           string
+}
+
+func parseRetrievalContextInjectionApprovalNewOptions(args []string) (retrievalContextInjectionApprovalNewOptions, error) {
+	opts := retrievalContextInjectionApprovalNewOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--governance-report":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalNewOptions{}, fmt.Errorf("missing value for --governance-report")
+			}
+			opts.governanceReportPath = args[i+1]
+			i++
+		case "--policy":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalNewOptions{}, fmt.Errorf("missing value for --policy")
+			}
+			opts.policyPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalNewOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return retrievalContextInjectionApprovalNewOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.governanceReportPath == "" {
+		return retrievalContextInjectionApprovalNewOptions{}, fmt.Errorf("missing --governance-report")
+	}
+	if opts.policyPath == "" {
+		return retrievalContextInjectionApprovalNewOptions{}, fmt.Errorf("missing --policy")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextInjectionApprovalNewOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextInjectionApprovalNew(opts retrievalContextInjectionApprovalNewOptions, stdout io.Writer, stderr io.Writer) int {
+	request, err := retrievalcontext.NewInjectionApprovalRequest(retrievalcontext.NewInjectionApprovalRequestOptions{
+		GovernanceReportPath: opts.governanceReportPath,
+		PolicyPath:           opts.policyPath,
+		OutputPath:           opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-approval new failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context injection-approval new: ok")
+	fmt.Fprintf(stdout, "status: %s\n", request.Status)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "governance_report_sha256: %s\n", request.GovernanceReportSHA256)
+	fmt.Fprintf(stdout, "policy_sha256: %s\n", request.PolicySHA256)
+	fmt.Fprintf(stdout, "materialized_sha256: %s\n", request.MaterializedSHA256)
+	fmt.Fprintf(stdout, "max_total_chars: %d\n", request.MaxTotalChars)
+	return 0
+}
+
+type retrievalContextInjectionApprovalApproveOptions struct {
+	requestPath                 string
+	outputPath                  string
+	confirmAllowRunnerInjection bool
+}
+
+func parseRetrievalContextInjectionApprovalApproveOptions(args []string) (retrievalContextInjectionApprovalApproveOptions, error) {
+	opts := retrievalContextInjectionApprovalApproveOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--request":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalApproveOptions{}, fmt.Errorf("missing value for --request")
+			}
+			opts.requestPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalApproveOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--confirm-allow-runner-injection":
+			opts.confirmAllowRunnerInjection = true
+		default:
+			return retrievalContextInjectionApprovalApproveOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.requestPath == "" {
+		return retrievalContextInjectionApprovalApproveOptions{}, fmt.Errorf("missing --request")
+	}
+	if opts.outputPath == "" {
+		return retrievalContextInjectionApprovalApproveOptions{}, fmt.Errorf("missing --output")
+	}
+	if !opts.confirmAllowRunnerInjection {
+		return retrievalContextInjectionApprovalApproveOptions{}, fmt.Errorf("missing --confirm-allow-runner-injection")
+	}
+	return opts, nil
+}
+
+func runRetrievalContextInjectionApprovalApprove(opts retrievalContextInjectionApprovalApproveOptions, stdout io.Writer, stderr io.Writer) int {
+	approval, err := retrievalcontext.ApproveRunnerInjection(retrievalcontext.ApproveRunnerInjectionOptions{
+		RequestPath:                 opts.requestPath,
+		OutputPath:                  opts.outputPath,
+		ConfirmAllowRunnerInjection: opts.confirmAllowRunnerInjection,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-approval approve failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "retrieval context injection-approval approve: ok")
+	fmt.Fprintf(stdout, "approved: %t\n", approval.Approved)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "allowed_use: %s\n", approval.AllowedUse)
+	fmt.Fprintf(stdout, "runner_injection_allowed: %t\n", approval.RunnerInjectionAllowed)
+	return 0
+}
+
+type retrievalContextInjectionApprovalInspectOptions struct {
+	approvalPath string
+	requestPath  string
+	outputFormat string
+}
+
+func parseRetrievalContextInjectionApprovalInspectOptions(args []string) (retrievalContextInjectionApprovalInspectOptions, error) {
+	opts := retrievalContextInjectionApprovalInspectOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--approval":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalInspectOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--request":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalInspectOptions{}, fmt.Errorf("missing value for --request")
+			}
+			opts.requestPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextInjectionApprovalInspectOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextInjectionApprovalInspectOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.approvalPath == "" {
+		return retrievalContextInjectionApprovalInspectOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextInjectionApprovalInspectOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextInjectionApprovalInspect(opts retrievalContextInjectionApprovalInspectOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.InspectInjectionApproval(opts.approvalPath, retrievalcontext.InspectInjectionApprovalOptions{
+		RequestPath: opts.requestPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-approval inspect failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteInspectInjectionApprovalJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteInspectInjectionApprovalText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context injection-approval inspect failed: %v\n", err)
 		return 1
 	}
 	if result.Status == lancedbpolicy.StatusFailed {

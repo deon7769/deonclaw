@@ -111,6 +111,7 @@ Implemented:
 - retrieval runner injection design ADR (`docs/ADR_RETRIEVAL_RUNNER_INJECTION.md`)
 - retrieval context injection policy schema (`retrieval context injection-policy`), no execution
 - retrieval injection policy e2e fixture (`configs/examples/retrieval-context-fixture/retrieval-injection-policy.yaml`), validate/plan only
+- runner injection approval artifact (`retrieval context injection-approval`), no execution
 
 Not implemented yet:
 

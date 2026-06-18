@@ -123,11 +123,54 @@ deonctl retrieval context injection-policy plan \
   --output-format json
 ~~~
 
+## Optional: runner injection approval (Task 22.16)
+
+These steps require saving the governance report JSON from step 9 first:
+
+~~~bash
+deonctl retrieval context governance-report \
+  --retrieval-context retrieval-context.json \
+  --materialized retrieval-context-materialized.json \
+  --bundle retrieval-context-bundle.json \
+  --request retrieval-context-approval-request.json \
+  --approval retrieval-context-approval.json \
+  --injection-plan retrieval-context-injection-plan.json \
+  --output-format json > retrieval-context-governance-report.json
+~~~
+
+### 12. Injection approval request
+
+~~~bash
+deonctl retrieval context injection-approval new \
+  --governance-report retrieval-context-governance-report.json \
+  --policy retrieval-injection-policy.yaml \
+  --output retrieval-context-injection-approval-request.json
+~~~
+
+### 13. Approve runner injection (artifact only)
+
+~~~bash
+deonctl retrieval context injection-approval approve \
+  --request retrieval-context-injection-approval-request.json \
+  --output retrieval-context-injection-approval.json \
+  --confirm-allow-runner-injection
+~~~
+
+### 14. Inspect injection approval
+
+~~~bash
+deonctl retrieval context injection-approval inspect \
+  --approval retrieval-context-injection-approval.json \
+  --request retrieval-context-injection-approval-request.json \
+  --output-format json
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
 - injection-policy validate returns ok after steps 1–9 generated the artifacts
 - injection-policy plan returns `would_inject: false`, `reason: schema_only_no_execution`, and `status: warning` while approval still has `runner_injection_allowed: false`
+- optional injection-approval inspect returns `runner_injection_allowed: true` and `allowed_use: runner_injection_policy_only` on the dedicated injection-approval artifact; Task 22.11 `retrieval-context-approval.json` stays `manual_review_only` with `runner_injection_allowed: false`
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

@@ -37,6 +37,7 @@ retrieval-context (runner metadata attachment)
 | 22.12.2 | `configs/examples/retrieval-context-fixture/` + e2e tests |
 | 22.13 | [RETRIEVAL_GOVERNANCE_CHECKLIST.md](RETRIEVAL_GOVERNANCE_CHECKLIST.md) |
 | 22.15 | `retrieval context injection-policy` validate/plan (schema only, no execution) |
+| 22.16 | `retrieval context injection-approval` new/approve/inspect (runner injection approval artifact, no execution) |
 
 ### What already exists
 
@@ -50,7 +51,7 @@ See [RETRIEVAL_CONTEXT.md](RETRIEVAL_CONTEXT.md) for CLI details.
 
 - **Runner injection of materialized context is not implemented** and must not be implied by existing task YAML or CLI defaults.
 - **`can_inject_now` must remain `false`** in injection-plan and governance-report until a future task explicitly enables execution.
-- **`runner_injection_allowed` must remain `false`** on approval artifacts until a separate approval path or artifact type authorizes injection.
+- **`runner_injection_allowed` must remain `false`** on materialized-context approval artifacts (`manual_review_only`) until a dedicated injection-approval artifact authorizes injection with `runner_injection_allowed: true`.
 - Any future injection work requires a **new ADR amendment or successor task**; this record does not authorize shipping injection by itself.
 
 ## 3. Future options (not chosen yet)
@@ -68,7 +69,7 @@ No option is selected for implementation in Task 22.14. Option **B** and **C** a
 
 All of the following would be **mandatory** before runner execution could include materialized text:
 
-1. **Approval artifact** with `runner_injection_allowed: true` (or a dedicated injection-approval artifact), bound to bundle/materialized/request hashes.
+1. **Injection-approval artifact** with `runner_injection_allowed: true` and `allowed_use: runner_injection_policy_only`, bound to governance-report/policy/bundle/materialized hashes (Task 22.16). Materialized-context approval (`manual_review_only`) does not authorize runner injection.
 2. **Explicit confirm flag** — e.g. `--confirm-inject-materialized-context` on run or materialize-equivalent gate; no silent opt-in.
 3. **Hard cap on injected characters** — enforce `max_total_chars` / `max_chars_per_chunk` at injection time (stricter than materialize limits if needed).
 4. **`governance-report` status `ok`** (or `warning` with documented acceptance) immediately before run dispatch.
@@ -103,7 +104,9 @@ Future injection design and implementation must **not** include:
 
 **Task 22.15 (implemented):** *Runner injection policy schema only* — `configs/examples/retrieval-injection-policy.yaml` plus `deonctl retrieval context injection-policy validate/plan`. **Still no runner execution**, no prompt changes, no task schema wiring.
 
-**Task 22.16+ (proposal):** runner injection execution behind explicit confirm flag, approval with `runner_injection_allowed: true`, and governance-report `ok`.
+**Task 22.16 (implemented):** *Runner injection approval artifact* — `deonctl retrieval context injection-approval new/approve/inspect` creates a dedicated approval artifact with `runner_injection_allowed: true` after governance-report and injection-policy validation. **Still no runner execution**, no prompt changes, no task schema wiring.
+
+**Task 22.17+ (proposal):** runner injection execution behind explicit confirm flag and governance gates satisfied at run dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

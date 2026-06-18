@@ -8085,17 +8085,20 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	}
 
 	const (
-		retrievalContextPath = "retrieval-context.json"
-		chunksPath           = "memory-index-chunks.jsonl"
-		materializedPath     = "retrieval-context-materialized.json"
-		materializedSummary  = "retrieval-context-materialized.md"
-		bundlePath           = "retrieval-context-bundle.json"
-		bundleSummary        = "retrieval-context-bundle.md"
-		requestPath          = "retrieval-context-approval-request.json"
-		approvalPath         = "retrieval-context-approval.json"
-		injectionPlanPath    = "retrieval-context-injection-plan.json"
-		injectionPlanSummary = "retrieval-context-injection-plan.md"
-		injectionPolicyPath  = "retrieval-injection-policy.yaml"
+		retrievalContextPath         = "retrieval-context.json"
+		chunksPath                   = "memory-index-chunks.jsonl"
+		materializedPath             = "retrieval-context-materialized.json"
+		materializedSummary          = "retrieval-context-materialized.md"
+		bundlePath                   = "retrieval-context-bundle.json"
+		bundleSummary                = "retrieval-context-bundle.md"
+		requestPath                  = "retrieval-context-approval-request.json"
+		approvalPath                 = "retrieval-context-approval.json"
+		injectionPlanPath            = "retrieval-context-injection-plan.json"
+		injectionPlanSummary         = "retrieval-context-injection-plan.md"
+		injectionPolicyPath          = "retrieval-injection-policy.yaml"
+		governanceReportPath         = "retrieval-context-governance-report.json"
+		injectionApprovalRequestPath = "retrieval-context-injection-approval-request.json"
+		injectionApprovalPath        = "retrieval-context-injection-approval.json"
 	)
 
 	steps := [][]string{
@@ -8217,6 +8220,55 @@ func TestRunRetrievalContextGovernanceFixtureE2E(t *testing.T) {
 	}
 	if strings.Contains(injectionPolicyPlanJSON, "text_excerpt") {
 		t.Fatal("injection policy plan json must not contain text_excerpt")
+	}
+
+	if err := os.WriteFile(filepath.Join(dir, governanceReportPath), []byte(stdout.String()), 0o644); err != nil {
+		t.Fatalf("WriteFile(governance report) error = %v", err)
+	}
+
+	injectionApprovalSteps := [][]string{
+		{
+			"retrieval", "context", "injection-approval", "new",
+			"--governance-report", governanceReportPath,
+			"--policy", injectionPolicyPath,
+			"--output", injectionApprovalRequestPath,
+		},
+		{
+			"retrieval", "context", "injection-approval", "approve",
+			"--request", injectionApprovalRequestPath,
+			"--output", injectionApprovalPath,
+			"--confirm-allow-runner-injection",
+		},
+		{
+			"retrieval", "context", "injection-approval", "inspect",
+			"--approval", injectionApprovalPath,
+			"--request", injectionApprovalRequestPath,
+			"--output-format", "json",
+		},
+	}
+	var injectionApprovalInspectJSON string
+	for i, step := range injectionApprovalSteps {
+		var stepStdout, stepStderr bytes.Buffer
+		if code := run(step, &stepStdout, &stepStderr); code != 0 {
+			t.Fatalf("injection approval step %d %v exit=%d stderr=%q stdout=%q", i+1, step, code, stepStderr.String(), stepStdout.String())
+		}
+		if len(step) >= 5 && step[3] == "inspect" {
+			injectionApprovalInspectJSON = stepStdout.String()
+		}
+	}
+	if !strings.Contains(injectionApprovalInspectJSON, `"runner_injection_allowed": true`) {
+		t.Fatalf("injection approval inspect json = %q, want runner_injection_allowed true", injectionApprovalInspectJSON)
+	}
+	if !strings.Contains(injectionApprovalInspectJSON, retrievalcontext.AllowedUseRunnerInjectionPolicyOnly) {
+		t.Fatalf("injection approval inspect json = %q, want allowed_use runner_injection_policy_only", injectionApprovalInspectJSON)
+	}
+	if strings.Contains(injectionApprovalInspectJSON, "text_excerpt") {
+		t.Fatal("injection approval inspect json must not contain text_excerpt")
+	}
+
+	oldApprovalData := readFixtureFileString(t, filepath.Join(dir, approvalPath))
+	if strings.Contains(oldApprovalData, `"runner_injection_allowed": true`) {
+		t.Fatal("materialized context approval must keep runner_injection_allowed false")
 	}
 }
 
