@@ -112,6 +112,7 @@ Usage:
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
   deonctl retrieval context materialize --retrieval-context <retrieval-context.json> --chunks <memory-index-chunks.jsonl> --output <materialized.json> --summary <materialized.md> --max-chars-per-chunk <n> --max-total-chars <n> --confirm-include-chunk-text
+  deonctl retrieval context materialized-report --artifact <retrieval-context-materialized.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -882,6 +883,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextMaterialize(opts, stdout, stderr)
+			case "materialized-report":
+				opts, err := parseRetrievalContextMaterializedReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextMaterializedReport(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -6968,6 +6977,62 @@ func runRetrievalContextMaterialize(opts retrievalContextMaterializeOptions, std
 	fmt.Fprintf(stdout, "included_chunk_count: %d\n", result.IncludedChunkCount)
 	fmt.Fprintf(stdout, "omitted_chunk_count: %d\n", result.OmittedChunkCount)
 	fmt.Fprintf(stdout, "total_chars_included: %d\n", result.TotalCharsIncluded)
+	return 0
+}
+
+type retrievalContextMaterializedReportOptions struct {
+	artifactPath string
+	outputFormat string
+}
+
+func parseRetrievalContextMaterializedReportOptions(args []string) (retrievalContextMaterializedReportOptions, error) {
+	opts := retrievalContextMaterializedReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--artifact":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializedReportOptions{}, fmt.Errorf("missing value for --artifact")
+			}
+			opts.artifactPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextMaterializedReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextMaterializedReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.artifactPath == "" {
+		return retrievalContextMaterializedReportOptions{}, fmt.Errorf("missing --artifact")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextMaterializedReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextMaterializedReport(opts retrievalContextMaterializedReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedReport(opts.artifactPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context materialized-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context materialized-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
 	return 0
 }
 

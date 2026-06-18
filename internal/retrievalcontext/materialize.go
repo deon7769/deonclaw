@@ -70,8 +70,8 @@ func Materialize(opts MaterializeOptions) (MaterializeResult, error) {
 	if err := validateRelativeSafePath("summary path", opts.SummaryPath); err != nil {
 		return MaterializeResult{}, err
 	}
-	if strings.TrimSpace(opts.RetrievalContextPath) == "" {
-		return MaterializeResult{}, fmt.Errorf("retrieval context path is required")
+	if err := validateRelativeSafePath("retrieval context path", opts.RetrievalContextPath); err != nil {
+		return MaterializeResult{}, err
 	}
 
 	retrievalData, err := os.ReadFile(opts.RetrievalContextPath)

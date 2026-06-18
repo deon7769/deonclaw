@@ -18,11 +18,11 @@ import (
 func TestMaterializeRequiresConfirmFlag(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
+	writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
 	_ = writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
 
 	_, err := retrievalcontext.Materialize(retrievalcontext.MaterializeOptions{
-		RetrievalContextPath: artifact,
+		RetrievalContextPath: "retrieval-context.json",
 		ChunksPath:           "chunks.jsonl",
 		OutputPath:           "out.json",
 		SummaryPath:          "out.md",
@@ -38,13 +38,13 @@ func TestMaterializeFailsWhenInspectFails(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
 	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
 
 	payload := readJSONFile(t, artifact)
 	payload["hit_count"] = 99
-	writeJSONFile(t, artifact, payload)
+	writeJSONFile(t, "retrieval-context.json", payload)
 
-	_, err := retrievalcontext.Materialize(materializeOpts(dir, artifact, chunks))
+	_, err := retrievalcontext.Materialize(materializeOpts())
 	if err == nil || !strings.Contains(err.Error(), "inspect status") {
 		t.Fatalf("error = %v, want inspect failure", err)
 	}
@@ -53,10 +53,10 @@ func TestMaterializeFailsWhenInspectFails(t *testing.T) {
 func TestMaterializeFailsWhenChunkMissing(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("other-chunk", "alpha text", "sha-source")})
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("other-chunk", "alpha text", "sha-source")})
 
-	_, err := retrievalcontext.Materialize(materializeOpts(dir, artifact, chunks))
+	_, err := retrievalcontext.Materialize(materializeOpts())
 	if err == nil || !strings.Contains(err.Error(), `chunk_id "chunk-a" not found`) {
 		t.Fatalf("error = %v, want missing chunk failure", err)
 	}
@@ -65,12 +65,12 @@ func TestMaterializeFailsWhenChunkMissing(t *testing.T) {
 func TestMaterializeFailsOnTextSHA256Mismatch(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
 	chunk := sampleChunk("chunk-a", "alpha text", "sha-source")
 	chunk.TextSHA256 = "wrong"
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{chunk})
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{chunk})
 
-	_, err := retrievalcontext.Materialize(materializeOpts(dir, artifact, chunks))
+	_, err := retrievalcontext.Materialize(materializeOpts())
 	if err == nil || !strings.Contains(err.Error(), "text_sha256 mismatch") {
 		t.Fatalf("error = %v, want text_sha256 mismatch", err)
 	}
@@ -83,12 +83,12 @@ func TestMaterializeFailsOnSourceSHA256Mismatch(t *testing.T) {
 	attachments := payload["attachments"].([]map[string]any)
 	hits := attachments[0]["hits"].([]map[string]any)
 	hits[0]["source_sha256"] = "wrong-source"
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, payload))
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, payload))
 
 	chunk := sampleChunk("chunk-a", "alpha text", "sha-source")
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{chunk})
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{chunk})
 
-	_, err := retrievalcontext.Materialize(materializeOpts(dir, artifact, chunks))
+	_, err := retrievalcontext.Materialize(materializeOpts())
 	if err == nil || !strings.Contains(err.Error(), "source_sha256 mismatch") {
 		t.Fatalf("error = %v, want source_sha256 mismatch", err)
 	}
@@ -102,11 +102,10 @@ func TestMaterializeTruncatesPerChunkWithWarning(t *testing.T) {
 	attachments := payload["attachments"].([]map[string]any)
 	hits := attachments[0]["hits"].([]map[string]any)
 	hits[0]["text_sha256"] = textSHA(longText)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, payload))
-	chunk := sampleChunk("chunk-a", longText, "sha-source")
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{chunk})
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, payload))
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", longText, "sha-source")})
 
-	opts := materializeOpts(dir, artifact, chunks)
+	opts := materializeOpts()
 	opts.MaxCharsPerChunk = 10
 	opts.MaxTotalChars = 6000
 
@@ -144,14 +143,14 @@ func TestMaterializeRespectsMaxTotalChars(t *testing.T) {
 		},
 	}
 	payload["hit_count"] = 2
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, payload))
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, payload))
 
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{
 		sampleChunkWithSource("chunk-a", "aaaaa", "sha-source-a"),
 		sampleChunkWithSource("chunk-b", "bbbb", "sha-source-b"),
 	})
 
-	opts := materializeOpts(dir, artifact, chunks)
+	opts := materializeOpts()
 	opts.MaxCharsPerChunk = 10
 	opts.MaxTotalChars = 5
 
@@ -170,10 +169,10 @@ func TestMaterializeRespectsMaxTotalChars(t *testing.T) {
 func TestMaterializeOutputJSONHasExcerptNotVector(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
 
-	opts := materializeOpts(dir, artifact, chunks)
+	opts := materializeOpts()
 	result, err := retrievalcontext.Materialize(opts)
 	if err != nil {
 		t.Fatalf("Materialize() error = %v", err)
@@ -200,10 +199,10 @@ func TestMaterializeOutputJSONHasExcerptNotVector(t *testing.T) {
 func TestMaterializeSummaryHasNoVectorOrEmbedding(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
 
-	opts := materializeOpts(dir, artifact, chunks)
+	opts := materializeOpts()
 	if _, err := retrievalcontext.Materialize(opts); err != nil {
 		t.Fatalf("Materialize() error = %v", err)
 	}
@@ -228,8 +227,8 @@ func TestMaterializeSummaryHasNoVectorOrEmbedding(t *testing.T) {
 func TestMaterializeRejectsBlockedOutputPaths(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{sampleChunk("chunk-a", "alpha text", "sha-source")})
 
 	cases := []struct {
 		name string
@@ -262,7 +261,7 @@ func TestMaterializeRejectsBlockedOutputPaths(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			opts := materializeOpts(dir, artifact, chunks)
+			opts := materializeOpts()
 			tc.mut(&opts)
 			_, err := retrievalcontext.Materialize(opts)
 			if err == nil {
@@ -275,20 +274,20 @@ func TestMaterializeRejectsBlockedOutputPaths(t *testing.T) {
 func TestMaterializeDoesNotOpenSourceFiles(t *testing.T) {
 	dir := t.TempDir()
 	chdir(t, dir)
-	artifact := writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
-	chunks := writeChunksFile(t, dir, []memoryindex.Chunk{
+	_ = writeRetrievalArtifactFile(t, dir, mustMarshal(t, validRetrievalArtifactMap(t)))
+	_ = writeChunksFile(t, dir, []memoryindex.Chunk{
 		sampleChunkWithSource("chunk-a", "alpha text", "sha-source"),
 	})
 
-	payload := readJSONFile(t, artifact)
+	payload := readJSONFile(t, "retrieval-context.json")
 	attachments := payload["attachments"].([]any)
 	attachment := attachments[0].(map[string]any)
 	hits := attachment["hits"].([]any)
 	hit := hits[0].(map[string]any)
 	hit["source_path"] = "missing-source.md"
-	writeJSONFile(t, artifact, payload)
+	writeJSONFile(t, "retrieval-context.json", payload)
 
-	opts := materializeOpts(dir, artifact, chunks)
+	opts := materializeOpts()
 	result, err := retrievalcontext.Materialize(opts)
 	if err != nil {
 		t.Fatalf("Materialize() error = %v", err)
@@ -301,9 +300,9 @@ func TestMaterializeDoesNotOpenSourceFiles(t *testing.T) {
 	}
 }
 
-func materializeOpts(dir, artifact, _ string) retrievalcontext.MaterializeOptions {
+func materializeOpts() retrievalcontext.MaterializeOptions {
 	return retrievalcontext.MaterializeOptions{
-		RetrievalContextPath:    artifact,
+		RetrievalContextPath:    "retrieval-context.json",
 		ChunksPath:              "chunks.jsonl",
 		OutputPath:              "materialized.json",
 		SummaryPath:             "materialized.md",
@@ -333,7 +332,7 @@ func writeRetrievalArtifactFile(t *testing.T, dir string, data []byte) string {
 	if err := os.WriteFile(path, data, 0o644); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	return path
+	return "retrieval-context.json"
 }
 
 func writeChunksFile(t *testing.T, dir string, chunks []memoryindex.Chunk) string {

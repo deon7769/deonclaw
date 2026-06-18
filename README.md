@@ -101,6 +101,7 @@ Implemented:
 - passive LanceDB retrieval context attachment in runner (`retrieval_context` on tasks), without runner search or chunk text injection
 - retrieval context inspect and runs retrieval-report for passive attachment auditing, without active search
 - governed retrieval context chunk text materialize (`retrieval context materialize`), without runner auto-injection
+- retrieval context materialized-report for chunk text artifact QA, without runner auto-injection
 
 Not implemented yet:
 

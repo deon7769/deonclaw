@@ -16,6 +16,7 @@ Implemented now:
 - `deonctl retrieval context inspect` for `retrieval-context.json` QA
 - `deonctl runs retrieval-report` for runs with `retrieval_context_attached` in execution traces
 - `deonctl retrieval context materialize` for governed chunk text excerpts from chunks JSONL (explicit confirm flag)
+- `deonctl retrieval context materialized-report` for QA over materialized chunk text artifacts
 
 Not implemented yet:
 
@@ -138,14 +139,25 @@ Rules:
 - validates `text_sha256` for every hit; validates `source_sha256` when present on the hit
 - `chunk_id` missing from chunks JSONL fails with a clear error (not a silent skip)
 - applies `max_chars_per_chunk` and `max_total_chars`; truncates with explicit warnings and char counts
-- output paths must be relative safe paths (no absolute, `..`, `secrets`, or `.env`)
-- chunks path must be a relative safe path and must exist
+- `--retrieval-context`, `--chunks`, `--output`, and `--summary` must be relative safe paths (no absolute, `..`, `secrets`, or `.env`)
 - never includes vector, embedding, or environment values
 
 Outputs:
 
 - `retrieval-context-materialized.json` — governed excerpts with hashes and truncation metadata
 - `retrieval-context-materialized.md` — human summary stating derived/non-canonical status
+
+Validate a materialized artifact before any human review or future runner integration:
+
+~~~bash
+deonctl retrieval context materialized-report \
+  --artifact artifacts/<run-id>/retrieval-context-materialized.json
+deonctl retrieval context materialized-report \
+  --artifact artifacts/<run-id>/retrieval-context-materialized.json \
+  --output-format json
+~~~
+
+`materialized-report` validates JSON shape, hash fields, count coherence, per-item char limits, and forbidden fields (`vector`, `embedding`, `raw_embedding`, `env`, `secret`). It accepts artifact status `ok` or `warning`. Stdout text output never prints `text_excerpt` values.
 
 ### Debugging `status: failed`
 
@@ -164,4 +176,4 @@ Outputs:
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
