@@ -92,6 +92,7 @@ Implemented:
 - retrieval context audit bundle (`retrieval context bundle`) over retrieval + materialized artifacts, without runner text injection
 - retrieval context approval workflow (`retrieval context approval new/approve/inspect`) for governed materialized context use, without runner text injection
 - retrieval context injection plan (`retrieval context injection-plan`) without runner execution or prompt changes
+- retrieval context governance report (`retrieval context governance-report`) without runner injection
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

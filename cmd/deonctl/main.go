@@ -118,6 +118,7 @@ Usage:
   deonctl retrieval context approval approve --request <retrieval-context-approval-request.json> --output <retrieval-context-approval.json> --confirm-approve-materialized-context
   deonctl retrieval context approval inspect --approval <retrieval-context-approval.json> [--output-format text|json]
   deonctl retrieval context injection-plan --approval <retrieval-context-approval.json> --request <retrieval-context-approval-request.json> --bundle <retrieval-context-bundle.json> --materialized <retrieval-context-materialized.json> --output <retrieval-context-injection-plan.json> --summary <retrieval-context-injection-plan.md>
+  deonctl retrieval context governance-report --retrieval-context <retrieval-context.json> --materialized <retrieval-context-materialized.json> --bundle <retrieval-context-bundle.json> --request <retrieval-context-approval-request.json> --approval <retrieval-context-approval.json> --injection-plan <retrieval-context-injection-plan.json> [--output-format text|json]
   deonctl worker codex dry-run <task-path> [--workers-config <path>]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
@@ -946,6 +947,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runRetrievalContextInjectionPlan(opts, stdout, stderr)
+			case "governance-report":
+				opts, err := parseRetrievalContextGovernanceReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runRetrievalContextGovernanceReport(opts, stdout, stderr)
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -7440,6 +7449,119 @@ func runRetrievalContextInjectionPlan(opts retrievalContextInjectionPlanOptions,
 	fmt.Fprintf(stdout, "reason: %s\n", result.Reason)
 	fmt.Fprintf(stdout, "estimated_prompt_chars: %d\n", result.EstimatedPromptChars)
 	fmt.Fprintf(stdout, "required_future_flag: %s\n", result.RequiredFutureFlag)
+	return 0
+}
+
+type retrievalContextGovernanceReportOptions struct {
+	retrievalContextPath string
+	materializedPath     string
+	bundlePath           string
+	requestPath          string
+	approvalPath         string
+	injectionPlanPath    string
+	outputFormat         string
+}
+
+func parseRetrievalContextGovernanceReportOptions(args []string) (retrievalContextGovernanceReportOptions, error) {
+	opts := retrievalContextGovernanceReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--retrieval-context":
+			if i+1 >= len(args) {
+				return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing value for --retrieval-context")
+			}
+			opts.retrievalContextPath = args[i+1]
+			i++
+		case "--materialized":
+			if i+1 >= len(args) {
+				return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing value for --materialized")
+			}
+			opts.materializedPath = args[i+1]
+			i++
+		case "--bundle":
+			if i+1 >= len(args) {
+				return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing value for --bundle")
+			}
+			opts.bundlePath = args[i+1]
+			i++
+		case "--request":
+			if i+1 >= len(args) {
+				return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing value for --request")
+			}
+			opts.requestPath = args[i+1]
+			i++
+		case "--approval":
+			if i+1 >= len(args) {
+				return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--injection-plan":
+			if i+1 >= len(args) {
+				return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing value for --injection-plan")
+			}
+			opts.injectionPlanPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return retrievalContextGovernanceReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.retrievalContextPath == "" {
+		return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing --retrieval-context")
+	}
+	if opts.materializedPath == "" {
+		return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing --materialized")
+	}
+	if opts.bundlePath == "" {
+		return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing --bundle")
+	}
+	if opts.requestPath == "" {
+		return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing --request")
+	}
+	if opts.approvalPath == "" {
+		return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.injectionPlanPath == "" {
+		return retrievalContextGovernanceReportOptions{}, fmt.Errorf("missing --injection-plan")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return retrievalContextGovernanceReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runRetrievalContextGovernanceReport(opts retrievalContextGovernanceReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.GovernanceReport(retrievalcontext.GovernanceReportOptions{
+		RetrievalContextPath: opts.retrievalContextPath,
+		MaterializedPath:     opts.materializedPath,
+		BundlePath:           opts.bundlePath,
+		RequestPath:          opts.requestPath,
+		ApprovalPath:         opts.approvalPath,
+		InjectionPlanPath:    opts.injectionPlanPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context governance-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteGovernanceReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteGovernanceReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "retrieval context governance-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
 	return 0
 }
 

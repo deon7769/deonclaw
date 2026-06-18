@@ -105,6 +105,7 @@ Implemented:
 - retrieval context audit bundle (`retrieval context bundle`), without runner text injection
 - retrieval context approval workflow (`retrieval context approval`), without runner text injection
 - retrieval context injection plan (`retrieval context injection-plan`), without runner execution
+- retrieval context governance report (`retrieval context governance-report`), without runner injection
 
 Not implemented yet:
 

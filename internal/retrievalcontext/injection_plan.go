@@ -139,6 +139,28 @@ func InjectionPlan(opts InjectionPlanOptions) (InjectionPlanResult, error) {
 	return result, nil
 }
 
+func LoadInjectionPlan(path string) (InjectionPlanResult, error) {
+	if err := validateRelativeSafePath("injection plan path", path); err != nil {
+		return InjectionPlanResult{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return InjectionPlanResult{}, fmt.Errorf("read injection plan %q: %w", path, err)
+	}
+	return ParseInjectionPlanJSON(data)
+}
+
+func ParseInjectionPlanJSON(data []byte) (InjectionPlanResult, error) {
+	if strings.Contains(string(data), `"text_excerpt"`) {
+		return InjectionPlanResult{}, fmt.Errorf("injection plan contains forbidden field text_excerpt")
+	}
+	var result InjectionPlanResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return InjectionPlanResult{}, fmt.Errorf("parse injection plan json: %w", err)
+	}
+	return result, nil
+}
+
 func validateInjectionPlanApproval(approval MaterializedContextApproval) error {
 	if !approval.Approved {
 		return fmt.Errorf("approval approved must be true")
