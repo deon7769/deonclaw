@@ -1,0 +1,11 @@
+materialized_injection_execution_enable:
+  enabled: false
+  require_confirm_flag: true
+  require_readiness_report: true
+  require_execution_gate: true
+  require_assembly_report: true
+  allow_provider_call: false
+  allow_worker_execution: false
+  allow_prompt_injection: false
+  blocked_reason: implementation_not_enabled
+  max_total_chars: 6000

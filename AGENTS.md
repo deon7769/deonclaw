@@ -114,6 +114,8 @@ Implemented:
 - materialized prompt assembly report (`worker codex materialized-prompt-assembly-report`), no worker execution
 - materialized injection runtime config schema (`worker codex materialized-injection-runtime validate`), no worker execution
 - materialized injection run planner (`worker codex materialized-injection-run-plan`), no worker execution
+- materialized injection execution enablement policy (`worker codex materialized-injection-execution-enable validate`), no worker execution
+- materialized injection provider run-plan (`worker codex materialized-injection-provider-run-plan`), no provider call
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
