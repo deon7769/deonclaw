@@ -243,6 +243,28 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 	}
 	assertProviderCallExecutorBlocked(t, planResult)
 	assertNoTextExcerpt(t, planPath)
+
+	const dryRunPath = "provider-call-executor-dry-run.json"
+	dryRunResult, err := retrievalcontext.ProviderCallExecutorDryRun(retrievalcontext.ProviderCallExecutorDryRunOptions{
+		ProviderCallExecutorOptions: providerCallExecutorDryRunOpts(chain),
+		OutputPath:                  dryRunPath,
+	})
+	if err != nil {
+		t.Fatalf("ProviderCallExecutorDryRun() error = %v", err)
+	}
+	assertProviderCallExecutorDryRunBlocked(t, dryRunResult)
+	assertNoTextExcerpt(t, dryRunPath)
+
+	dryRunReport, err := retrievalcontext.ProviderCallExecutorDryRunReport(retrievalcontext.ProviderCallExecutorDryRunReportOptions{
+		DryRunPath:         dryRunPath,
+		ExecutorConfigPath: chain.executorConfigPath,
+	})
+	if err != nil {
+		t.Fatalf("ProviderCallExecutorDryRunReport() error = %v", err)
+	}
+	if !dryRunReport.ExecutorDryRunValidated {
+		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
+	}
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -432,6 +454,39 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 	}
 	assertProviderCallExecutorBlocked(t, executor)
 	assertNoTextExcerpt(t, "provider-call-executor-plan.json")
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor", "dry-run",
+		"--executor-config", "provider-call-executor.yaml",
+		"--dispatch-config", dispatchPath,
+		"--provider-run-plan", runPlanPath,
+		"--payload-dry-run", "materialized-provider-payload-dry-run.json",
+		"--payload-report", "materialized-provider-payload-report.json",
+		"--provider-call-gate", "materialized-provider-call-gate.json",
+		"--readiness-report", "materialized-provider-call-readiness-report.json",
+		"--approval-request", "provider-call-approval-request.json",
+		"--approval", "provider-call-approval.json",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--output", "provider-call-executor-dry-run.json",
+		"--output-format", "json",
+	})
+
+	var dryRunReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor", "dry-run-report",
+		"--dry-run", "provider-call-executor-dry-run.json",
+		"--executor-config", "provider-call-executor.yaml",
+		"--output-format", "json",
+	}, &dryRunReportStdout)
+
+	var dryRunReport retrievalcontext.ProviderCallExecutorDryRunReportResult
+	if err := json.Unmarshal(dryRunReportStdout.Bytes(), &dryRunReport); err != nil {
+		t.Fatalf("Unmarshal(dry-run report) error = %v", err)
+	}
+	if !dryRunReport.ExecutorDryRunValidated {
+		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
+	}
+	assertNoTextExcerpt(t, "provider-call-executor-dry-run.json")
 }
 
 func buildDeonctlBinaryAt(t *testing.T, root string) string {

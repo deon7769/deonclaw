@@ -54,6 +54,7 @@ Implemented now:
 - `make provider-call-chain-smoke` / `scripts/provider-call-chain-fixture-smoke.sh` (Task 22.37, fixture smoke / CI guard only)
 - `deonctl worker codex provider-call-executor config validate` (Task 22.39, executor policy schema only)
 - `deonctl worker codex provider-call-executor validate/plan` (Tasks 22.38–22.39, executor skeleton only)
+- `deonctl worker codex provider-call-executor dry-run` / `dry-run-report` (Task 22.40, executor dry-run contract only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -1098,6 +1099,40 @@ Rules:
 - no provider call, no network, no worker execution
 
 Optional fixture steps 39–40 exercise config validate and executor validate/plan after chain audit.
+
+### Executor dry-run / dry-run report (Task 22.40)
+
+~~~bash
+deonctl worker codex provider-call-executor dry-run \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
+  --provider-run-plan artifacts/<run-id>/materialized-injection-provider-run-plan.json \
+  --payload-dry-run artifacts/<run-id>/materialized-provider-payload-dry-run.json \
+  --payload-report artifacts/<run-id>/materialized-provider-payload-report.json \
+  --provider-call-gate artifacts/<run-id>/materialized-provider-call-gate.json \
+  --readiness-report artifacts/<run-id>/materialized-provider-call-readiness-report.json \
+  --approval-request artifacts/<run-id>/provider-call-approval-request.json \
+  --approval artifacts/<run-id>/provider-call-approval.json \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --output artifacts/<run-id>/provider-call-executor-dry-run.json \
+  --output-format json
+
+deonctl worker codex provider-call-executor dry-run-report \
+  --dry-run artifacts/<run-id>/provider-call-executor-dry-run.json \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --output-format json
+~~~
+
+Rules:
+
+- does not read or print payload markdown; chain audit runs in metadata-only mode
+- does not call `transport.Deliver`
+- on success sets `executor_dry_run_ready: true`, `transport_called: false`, `contains_text: false`, `preview_only: true`
+- keeps all execution flags false and `blocked_reason: implementation_not_enabled`
+- dry-run-report validates hashes, policy, and blocked flags on the dry-run artifact
+- stdout/json must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+
+Optional fixture steps 41–42 exercise dry-run and dry-run-report after executor validate/plan.
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 

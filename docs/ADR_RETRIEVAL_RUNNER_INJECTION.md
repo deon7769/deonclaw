@@ -67,6 +67,7 @@ retrieval-context (runner metadata attachment)
 | 22.37 | `scripts/provider-call-chain-fixture-smoke.sh` / `make provider-call-chain-smoke` (fixture smoke / CI guard, no provider call) |
 | 22.38 | `worker codex provider-call-executor validate/plan` (executor skeleton, no provider call) |
 | 22.39 | `worker codex provider-call-executor config validate` + `configs/examples/provider-call-executor.yaml` (executor policy schema, no provider call) |
+| 22.40 | `worker codex provider-call-executor dry-run` / `dry-run-report` (executor dry-run contract, no provider call) |
 
 ### What already exists
 
@@ -191,7 +192,9 @@ Future injection design and implementation must **not** include:
 
 **Task 22.39 (implemented):** *Provider executor policy config* — `configs/examples/provider-call-executor.yaml` plus `deonctl worker codex provider-call-executor config validate`; integrated into executor validate/plan via `--executor-config`. **Still no provider call**, no network, no worker execution.
 
-**Task 22.40+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
+**Task 22.40 (implemented):** *Provider executor dry-run contract* — `deonctl worker codex provider-call-executor dry-run` and `dry-run-report` produce metadata-only artifacts without reading payload markdown or calling transport. **Still no provider call**, no network, no worker execution.
+
+**Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

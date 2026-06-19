@@ -123,7 +123,7 @@ Implemented:
 - provider call execution bundle (`worker codex provider-call-execution-bundle`), no provider call
 - provider call chain continuity audit (`worker codex provider-call-chain-audit`), no provider call
 - provider call chain fixture smoke / CI guard (`scripts/provider-call-chain-fixture-smoke.sh`, `make provider-call-chain-smoke`), no provider call
-- provider call executor skeleton (`worker codex provider-call-executor config validate`, `validate`, `plan`), no provider call
+- provider call executor skeleton (`worker codex provider-call-executor config validate`, `validate`, `plan`, `dry-run`, `dry-run-report`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries

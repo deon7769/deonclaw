@@ -19,6 +19,7 @@ var ErrProviderTransportNotEnabled = errors.New("provider transport not enabled 
 type ProviderExecutor interface {
 	Validate(ctx context.Context, opts ProviderCallExecutorOptions) (ProviderCallExecutorResult, error)
 	Plan(ctx context.Context, opts ProviderCallExecutorPlanOptions) (ProviderCallExecutorResult, error)
+	DryRun(ctx context.Context, opts ProviderCallExecutorDryRunOptions) (ProviderCallExecutorDryRunResult, error)
 }
 
 // SkeletonProviderExecutor is a policy-blocked executor with no real transport.
@@ -32,7 +33,7 @@ func NewSkeletonProviderExecutor() *SkeletonProviderExecutor {
 
 func (e *SkeletonProviderExecutor) Validate(ctx context.Context, opts ProviderCallExecutorOptions) (ProviderCallExecutorResult, error) {
 	_ = ctx
-	return providerCallExecutorCore(opts, false, "")
+	return providerCallExecutorCore(opts, providerCallExecutorCoreMode{})
 }
 
 func (e *SkeletonProviderExecutor) Plan(ctx context.Context, opts ProviderCallExecutorPlanOptions) (ProviderCallExecutorResult, error) {
@@ -40,11 +41,13 @@ func (e *SkeletonProviderExecutor) Plan(ctx context.Context, opts ProviderCallEx
 	if err := validateRelativeSafePath("plan output path", opts.OutputPath); err != nil {
 		return ProviderCallExecutorResult{}, err
 	}
-	result, err := providerCallExecutorCore(opts.ProviderCallExecutorOptions, true, opts.OutputPath)
-	if err != nil {
-		return ProviderCallExecutorResult{}, err
-	}
-	return result, nil
+	return providerCallExecutorCore(opts.ProviderCallExecutorOptions, providerCallExecutorCoreMode{plan: true, outputPath: opts.OutputPath})
+}
+
+func (e *SkeletonProviderExecutor) DryRun(ctx context.Context, opts ProviderCallExecutorDryRunOptions) (ProviderCallExecutorDryRunResult, error) {
+	_ = ctx
+	_ = e
+	return ProviderCallExecutorDryRun(opts)
 }
 
 type ProviderCallExecutorOptions struct {
@@ -113,8 +116,14 @@ func LoadProviderCallExecutionBundle(path string) (ProviderCallExecutionBundleRe
 	return bundle, data, nil
 }
 
-func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, planOutputPath string) (ProviderCallExecutorResult, error) {
-	for _, check := range []struct {
+type providerCallExecutorCoreMode struct {
+	plan              bool
+	skipPayloadOutput bool
+	outputPath        string
+}
+
+func providerCallExecutorCore(opts ProviderCallExecutorOptions, mode providerCallExecutorCoreMode) (ProviderCallExecutorResult, error) {
+	pathChecks := []struct {
 		field string
 		path  string
 	}{
@@ -122,14 +131,20 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 		{"dispatch config path", opts.DispatchConfigPath},
 		{"provider run plan path", opts.ProviderRunPlanPath},
 		{"payload dry-run path", opts.PayloadDryRunPath},
-		{"payload output path", opts.PayloadOutputPath},
 		{"payload report path", opts.PayloadReportPath},
 		{"provider call gate path", opts.ProviderCallGatePath},
 		{"readiness report path", opts.ReadinessReportPath},
 		{"approval request path", opts.ApprovalRequestPath},
 		{"approval path", opts.ApprovalPath},
 		{"execution bundle path", opts.ExecutionBundlePath},
-	} {
+	}
+	if !mode.skipPayloadOutput {
+		pathChecks = append(pathChecks, struct {
+			field string
+			path  string
+		}{"payload output path", opts.PayloadOutputPath})
+	}
+	for _, check := range pathChecks {
 		if err := validateRelativeSafePath(check.field, check.path); err != nil {
 			return ProviderCallExecutorResult{}, err
 		}
@@ -206,16 +221,17 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 	}
 
 	audit, err := ProviderCallChainContinuityAudit(ProviderCallChainContinuityAuditOptions{
-		DispatchConfigPath:   opts.DispatchConfigPath,
-		ProviderRunPlanPath:  opts.ProviderRunPlanPath,
-		PayloadDryRunPath:    opts.PayloadDryRunPath,
-		PayloadOutputPath:    opts.PayloadOutputPath,
-		PayloadReportPath:    opts.PayloadReportPath,
-		ProviderCallGatePath: opts.ProviderCallGatePath,
-		ReadinessReportPath:  opts.ReadinessReportPath,
-		ApprovalRequestPath:  opts.ApprovalRequestPath,
-		ApprovalPath:         opts.ApprovalPath,
-		ExecutionBundlePath:  opts.ExecutionBundlePath,
+		DispatchConfigPath:       opts.DispatchConfigPath,
+		ProviderRunPlanPath:      opts.ProviderRunPlanPath,
+		PayloadDryRunPath:        opts.PayloadDryRunPath,
+		PayloadOutputPath:        opts.PayloadOutputPath,
+		PayloadReportPath:        opts.PayloadReportPath,
+		ProviderCallGatePath:     opts.ProviderCallGatePath,
+		ReadinessReportPath:      opts.ReadinessReportPath,
+		ApprovalRequestPath:      opts.ApprovalRequestPath,
+		ApprovalPath:             opts.ApprovalPath,
+		ExecutionBundlePath:      opts.ExecutionBundlePath,
+		SkipPayloadOutputContent: mode.skipPayloadOutput,
 	})
 	if err != nil {
 		failures = append(failures, err.Error())
@@ -289,7 +305,7 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 		if len(warnings) > 0 {
 			result.Status = lancedbpolicy.StatusWarning
 		}
-		if planMode {
+		if planMode := mode.plan; planMode {
 			result.PlanSteps = []string{
 				"validate_executor_policy",
 				"load_execution_bundle",
@@ -298,7 +314,7 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 				"reconcile_hashes_and_policy_flags",
 				"blocked: implementation_not_enabled",
 			}
-			if err := writeProviderCallExecutorPlanJSON(planOutputPath, result); err != nil {
+			if err := writeProviderCallExecutorPlanJSON(mode.outputPath, result); err != nil {
 				return ProviderCallExecutorResult{}, err
 			}
 		}

@@ -513,7 +513,34 @@ deonctl worker codex provider-call-executor plan \
   --output-format json
 ~~~
 
-## CI smoke (Tasks 22.37–22.39)
+### 41. Provider call executor dry-run (no provider call)
+
+~~~bash
+deonctl worker codex provider-call-executor dry-run \
+  --executor-config ../provider-call-executor.yaml \
+  --dispatch-config ../materialized-provider-dispatch.yaml \
+  --provider-run-plan retrieval-context-materialized-injection-provider-run-plan.json \
+  --payload-dry-run retrieval-context-materialized-provider-payload-dry-run.json \
+  --payload-report retrieval-context-materialized-provider-payload-report.json \
+  --provider-call-gate retrieval-context-materialized-provider-call-gate.json \
+  --readiness-report retrieval-context-materialized-provider-call-readiness-report.json \
+  --approval-request retrieval-context-provider-call-approval-request.json \
+  --approval retrieval-context-provider-call-approval.json \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --output retrieval-context-provider-call-executor-dry-run.json \
+  --output-format json
+~~~
+
+### 42. Provider call executor dry-run report
+
+~~~bash
+deonctl worker codex provider-call-executor dry-run-report \
+  --dry-run retrieval-context-provider-call-executor-dry-run.json \
+  --executor-config ../provider-call-executor.yaml \
+  --output-format json
+~~~
+
+## CI smoke (Tasks 22.37–22.40)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -523,7 +550,7 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false. It also exercises executor policy validate and executor validate/plan with `execution_supported_now: false`.
+This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false. It also exercises executor policy validate, executor validate/plan, and executor dry-run with `transport_called: false`.
 
 See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
@@ -560,7 +587,8 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-call-chain-audit returns `chain_continuity_ready: true`, `loaders_reconciled: true`, `producer_commands_active: true`, `provider_call: false`, `network_call: false`, `worker_execution: false`, `sent_to_provider: false`, and does not print payload-output content
 - optional provider-call-executor config validate returns `status: ok`, `enabled: false`, `allow_provider_call: false`, `allow_network: false`, `blocked_reason: implementation_not_enabled`
 - optional provider-call-executor validate/plan returns `executor_policy_validated: true`, `executor_config_validated: true`, `execution_supported_now: false`, `provider_call_authorized_for_future: true`, `chain_continuity_ready: true`, all execution flags false, and does not print payload-output content
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.39)
+- optional provider-call-executor dry-run/dry-run-report returns `executor_dry_run_ready: true`, `transport_called: false`, `contains_text: false`, `preview_only: true`, all execution flags false, and does not read or print payload markdown
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.40)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

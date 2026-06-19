@@ -1,4 +1,4 @@
-# Provider call chain gate (Tasks 22.37–22.39)
+# Provider call chain gate (Tasks 22.37–22.40)
 
 This document defines the **governance gates before any real provider executor dispatch** (Task 22.40+).
 
@@ -11,6 +11,8 @@ Task 22.37 adds a **fixture smoke / CI guard** that executes the documented chai
 Task 22.38 adds a **provider executor skeleton** that consumes the execution bundle, chain audit, and approval, re-validates hashes and policy flags, and returns `blocked_reason: implementation_not_enabled`.
 
 Task 22.39 adds the **executor policy config** (`provider-call-executor.yaml`), CLI validation, and integration into the skeleton validate/plan path.
+
+Task 22.40 adds the **executor dry-run contract** (`dry-run` + `dry-run-report`) with metadata-only artifacts; no payload markdown reads and no transport dispatch.
 
 ## Chain boundary (must stay false)
 
@@ -37,8 +39,9 @@ Before any future real provider dispatch:
 9. **`provider-call-chain-audit`** — continuity / reconciliation gate
 10. **`provider-call-executor.yaml`** — executor policy (`enabled: false`, all `allow_*: false`)
 11. **`provider-call-executor validate/plan`** — skeleton executor re-validation (no dispatch)
+12. **`provider-call-executor dry-run`** + **`dry-run-report`** — metadata-only dry-run contract (no transport)
 
-The **execution bundle**, **chain audit**, **executor policy**, and **executor validate/plan** are the last gates. A future real dispatch (22.40+) must still require an explicit confirm flag.
+The **execution bundle**, **chain audit**, **executor policy**, **executor validate/plan**, and **executor dry-run** are the last gates. A future real dispatch (22.41+) must still require an explicit confirm flag.
 
 ## Final audit expectations
 
@@ -80,7 +83,24 @@ The **execution bundle**, **chain audit**, **executor policy**, and **executor v
 
 `deonctl worker codex provider-call-executor config validate` must return `status: ok` with `enabled: false` and all `allow_*: false`.
 
-Audit and executor JSON/stdout must not contain `text_excerpt` or payload content.
+`deonctl worker codex provider-call-executor dry-run` must return:
+
+```json
+{
+  "status": "ok",
+  "executor_dry_run_ready": true,
+  "transport_called": false,
+  "contains_text": false,
+  "preview_only": true,
+  "provider_call": false,
+  "network_call": false,
+  "worker_execution": false,
+  "sent_to_provider": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+Audit, executor, and dry-run JSON/stdout must not contain `text_excerpt` or payload content.
 
 ## CI smoke
 
@@ -96,16 +116,16 @@ make provider-call-chain-smoke
 
 This runs:
 
-- `TestProviderCallChainFixtureSmokeE2E` — library chain 29–40 equivalent with hash coherence and anti-leak assertions
-- `TestProviderCallChainFixtureCLISmokeE2E` — same chain via `deonctl` CLI (steps 31–40 + audit + executor)
+- `TestProviderCallChainFixtureSmokeE2E` — library chain 29–42 equivalent with hash coherence and anti-leak assertions
+- `TestProviderCallChainFixtureCLISmokeE2E` — same chain via `deonctl` CLI (steps 31–42 + audit + executor + dry-run)
 
 GitHub Actions also runs `make provider-call-chain-smoke` explicitly before `go test ./...`.
 
 ## Manual fixture
 
-See [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md) steps 29–40.
+See [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md) steps 29–42.
 
-## What 22.40+ may do (proposal)
+## What 22.41+ may do (proposal)
 
 - Enable executor policy with explicit operator approval and confirm flag
 - Invoke transport behind policy gates

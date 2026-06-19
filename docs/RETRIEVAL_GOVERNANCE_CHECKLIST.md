@@ -173,6 +173,7 @@ Tasks 22.22–22.36 add the runner materialized injection execution gate through
 - `make provider-call-chain-smoke` runs library + CLI fixture e2e guards (Tasks 22.37–22.39) with hash coherence and anti-leak assertions
 - provider call executor policy config (`provider-call-executor.yaml`) keeps `enabled: false` and all `allow_*: false`
 - provider call executor validate/plan re-validates bundle + audit + approval and keeps `execution_supported_now: false`
+- provider call executor dry-run produces metadata-only artifacts without reading payload markdown or calling transport
 - approval, bundle, and chain audit must not read or print payload-output content
 - all metadata-only artifacts must block `text_excerpt`, alpha text, prompt-output content, assembled-output content, and payload-output content
 

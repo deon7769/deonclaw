@@ -11,16 +11,17 @@ import (
 )
 
 type ProviderCallChainContinuityAuditOptions struct {
-	DispatchConfigPath   string
-	ProviderRunPlanPath  string
-	PayloadDryRunPath    string
-	PayloadOutputPath    string
-	PayloadReportPath    string
-	ProviderCallGatePath string
-	ReadinessReportPath  string
-	ApprovalRequestPath  string
-	ApprovalPath         string
-	ExecutionBundlePath  string
+	DispatchConfigPath       string
+	ProviderRunPlanPath      string
+	PayloadDryRunPath        string
+	PayloadOutputPath        string
+	PayloadReportPath        string
+	ProviderCallGatePath     string
+	ReadinessReportPath      string
+	ApprovalRequestPath      string
+	ApprovalPath             string
+	ExecutionBundlePath      string
+	SkipPayloadOutputContent bool
 }
 
 type ProviderCallChainStep struct {
@@ -54,7 +55,6 @@ func ProviderCallChainContinuityAudit(opts ProviderCallChainContinuityAuditOptio
 		{"dispatch config path", opts.DispatchConfigPath},
 		{"provider run plan path", opts.ProviderRunPlanPath},
 		{"payload dry-run path", opts.PayloadDryRunPath},
-		{"payload output path", opts.PayloadOutputPath},
 		{"payload report path", opts.PayloadReportPath},
 		{"provider call gate path", opts.ProviderCallGatePath},
 		{"readiness report path", opts.ReadinessReportPath},
@@ -63,6 +63,11 @@ func ProviderCallChainContinuityAudit(opts ProviderCallChainContinuityAuditOptio
 		{"execution bundle path", opts.ExecutionBundlePath},
 	} {
 		if err := validateRelativeSafePath(check.field, check.path); err != nil {
+			return ProviderCallChainContinuityAuditResult{}, err
+		}
+	}
+	if !opts.SkipPayloadOutputContent {
+		if err := validateRelativeSafePath("payload output path", opts.PayloadOutputPath); err != nil {
 			return ProviderCallChainContinuityAuditResult{}, err
 		}
 	}
@@ -152,11 +157,13 @@ func ProviderCallChainContinuityAudit(opts ProviderCallChainContinuityAuditOptio
 		_ = payloadData
 	}
 
-	payloadOutputData, err := os.ReadFile(opts.PayloadOutputPath)
-	if err != nil {
-		failures = append(failures, fmt.Sprintf("read payload output %q: %v", opts.PayloadOutputPath, err))
-	} else if payload.ProviderPayloadSHA256 != "" && sha256Hex(payloadOutputData) != payload.ProviderPayloadSHA256 {
-		failures = append(failures, "payload output hash mismatch with payload dry-run")
+	if !opts.SkipPayloadOutputContent {
+		payloadOutputData, err := os.ReadFile(opts.PayloadOutputPath)
+		if err != nil {
+			failures = append(failures, fmt.Sprintf("read payload output %q: %v", opts.PayloadOutputPath, err))
+		} else if payload.ProviderPayloadSHA256 != "" && sha256Hex(payloadOutputData) != payload.ProviderPayloadSHA256 {
+			failures = append(failures, "payload output hash mismatch with payload dry-run")
+		}
 	}
 
 	payloadReport, payloadReportData, err := LoadMaterializedProviderPayloadReport(opts.PayloadReportPath)
