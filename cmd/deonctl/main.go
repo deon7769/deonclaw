@@ -137,6 +137,8 @@ Usage:
   deonctl worker codex materialized-injection-execution-gate --task <path> --readiness-report <materialized-injection-readiness-report.json> --prompt-output <materialized-injection-prompt-section.md> --output <materialized-injection-execution-gate.json> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex materialized-prompt-assembly-dry-run --execution-gate <materialized-injection-execution-gate.json> --base-prompt-fixture <base-worker-prompt-fixture.md> --prompt-output <materialized-injection-prompt-section.md> --output <materialized-prompt-assembly-dry-run.json> --assembled-output <materialized-prompt-assembly.md> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex materialized-prompt-assembly-report --assembly-dry-run <materialized-prompt-assembly-dry-run.json> --assembled-output <materialized-prompt-assembly.md> [--output-format text|json]
+  deonctl worker codex materialized-injection-runtime validate --config <materialized-injection-runtime.yaml> [--output-format text|json]
+  deonctl worker codex materialized-injection-run-plan --task <path> --runtime-config <materialized-injection-runtime.yaml> --execution-gate <materialized-injection-execution-gate.json> --assembly-report <materialized-prompt-assembly-report.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-injection-run-plan.json> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -878,6 +880,32 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedPromptAssemblyReport(opts, stdout, stderr)
+			case "materialized-injection-runtime":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "validate":
+					subOpts, err := parseCodexMaterializedInjectionRuntimeValidateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexMaterializedInjectionRuntimeValidate(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "materialized-injection-run-plan":
+				opts, err := parseCodexMaterializedInjectionRunPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedInjectionRunPlan(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -7006,6 +7034,190 @@ func runCodexMaterializedPromptAssemblyReport(opts codexMaterializedPromptAssemb
 	if err != nil {
 		fmt.Fprintf(stderr, "worker codex materialized-prompt-assembly-report failed: %v\n", err)
 		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedInjectionRuntimeValidateOptions struct {
+	configPath   string
+	outputFormat string
+}
+
+func parseCodexMaterializedInjectionRuntimeValidateOptions(args []string) (codexMaterializedInjectionRuntimeValidateOptions, error) {
+	opts := codexMaterializedInjectionRuntimeValidateOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRuntimeValidateOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRuntimeValidateOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedInjectionRuntimeValidateOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return codexMaterializedInjectionRuntimeValidateOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedInjectionRuntimeValidateOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedInjectionRuntimeValidate(opts codexMaterializedInjectionRuntimeValidateOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := retrievalcontext.LoadMaterializedInjectionRuntime(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-runtime validate failed: %v\n", err)
+		return 1
+	}
+	result, err := retrievalcontext.MaterializedInjectionRuntimeValidate(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-runtime validate failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedInjectionRuntimeValidateJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedInjectionRuntimeValidateText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-runtime validate failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedInjectionRunPlanOptions struct {
+	taskPath                         string
+	runtimeConfigPath                string
+	executionGatePath                string
+	assemblyReportPath               string
+	assembledOutputPath              string
+	outputPath                       string
+	confirmInjectMaterializedContext bool
+	outputFormat                     string
+}
+
+func parseCodexMaterializedInjectionRunPlanOptions(args []string) (codexMaterializedInjectionRunPlanOptions, error) {
+	opts := codexMaterializedInjectionRunPlanOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--task":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing value for --task")
+			}
+			opts.taskPath = args[i+1]
+			i++
+		case "--runtime-config":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing value for --runtime-config")
+			}
+			opts.runtimeConfigPath = args[i+1]
+			i++
+		case "--execution-gate":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing value for --execution-gate")
+			}
+			opts.executionGatePath = args[i+1]
+			i++
+		case "--assembly-report":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing value for --assembly-report")
+			}
+			opts.assemblyReportPath = args[i+1]
+			i++
+		case "--assembled-output":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing value for --assembled-output")
+			}
+			opts.assembledOutputPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--confirm-inject-materialized-context":
+			opts.confirmInjectMaterializedContext = true
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.taskPath == "" {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing --task")
+	}
+	if opts.runtimeConfigPath == "" {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing --runtime-config")
+	}
+	if opts.executionGatePath == "" {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing --execution-gate")
+	}
+	if opts.assemblyReportPath == "" {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing --assembly-report")
+	}
+	if opts.assembledOutputPath == "" {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing --assembled-output")
+	}
+	if opts.outputPath == "" {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing --output")
+	}
+	if !opts.confirmInjectMaterializedContext {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("missing --confirm-inject-materialized-context")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedInjectionRunPlanOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedInjectionRunPlan(opts codexMaterializedInjectionRunPlanOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedInjectionRunPlan(retrievalcontext.MaterializedInjectionRunPlanOptions{
+		TaskPath:                         opts.taskPath,
+		RuntimeConfigPath:                opts.runtimeConfigPath,
+		ExecutionGatePath:                opts.executionGatePath,
+		AssemblyReportPath:               opts.assemblyReportPath,
+		AssembledOutputPath:              opts.assembledOutputPath,
+		ConfirmInjectMaterializedContext: opts.confirmInjectMaterializedContext,
+		OutputPath:                       opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-run-plan failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedInjectionRunPlanJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedInjectionRunPlanText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-injection-run-plan failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
 	}
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1

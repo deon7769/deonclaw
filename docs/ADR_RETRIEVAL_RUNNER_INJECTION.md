@@ -51,6 +51,8 @@ retrieval-context (runner metadata attachment)
 | 22.22 | `worker codex materialized-injection-execution-gate` (execution gate, no worker execution) |
 | 22.23 | `worker codex materialized-prompt-assembly-dry-run` (prompt assembly adapter, no worker execution) |
 | 22.24 | `worker codex materialized-prompt-assembly-report` (prompt assembly QA, no worker execution) |
+| 22.25 | `worker codex materialized-injection-runtime validate` (runtime config schema, no worker execution) |
+| 22.26 | `worker codex materialized-injection-run-plan` (run planner, no worker execution) |
 
 ### What already exists
 
@@ -145,7 +147,11 @@ Future injection design and implementation must **not** include:
 
 **Task 22.24 (implemented):** *Materialized prompt assembly report* — `deonctl worker codex materialized-prompt-assembly-report` validates Task 22.23 assembly dry-run JSON and assembled markdown without printing chunk text in report output. **Still no runner execution**, no real prompt injection, no worker materialized text injection.
 
-**Task 22.25+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
+**Task 22.25 (implemented):** *Materialized injection runtime config* — `deonctl worker codex materialized-injection-runtime validate` validates YAML schema for future runtime gates (`enabled: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`, `blocked_reason: implementation_not_enabled`). **Still no runner execution**, no real prompt injection, no worker materialized text injection.
+
+**Task 22.26 (implemented):** *Materialized injection run planner* — `deonctl worker codex materialized-injection-run-plan` binds task declaration, runtime config, execution gate, and assembly report into a run-plan JSON artifact with `run_plan_ready: true`, `worker_execution_planned: false`, `prompt_injection_planned: false`, `implementation_allows_execution_now: false`. **Still no runner execution**, no real prompt injection, no worker materialized text injection; normal runner prompt unchanged.
+
+**Task 22.27+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

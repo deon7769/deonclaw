@@ -131,6 +131,28 @@ func MaterializedPromptAssemblyReport(opts MaterializedPromptAssemblyReportOptio
 	return result, nil
 }
 
+func LoadMaterializedPromptAssemblyReport(path string) (MaterializedPromptAssemblyReportResult, []byte, error) {
+	if err := validateRelativeSafePath("assembly report path", path); err != nil {
+		return MaterializedPromptAssemblyReportResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MaterializedPromptAssemblyReportResult{}, nil, fmt.Errorf("read materialized prompt assembly report %q: %w", path, err)
+	}
+	return ParseMaterializedPromptAssemblyReportJSON(data)
+}
+
+func ParseMaterializedPromptAssemblyReportJSON(data []byte) (MaterializedPromptAssemblyReportResult, []byte, error) {
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return MaterializedPromptAssemblyReportResult{}, nil, fmt.Errorf("materialized prompt assembly report must not contain materialized preview text")
+	}
+	var result MaterializedPromptAssemblyReportResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return MaterializedPromptAssemblyReportResult{}, nil, fmt.Errorf("parse materialized prompt assembly report json: %w", err)
+	}
+	return result, data, nil
+}
+
 func WriteMaterializedPromptAssemblyReportText(result MaterializedPromptAssemblyReportResult, out io.Writer) error {
 	if _, err := fmt.Fprintln(out, "worker_codex_materialized_prompt_assembly_report:"); err != nil {
 		return err
