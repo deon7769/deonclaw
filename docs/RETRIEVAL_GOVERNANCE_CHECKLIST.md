@@ -158,15 +158,18 @@ Before merging or tagging retrieval-governance work:
 
 Task 22.13 is documentation and operability only. Runner materialized text injection, active runner search, natural-language retrieval, provider APIs, MCP integration, fallback execution, and UI remain out of scope.
 
-Tasks 22.22–22.28 add the runner materialized injection execution gate, materialized prompt assembly dry-run, materialized prompt assembly report, materialized injection runtime config schema, materialized injection run planner, execution enablement policy schema, and provider run-plan. They are **metadata-only and dry-run** artifacts:
+Tasks 22.22–22.35 add the runner materialized injection execution gate through provider call execution bundle. They are **metadata-only and dry-run** artifacts:
 
 - worker execution with materialized text is still not implemented
 - normal runner prompt injection is still not implemented
-- task `enabled: true` and runtime `enabled: true` are still blocked
+- task `enabled: true`, runtime `enabled: true`, and dispatch `enabled: true` are still blocked
 - the materialized prompt assembly is never sent to Codex or OpenCode
 - run planner sets `worker_execution_planned: false` and `prompt_injection_planned: false`
 - provider run-plan sets `sent_to_provider: false`, `provider_call_allowed_now: false`, and `would_use_assembled_prompt: true` without dispatching Codex/OpenCode
-- all metadata-only artifacts (gate, assembly dry-run JSON/text, assembly report JSON/text, runtime validate output, run-plan JSON/text, enablement validate output, provider run-plan JSON/text) must block `text_excerpt`, alpha text, prompt-output content, and assembled-output content
+- provider call approval keeps `provider_call_allowed_now: false` and `sent_to_provider: false` even after approve; approve requires explicit `--confirm-payload-output-sha256`
+- provider call execution bundle keeps `network_allowed: false`, `provider_call_allowed_now: false`, and `sent_to_provider: false`
+- approval and bundle must not read or print payload-output content
+- all metadata-only artifacts must block `text_excerpt`, alpha text, prompt-output content, assembled-output content, and payload-output content
 
 Boundary
 

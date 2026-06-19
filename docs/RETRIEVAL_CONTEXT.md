@@ -43,6 +43,8 @@ Implemented now:
 - `deonctl worker codex materialized-injection-run-plan` (Task 22.26, run planner only)
 - `deonctl worker codex materialized-injection-execution-enable validate` (Task 22.27, execution enablement policy schema only)
 - `deonctl worker codex materialized-injection-provider-run-plan` (Task 22.28, provider run-plan only)
+- `deonctl worker codex provider-call-approval new/approve/inspect` (Task 22.34, provider call approval only)
+- `deonctl worker codex provider-call-execution-bundle` (Task 22.35, provider call execution bundle only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -822,6 +824,67 @@ Rules:
 
 Optional fixture step 30 exercises this path after execution enablement validate.
 
+## Provider call approval (Task 22.34)
+
+Explicit approval workflow for future provider calls. Binds `provider-call-readiness-report`, `provider-call-gate`, and `payload-report` metadata. Requires `--confirm-payload-output-sha256` on approve matching `payload_output_sha256` from the payload report. Does **not** read or print `payload-output` content.
+
+~~~bash
+deonctl worker codex provider-call-approval new \
+  --readiness-report artifacts/<run-id>/provider-call-readiness-report.json \
+  --provider-call-gate artifacts/<run-id>/provider-call-gate.json \
+  --payload-report artifacts/<run-id>/payload-report.json \
+  --output artifacts/<run-id>/provider-call-approval-request.json
+
+deonctl worker codex provider-call-approval approve \
+  --request artifacts/<run-id>/provider-call-approval-request.json \
+  --output artifacts/<run-id>/provider-call-approval.json \
+  --confirm-payload-output-sha256 <sha256-from-payload-report>
+
+deonctl worker codex provider-call-approval inspect \
+  --approval artifacts/<run-id>/provider-call-approval.json \
+  --request artifacts/<run-id>/provider-call-approval-request.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input/output paths
+- rejects readiness/gate/payload-report JSON containing `text_excerpt` or alpha text
+- validates readiness report `provider_call_readiness_ready: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`
+- validates gate `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
+- validates payload report `payload_validated: true`, `sent_to_provider: false`, `payload_output_sha256` present
+- cross-checks `provider_run_plan_sha256`, `payload_report_sha256`, `payload_output_sha256`, and `provider_call_gate_sha256` across artifacts
+- approval sets `provider_call_authorized_for_future: true` while keeping `provider_call_allowed_now: false` and `sent_to_provider: false`
+- approval/inspect output must not contain `text_excerpt` or payload-output content
+- no provider call, no network, no worker execution
+
+## Provider call execution bundle (Task 22.35)
+
+Final metadata-only consolidation before any future provider call. Binds `dispatch-config`, `payload-report`, `provider-call-gate`, `provider-call-readiness-report`, and `provider-call-approval`. Does not read `payload-output`, does not call providers, and does not dispatch workers.
+
+Example dispatch config: `configs/examples/materialized-injection-dispatch.yaml`
+
+~~~bash
+deonctl worker codex provider-call-execution-bundle \
+  --dispatch-config configs/examples/materialized-injection-dispatch.yaml \
+  --payload-report artifacts/<run-id>/payload-report.json \
+  --provider-call-gate artifacts/<run-id>/provider-call-gate.json \
+  --readiness-report artifacts/<run-id>/provider-call-readiness-report.json \
+  --approval artifacts/<run-id>/provider-call-approval.json \
+  --output artifacts/<run-id>/provider-call-execution-bundle.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input/output paths
+- validates dispatch config `enabled: false`, `allow_provider_call: false`, `allow_network: false`, `allow_worker_execution: false`, `blocked_reason: implementation_not_enabled`
+- validates payload report, gate, readiness report, and approval via Task 22.34 rules
+- cross-checks hashes across dispatch config, reports, gate, readiness, and approval
+- on success sets `provider_call_authorized_for_future: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `network_allowed: false`, `runner_execution: false`, `execution_supported_now: false`, `contains_text: false`, `blocked_reason: implementation_not_enabled`
+- bundle text/json output must not contain `text_excerpt` or payload-output content; exit code 1 on `status: failed`
+- no provider call, no network, no worker execution
+
 ### Debugging `status: failed`
 
 1. Run `deonctl retrieval context inspect --artifact ...` and read `failures`
@@ -839,4 +902,4 @@ Optional fixture step 30 exercises this path after execution enablement validate
 
 ## Boundary
 
-Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Task 22.15.1 extends the governance e2e fixture with injection-policy validate/plan over real chain artifacts. Task 22.16 owns runner injection approval artifacts without execution. Task 22.17 owns runner injection execution-plan artifacts without worker execution. Task 22.18 owns materialized prompt section preview render without worker execution. Task 22.18.1 owns prompt preview report/QA without worker execution. Task 22.18.2 owns injection governance release bundle consolidation without worker execution. Task 22.19 owns task YAML declaration for future materialized injection with governance bundle validation only. Task 22.19.1 owns materialized injection task declaration report/QA without runner execution. Task 22.20 owns runner materialized injection preflight without worker execution. Task 22.21 owns runner materialized injection dry-run prompt artifact without worker execution. Task 22.21.1 owns runner materialized injection dry-run report/QA without worker execution. Task 22.21.2 owns runner materialized injection readiness report without worker execution. Task 22.22 owns runner materialized injection execution gate without worker execution. Task 22.23 owns materialized prompt assembly dry-run adapter without worker execution and without normal runner prompt changes. Task 22.24 owns materialized prompt assembly report/QA without worker execution. Task 22.25 owns materialized injection runtime config schema validation without worker execution. Task 22.26 owns materialized injection run planner without worker execution and without normal runner prompt changes. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.
+Tasks 22.7–22.7.1 own controlled vector search smoke and result QA. Task 22.8 owns passive runner attachment of validated metadata. Task 22.8.1 owns retrieval-context inspect and runs retrieval-report for passive attachment auditing. Task 22.9 owns governed chunk text materialization from chunks JSONL without runner auto-injection. Task 22.9.1 owns materialized-report QA and materialize path hardening. Task 22.10 owns retrieval context audit bundle consolidation without runner text injection. Task 22.11 owns explicit approval workflow for materialized context without runner text injection. Task 22.12 owns injection planning without runner execution. Task 22.12.1 owns consolidated governance reporting without injection. Task 22.12.2 owns the end-to-end governance fixture and e2e validation. Task 22.13 owns the retrieval governance release checklist. Task 22.14 owns the retrieval runner injection design ADR without implementation. Task 22.15 owns injection policy schema validate/plan without execution. Task 22.15.1 extends the governance e2e fixture with injection-policy validate/plan over real chain artifacts. Task 22.16 owns runner injection approval artifacts without execution. Task 22.17 owns runner injection execution-plan artifacts without worker execution. Task 22.18 owns materialized prompt section preview render without worker execution. Task 22.18.1 owns prompt preview report/QA without worker execution. Task 22.18.2 owns injection governance release bundle consolidation without worker execution. Task 22.19 owns task YAML declaration for future materialized injection with governance bundle validation only. Task 22.19.1 owns materialized injection task declaration report/QA without runner execution. Task 22.20 owns runner materialized injection preflight without worker execution. Task 22.21 owns runner materialized injection dry-run prompt artifact without worker execution. Task 22.21.1 owns runner materialized injection dry-run report/QA without worker execution. Task 22.21.2 owns runner materialized injection readiness report without worker execution. Task 22.22 owns runner materialized injection execution gate without worker execution. Task 22.23 owns materialized prompt assembly dry-run adapter without worker execution and without normal runner prompt changes. Task 22.24 owns materialized prompt assembly report/QA without worker execution. Task 22.25 owns materialized injection runtime config schema validation without worker execution. Task 22.26 owns materialized injection run planner without worker execution and without normal runner prompt changes. Task 22.27 owns materialized injection execution enablement policy schema validation without worker execution. Task 22.28 owns materialized injection provider run-plan without provider call. Task 22.34 owns provider call approval without provider call. Task 22.35 owns provider call execution bundle without provider call, network, or worker execution. Natural-language retrieval and active runner search remain future work. See docs/MEMORY_LANCEDB.md and docs/MEMORY_INDEX.md.

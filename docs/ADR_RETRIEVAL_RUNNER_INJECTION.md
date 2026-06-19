@@ -55,6 +55,8 @@ retrieval-context (runner metadata attachment)
 | 22.26 | `worker codex materialized-injection-run-plan` (run planner, no worker execution) |
 | 22.27 | `worker codex materialized-injection-execution-enable validate` (execution enablement policy schema, no worker execution) |
 | 22.28 | `worker codex materialized-injection-provider-run-plan` (provider run-plan, no provider call) |
+| 22.34 | `worker codex provider-call-approval new/approve/inspect` (provider call approval, no provider call) |
+| 22.35 | `worker codex provider-call-execution-bundle` (provider call execution bundle, no provider call) |
 
 ### What already exists
 
@@ -157,7 +159,11 @@ Future injection design and implementation must **not** include:
 
 **Task 22.28 (implemented):** *Materialized injection provider run-plan* — `deonctl worker codex materialized-injection-provider-run-plan` binds task declaration, enablement policy, execution gate, and assembly report into a provider run-plan JSON with `provider_run_plan_ready: true`, `would_use_assembled_prompt: true`, `sent_to_provider: false`, `provider_call_allowed_now: false`. **Still no provider call**, no Codex/OpenCode dispatch, no real prompt injection; normal runner prompt unchanged.
 
-**Task 22.29+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
+**Task 22.34 (implemented):** *Provider call approval* — `deonctl worker codex provider-call-approval new/approve/inspect` binds readiness report, provider-call gate, and payload-report metadata with explicit `--confirm-payload-output-sha256` on approve. Keeps `provider_call_allowed_now: false` and `sent_to_provider: false`. Does not read or print payload-output. **Still no provider call**, no network, no worker execution.
+
+**Task 22.35 (implemented):** *Provider call execution bundle* — `deonctl worker codex provider-call-execution-bundle` consolidates dispatch config, payload report, gate, readiness report, and approval into a final metadata-only bundle with hash validation. **Still no provider call**, no network, no worker execution.
+
+**Task 22.36+ (proposal):** actual provider call execution behind explicit confirm flag at dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

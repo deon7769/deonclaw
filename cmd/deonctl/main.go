@@ -141,6 +141,10 @@ Usage:
   deonctl worker codex materialized-injection-run-plan --task <path> --runtime-config <materialized-injection-runtime.yaml> --execution-gate <materialized-injection-execution-gate.json> --assembly-report <materialized-prompt-assembly-report.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-injection-run-plan.json> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex materialized-injection-execution-enable validate --config <materialized-injection-execution-enable.yaml> [--output-format text|json]
   deonctl worker codex materialized-injection-provider-run-plan --task <path> --enable-config <materialized-injection-execution-enable.yaml> --execution-gate <materialized-injection-execution-gate.json> --assembly-report <materialized-prompt-assembly-report.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-injection-provider-run-plan.json> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex provider-call-approval new --readiness-report <provider-call-readiness-report.json> --provider-call-gate <provider-call-gate.json> --payload-report <payload-report.json> --output <provider-call-approval-request.json>
+  deonctl worker codex provider-call-approval approve --request <provider-call-approval-request.json> --output <provider-call-approval.json> --confirm-payload-output-sha256 <sha256>
+  deonctl worker codex provider-call-approval inspect --approval <provider-call-approval.json> [--request <provider-call-approval-request.json>] [--output-format text|json]
+  deonctl worker codex provider-call-execution-bundle --dispatch-config <materialized-injection-dispatch.yaml> --payload-report <payload-report.json> --provider-call-gate <provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval <provider-call-approval.json> --output <provider-call-execution-bundle.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -934,6 +938,48 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedInjectionProviderRunPlan(opts, stdout, stderr)
+			case "provider-call-approval":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					subOpts, err := parseCodexProviderCallApprovalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCallApprovalNew(subOpts, stdout, stderr)
+				case "approve":
+					subOpts, err := parseCodexProviderCallApprovalApproveOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCallApprovalApprove(subOpts, stdout, stderr)
+				case "inspect":
+					subOpts, err := parseCodexProviderCallApprovalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCallApprovalInspect(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-call-execution-bundle":
+				opts, err := parseCodexProviderCallExecutionBundleOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderCallExecutionBundle(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -7426,6 +7472,314 @@ func runCodexMaterializedInjectionProviderRunPlan(opts codexMaterializedInjectio
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "worker codex materialized-injection-provider-run-plan failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexProviderCallApprovalNewOptions struct {
+	readinessReportPath  string
+	providerCallGatePath string
+	payloadReportPath    string
+	outputPath           string
+}
+
+func parseCodexProviderCallApprovalNewOptions(args []string) (codexProviderCallApprovalNewOptions, error) {
+	opts := codexProviderCallApprovalNewOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--readiness-report":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing value for --readiness-report")
+			}
+			opts.readinessReportPath = args[i+1]
+			i++
+		case "--provider-call-gate":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing value for --provider-call-gate")
+			}
+			opts.providerCallGatePath = args[i+1]
+			i++
+		case "--payload-report":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing value for --payload-report")
+			}
+			opts.payloadReportPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return codexProviderCallApprovalNewOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.readinessReportPath == "" {
+		return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing --readiness-report")
+	}
+	if opts.providerCallGatePath == "" {
+		return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing --provider-call-gate")
+	}
+	if opts.payloadReportPath == "" {
+		return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing --payload-report")
+	}
+	if opts.outputPath == "" {
+		return codexProviderCallApprovalNewOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runCodexProviderCallApprovalNew(opts codexProviderCallApprovalNewOptions, stdout io.Writer, stderr io.Writer) int {
+	request, err := retrievalcontext.NewProviderCallApprovalRequest(retrievalcontext.NewProviderCallApprovalRequestOptions{
+		ReadinessReportPath:  opts.readinessReportPath,
+		ProviderCallGatePath: opts.providerCallGatePath,
+		PayloadReportPath:    opts.payloadReportPath,
+		OutputPath:           opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-approval new failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "worker codex provider-call-approval new: ok")
+	fmt.Fprintf(stdout, "status: %s\n", request.Status)
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "payload_output_sha256: %s\n", request.PayloadOutputSHA256)
+	fmt.Fprintf(stdout, "provider_call_allowed_now: %t\n", request.ProviderCallAllowedNow)
+	fmt.Fprintf(stdout, "sent_to_provider: %t\n", request.SentToProvider)
+	return 0
+}
+
+type codexProviderCallApprovalApproveOptions struct {
+	requestPath                string
+	outputPath                 string
+	confirmPayloadOutputSHA256 string
+}
+
+func parseCodexProviderCallApprovalApproveOptions(args []string) (codexProviderCallApprovalApproveOptions, error) {
+	opts := codexProviderCallApprovalApproveOptions{}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--request":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("missing value for --request")
+			}
+			opts.requestPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--confirm-payload-output-sha256":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("missing value for --confirm-payload-output-sha256")
+			}
+			opts.confirmPayloadOutputSHA256 = args[i+1]
+			i++
+		default:
+			return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.requestPath == "" {
+		return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("missing --request")
+	}
+	if opts.outputPath == "" {
+		return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runCodexProviderCallApprovalApprove(opts codexProviderCallApprovalApproveOptions, stdout io.Writer, stderr io.Writer) int {
+	approval, err := retrievalcontext.ApproveProviderCall(retrievalcontext.ApproveProviderCallOptions{
+		RequestPath:                opts.requestPath,
+		OutputPath:                 opts.outputPath,
+		ConfirmPayloadOutputSHA256: opts.confirmPayloadOutputSHA256,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-approval approve failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintln(stdout, "worker codex provider-call-approval approve: ok")
+	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	fmt.Fprintf(stdout, "provider_call_authorized_for_future: %t\n", approval.ProviderCallAuthorizedForFuture)
+	fmt.Fprintf(stdout, "provider_call_allowed_now: %t\n", approval.ProviderCallAllowedNow)
+	fmt.Fprintf(stdout, "sent_to_provider: %t\n", approval.SentToProvider)
+	return 0
+}
+
+type codexProviderCallApprovalInspectOptions struct {
+	approvalPath string
+	requestPath  string
+	outputFormat string
+}
+
+func parseCodexProviderCallApprovalInspectOptions(args []string) (codexProviderCallApprovalInspectOptions, error) {
+	opts := codexProviderCallApprovalInspectOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--approval":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalInspectOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--request":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalInspectOptions{}, fmt.Errorf("missing value for --request")
+			}
+			opts.requestPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexProviderCallApprovalInspectOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexProviderCallApprovalInspectOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.approvalPath == "" {
+		return codexProviderCallApprovalInspectOptions{}, fmt.Errorf("missing --approval")
+	}
+	return opts, nil
+}
+
+func runCodexProviderCallApprovalInspect(opts codexProviderCallApprovalInspectOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.InspectProviderCallApproval(opts.approvalPath, retrievalcontext.InspectProviderCallApprovalOptions{
+		RequestPath: opts.requestPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-approval inspect failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteInspectProviderCallApprovalJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteInspectProviderCallApprovalText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-approval inspect failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexProviderCallExecutionBundleOptions struct {
+	dispatchConfigPath   string
+	payloadReportPath    string
+	providerCallGatePath string
+	readinessReportPath  string
+	approvalPath         string
+	outputPath           string
+	outputFormat         string
+}
+
+func parseCodexProviderCallExecutionBundleOptions(args []string) (codexProviderCallExecutionBundleOptions, error) {
+	opts := codexProviderCallExecutionBundleOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dispatch-config":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing value for --dispatch-config")
+			}
+			opts.dispatchConfigPath = args[i+1]
+			i++
+		case "--payload-report":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing value for --payload-report")
+			}
+			opts.payloadReportPath = args[i+1]
+			i++
+		case "--provider-call-gate":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing value for --provider-call-gate")
+			}
+			opts.providerCallGatePath = args[i+1]
+			i++
+		case "--readiness-report":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing value for --readiness-report")
+			}
+			opts.readinessReportPath = args[i+1]
+			i++
+		case "--approval":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.dispatchConfigPath == "" {
+		return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing --dispatch-config")
+	}
+	if opts.payloadReportPath == "" {
+		return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing --payload-report")
+	}
+	if opts.providerCallGatePath == "" {
+		return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing --provider-call-gate")
+	}
+	if opts.readinessReportPath == "" {
+		return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing --readiness-report")
+	}
+	if opts.approvalPath == "" {
+		return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing --approval")
+	}
+	if opts.outputPath == "" {
+		return codexProviderCallExecutionBundleOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func runCodexProviderCallExecutionBundle(opts codexProviderCallExecutionBundleOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.ProviderCallExecutionBundle(retrievalcontext.ProviderCallExecutionBundleOptions{
+		DispatchConfigPath:   opts.dispatchConfigPath,
+		PayloadReportPath:    opts.payloadReportPath,
+		ProviderCallGatePath: opts.providerCallGatePath,
+		ReadinessReportPath:  opts.readinessReportPath,
+		ApprovalPath:         opts.approvalPath,
+		OutputPath:           opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-execution-bundle failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteProviderCallExecutionBundleJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteProviderCallExecutionBundleText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-execution-bundle failed: %v\n", err)
 		return 1
 	}
 	if opts.outputFormat != "json" {

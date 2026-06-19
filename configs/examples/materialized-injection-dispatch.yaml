@@ -1,0 +1,6 @@
+materialized_injection_dispatch:
+  enabled: false
+  allow_provider_call: false
+  allow_network: false
+  allow_worker_execution: false
+  blocked_reason: implementation_not_enabled
