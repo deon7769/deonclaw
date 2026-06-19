@@ -241,6 +241,28 @@ func writeMaterializedInjectionProviderRunPlanJSON(path string, result Materiali
 	return nil
 }
 
+func LoadMaterializedInjectionProviderRunPlan(path string) (MaterializedInjectionProviderRunPlanResult, []byte, error) {
+	if err := validateRelativeSafePath("provider run plan path", path); err != nil {
+		return MaterializedInjectionProviderRunPlanResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MaterializedInjectionProviderRunPlanResult{}, nil, fmt.Errorf("read materialized injection provider run plan %q: %w", path, err)
+	}
+	return ParseMaterializedInjectionProviderRunPlanJSON(data)
+}
+
+func ParseMaterializedInjectionProviderRunPlanJSON(data []byte) (MaterializedInjectionProviderRunPlanResult, []byte, error) {
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return MaterializedInjectionProviderRunPlanResult{}, nil, fmt.Errorf("materialized injection provider run plan must not contain materialized preview text")
+	}
+	var result MaterializedInjectionProviderRunPlanResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return MaterializedInjectionProviderRunPlanResult{}, nil, fmt.Errorf("parse materialized injection provider run plan json: %w", err)
+	}
+	return result, data, nil
+}
+
 func WriteMaterializedInjectionProviderRunPlanText(result MaterializedInjectionProviderRunPlanResult, out io.Writer) error {
 	if _, err := fmt.Fprintln(out, "worker_codex_materialized_injection_provider_run_plan:"); err != nil {
 		return err

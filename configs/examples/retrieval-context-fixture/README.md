@@ -370,6 +370,36 @@ deonctl worker codex materialized-injection-provider-run-plan \
   --output-format json
 ~~~
 
+### 31. Provider dispatch config validate
+
+~~~bash
+deonctl worker codex materialized-provider-dispatch validate \
+  --config ../materialized-provider-dispatch.yaml \
+  --output-format json
+~~~
+
+### 32. Provider payload dry-run
+
+~~~bash
+deonctl worker codex materialized-provider-payload-dry-run \
+  --dispatch-config ../materialized-provider-dispatch.yaml \
+  --provider-run-plan retrieval-context-materialized-injection-provider-run-plan.json \
+  --assembled-output retrieval-context-materialized-prompt-assembly.md \
+  --output retrieval-context-materialized-provider-payload-dry-run.json \
+  --payload-output retrieval-context-materialized-provider-payload.md \
+  --confirm-inject-materialized-context \
+  --output-format json
+~~~
+
+### 33. Provider payload report
+
+~~~bash
+deonctl worker codex materialized-provider-payload-report \
+  --payload-dry-run retrieval-context-materialized-provider-payload-dry-run.json \
+  --payload-output retrieval-context-materialized-provider-payload.md \
+  --output-format json
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
@@ -393,6 +423,10 @@ deonctl worker codex materialized-injection-provider-run-plan \
 - optional materialized-injection-run-plan returns `run_plan_ready: true`, `worker_execution_planned: false`, `prompt_injection_planned: false`, `implementation_allows_execution_now: false`, `blocked_reason: implementation_not_enabled`, and does not print preview chunk text in plan output
 - optional materialized-injection-execution-enable validate returns `status: ok`, `enabled: false`, `allow_provider_call: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`, `blocked_reason: implementation_not_enabled`
 - optional materialized-injection-provider-run-plan returns `provider_run_plan_ready: true`, `would_use_assembled_prompt: true`, `sent_to_provider: false`, `provider_call_allowed_now: false`, `worker_execution_allowed_now: false`, `prompt_injection_allowed_now: false`, `blocked_reason: implementation_not_enabled`, and does not print preview chunk text in plan output
+- optional materialized-provider-dispatch validate returns `status: ok`, `enabled: false`, `allow_provider_call: false`, `allow_network: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`
+- optional materialized-provider-payload-dry-run returns `provider_payload_rendered: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `worker_execution: false`, `prompt_injection_real_runner: false`; only payload-output may contain `text_excerpt`
+- optional materialized-provider-payload-report returns `provider_payload_validated: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, and does not print payload content in report output
+- only payload-output, assembled-output, prompt-output and prompt-preview/materialized artifacts may contain `text_excerpt`; all metadata reports/stdout/json must not contain `text_excerpt` or alpha text
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

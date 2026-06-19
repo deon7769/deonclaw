@@ -55,6 +55,9 @@ retrieval-context (runner metadata attachment)
 | 22.26 | `worker codex materialized-injection-run-plan` (run planner, no worker execution) |
 | 22.27 | `worker codex materialized-injection-execution-enable validate` (execution enablement policy schema, no worker execution) |
 | 22.28 | `worker codex materialized-injection-provider-run-plan` (provider run-plan, no provider call) |
+| 22.29 | `worker codex materialized-provider-dispatch validate` (provider dispatch contract schema, no provider call) |
+| 22.30 | `worker codex materialized-provider-payload-dry-run` (provider payload dry-run, no provider call) |
+| 22.31 | `worker codex materialized-provider-payload-report` (provider payload report, no provider call) |
 
 ### What already exists
 
@@ -157,7 +160,13 @@ Future injection design and implementation must **not** include:
 
 **Task 22.28 (implemented):** *Materialized injection provider run-plan* — `deonctl worker codex materialized-injection-provider-run-plan` binds task declaration, enablement policy, execution gate, and assembly report into a provider run-plan JSON with `provider_run_plan_ready: true`, `would_use_assembled_prompt: true`, `sent_to_provider: false`, `provider_call_allowed_now: false`. **Still no provider call**, no Codex/OpenCode dispatch, no real prompt injection; normal runner prompt unchanged.
 
-**Task 22.29+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
+**Task 22.29 (implemented):** *Provider dispatch contract* — `deonctl worker codex materialized-provider-dispatch validate` validates YAML schema for future provider dispatch (`enabled: false`, `provider: codex`, `allow_provider_call: false`, `allow_network: false`, `blocked_reason: implementation_not_enabled`). **Still no provider call**, no network call, no worker execution.
+
+**Task 22.30 (implemented):** *Provider payload dry-run* — `deonctl worker codex materialized-provider-payload-dry-run` renders a provider payload markdown artifact from validated assembled-output under dispatch contract gates. Sets `provider_payload_rendered: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`. **Still no provider call**, no Codex/OpenCode dispatch, no real prompt injection.
+
+**Task 22.31 (implemented):** *Provider payload report* — `deonctl worker codex materialized-provider-payload-report` validates payload dry-run JSON and payload-output hash without printing payload content. **Still no provider call**, no network call, no worker execution; normal runner prompt unchanged.
+
+**Task 22.32+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

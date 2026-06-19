@@ -43,6 +43,9 @@ Implemented now:
 - `deonctl worker codex materialized-injection-run-plan` (Task 22.26, run planner only)
 - `deonctl worker codex materialized-injection-execution-enable validate` (Task 22.27, execution enablement policy schema only)
 - `deonctl worker codex materialized-injection-provider-run-plan` (Task 22.28, provider run-plan only)
+- `deonctl worker codex materialized-provider-dispatch validate` (Task 22.29, provider dispatch contract schema only)
+- `deonctl worker codex materialized-provider-payload-dry-run` (Task 22.30, provider payload dry-run only)
+- `deonctl worker codex materialized-provider-payload-report` (Task 22.31, provider payload report only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -821,6 +824,78 @@ Rules:
 - normal runner prompt, worker execution, and provider calls remain unchanged
 
 Optional fixture step 30 exercises this path after execution enablement validate.
+
+## Materialized provider dispatch contract (Task 22.29)
+
+Schema validation for future provider dispatch gates. Config must keep `enabled: false`, `provider: codex`, `allow_provider_call: false`, `allow_network: false`, and `blocked_reason: implementation_not_enabled`. Config and validate output must not contain `text_excerpt` or alpha text.
+
+Example: `configs/examples/materialized-provider-dispatch.yaml`
+
+~~~bash
+deonctl worker codex materialized-provider-dispatch validate \
+  --config configs/examples/materialized-provider-dispatch.yaml \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on `--config`
+- rejects config containing `text_excerpt` or alpha text
+- requires `require_confirm_flag`, `require_provider_run_plan`, and `require_assembled_prompt` all `true`
+- requires `max_total_chars > 0` and `max_payload_bytes > 0`
+- validate output echoes schema fields; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 31 exercises this path.
+
+## Materialized provider payload dry-run (Task 22.30)
+
+Dry-run provider payload artifact from validated provider run-plan and assembled-output. Requires `--confirm-inject-materialized-context`. Writes payload dry-run JSON and payload-output markdown; does not call Codex/OpenCode or any provider API.
+
+~~~bash
+deonctl worker codex materialized-provider-payload-dry-run \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
+  --provider-run-plan artifacts/<run-id>/materialized-injection-provider-run-plan.json \
+  --assembled-output artifacts/<run-id>/materialized-prompt-assembly.md \
+  --output artifacts/<run-id>/materialized-provider-payload-dry-run.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --confirm-inject-materialized-context \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input/output paths
+- validates dispatch config via Task 22.29 rules
+- validates provider run-plan `provider_run_plan_ready: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `would_use_assembled_prompt: true`, `assembled_prompt_validated: true`, `blocked_reason: implementation_not_enabled`
+- validates `assembled_output_sha256` match and size caps (`max_total_chars`, `max_payload_bytes`)
+- on success sets `provider_payload_rendered: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `worker_execution: false`, `prompt_injection_real_runner: false`
+- dry-run JSON/stdout must not contain payload content, `text_excerpt`, or alpha text; only `--payload-output` may contain `text_excerpt`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 32 exercises this path after provider dispatch validate.
+
+## Materialized provider payload report (Task 22.31)
+
+QA report for provider payload dry-run JSON and payload-output hash. Does not print payload content.
+
+~~~bash
+deonctl worker codex materialized-provider-payload-report \
+  --payload-dry-run artifacts/<run-id>/materialized-provider-payload-dry-run.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on both input paths
+- rejects payload dry-run JSON containing `text_excerpt` or alpha text
+- validates payload `provider_payload_rendered: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `worker_execution: false`, `prompt_injection_real_runner: false`, `blocked_reason: implementation_not_enabled`
+- validates `provider_payload_sha256 == sha256(payload-output)` and payload-output contains dry-run notice and `text_excerpt`
+- report sets `provider_payload_validated: true`; report text/json must not contain payload content; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 33 exercises this path after provider payload dry-run.
 
 ### Debugging `status: failed`
 

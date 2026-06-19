@@ -141,6 +141,9 @@ Usage:
   deonctl worker codex materialized-injection-run-plan --task <path> --runtime-config <materialized-injection-runtime.yaml> --execution-gate <materialized-injection-execution-gate.json> --assembly-report <materialized-prompt-assembly-report.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-injection-run-plan.json> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex materialized-injection-execution-enable validate --config <materialized-injection-execution-enable.yaml> [--output-format text|json]
   deonctl worker codex materialized-injection-provider-run-plan --task <path> --enable-config <materialized-injection-execution-enable.yaml> --execution-gate <materialized-injection-execution-gate.json> --assembly-report <materialized-prompt-assembly-report.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-injection-provider-run-plan.json> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex materialized-provider-dispatch validate --config <materialized-provider-dispatch.yaml> [--output-format text|json]
+  deonctl worker codex materialized-provider-payload-dry-run --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex materialized-provider-payload-report --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -934,6 +937,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedInjectionProviderRunPlan(opts, stdout, stderr)
+			case "materialized-provider-dispatch":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "validate":
+					subOpts, err := parseCodexMaterializedProviderDispatchValidateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexMaterializedProviderDispatchValidate(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "materialized-provider-payload-dry-run":
+				opts, err := parseCodexMaterializedProviderPayloadDryRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderPayloadDryRun(opts, stdout, stderr)
+			case "materialized-provider-payload-report":
+				opts, err := parseCodexMaterializedProviderPayloadReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderPayloadReport(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -7430,6 +7467,249 @@ func runCodexMaterializedInjectionProviderRunPlan(opts codexMaterializedInjectio
 	}
 	if opts.outputFormat != "json" {
 		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedProviderDispatchValidateOptions struct {
+	configPath   string
+	outputFormat string
+}
+
+func parseCodexMaterializedProviderDispatchValidateOptions(args []string) (codexMaterializedProviderDispatchValidateOptions, error) {
+	opts := codexMaterializedProviderDispatchValidateOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderDispatchValidateOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderDispatchValidateOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedProviderDispatchValidateOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return codexMaterializedProviderDispatchValidateOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedProviderDispatchValidateOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedProviderDispatchValidate(opts codexMaterializedProviderDispatchValidateOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := retrievalcontext.LoadMaterializedProviderDispatch(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-dispatch validate failed: %v\n", err)
+		return 1
+	}
+	result, err := retrievalcontext.MaterializedProviderDispatchValidate(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-dispatch validate failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedProviderDispatchValidateJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedProviderDispatchValidateText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-dispatch validate failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedProviderPayloadDryRunOptions struct {
+	dispatchConfigPath               string
+	providerRunPlanPath              string
+	assembledOutputPath              string
+	outputPath                       string
+	payloadOutputPath                string
+	confirmInjectMaterializedContext bool
+	outputFormat                     string
+}
+
+func parseCodexMaterializedProviderPayloadDryRunOptions(args []string) (codexMaterializedProviderPayloadDryRunOptions, error) {
+	opts := codexMaterializedProviderPayloadDryRunOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dispatch-config":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing value for --dispatch-config")
+			}
+			opts.dispatchConfigPath = args[i+1]
+			i++
+		case "--provider-run-plan":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing value for --provider-run-plan")
+			}
+			opts.providerRunPlanPath = args[i+1]
+			i++
+		case "--assembled-output":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing value for --assembled-output")
+			}
+			opts.assembledOutputPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--payload-output":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing value for --payload-output")
+			}
+			opts.payloadOutputPath = args[i+1]
+			i++
+		case "--confirm-inject-materialized-context":
+			opts.confirmInjectMaterializedContext = true
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.dispatchConfigPath == "" {
+		return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing --dispatch-config")
+	}
+	if opts.providerRunPlanPath == "" {
+		return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing --provider-run-plan")
+	}
+	if opts.assembledOutputPath == "" {
+		return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing --assembled-output")
+	}
+	if opts.outputPath == "" {
+		return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing --output")
+	}
+	if opts.payloadOutputPath == "" {
+		return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing --payload-output")
+	}
+	if !opts.confirmInjectMaterializedContext {
+		return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("missing --confirm-inject-materialized-context")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedProviderPayloadDryRunOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedProviderPayloadDryRun(opts codexMaterializedProviderPayloadDryRunOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedProviderPayload(retrievalcontext.MaterializedProviderPayloadOptions{
+		DispatchConfigPath:               opts.dispatchConfigPath,
+		ProviderRunPlanPath:              opts.providerRunPlanPath,
+		AssembledOutputPath:              opts.assembledOutputPath,
+		ConfirmInjectMaterializedContext: opts.confirmInjectMaterializedContext,
+		OutputPath:                       opts.outputPath,
+		PayloadOutputPath:                opts.payloadOutputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-payload-dry-run failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedProviderPayloadJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedProviderPayloadText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-payload-dry-run failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+		fmt.Fprintf(stdout, "payload_output: %s\n", opts.payloadOutputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedProviderPayloadReportOptions struct {
+	payloadDryRunPath string
+	payloadOutputPath string
+	outputFormat      string
+}
+
+func parseCodexMaterializedProviderPayloadReportOptions(args []string) (codexMaterializedProviderPayloadReportOptions, error) {
+	opts := codexMaterializedProviderPayloadReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--payload-dry-run":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadReportOptions{}, fmt.Errorf("missing value for --payload-dry-run")
+			}
+			opts.payloadDryRunPath = args[i+1]
+			i++
+		case "--payload-output":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadReportOptions{}, fmt.Errorf("missing value for --payload-output")
+			}
+			opts.payloadOutputPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderPayloadReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedProviderPayloadReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.payloadDryRunPath == "" {
+		return codexMaterializedProviderPayloadReportOptions{}, fmt.Errorf("missing --payload-dry-run")
+	}
+	if opts.payloadOutputPath == "" {
+		return codexMaterializedProviderPayloadReportOptions{}, fmt.Errorf("missing --payload-output")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedProviderPayloadReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedProviderPayloadReport(opts codexMaterializedProviderPayloadReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedProviderPayloadReport(retrievalcontext.MaterializedProviderPayloadReportOptions{
+		PayloadDryRunPath: opts.payloadDryRunPath,
+		PayloadOutputPath: opts.payloadOutputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-payload-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedProviderPayloadReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedProviderPayloadReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-payload-report failed: %v\n", err)
+		return 1
 	}
 	if result.Status == lancedbpolicy.StatusFailed {
 		return 1

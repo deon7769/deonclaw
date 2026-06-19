@@ -158,7 +158,7 @@ Before merging or tagging retrieval-governance work:
 
 Task 22.13 is documentation and operability only. Runner materialized text injection, active runner search, natural-language retrieval, provider APIs, MCP integration, fallback execution, and UI remain out of scope.
 
-Tasks 22.22–22.28 add the runner materialized injection execution gate, materialized prompt assembly dry-run, materialized prompt assembly report, materialized injection runtime config schema, materialized injection run planner, execution enablement policy schema, and provider run-plan. They are **metadata-only and dry-run** artifacts:
+Tasks 22.22–22.31 add the runner materialized injection execution gate, materialized prompt assembly dry-run, materialized prompt assembly report, materialized injection runtime config schema, materialized injection run planner, execution enablement policy schema, provider run-plan, provider dispatch contract, provider payload dry-run, and provider payload report. They are **metadata-only and dry-run** artifacts:
 
 - worker execution with materialized text is still not implemented
 - normal runner prompt injection is still not implemented
@@ -166,7 +166,8 @@ Tasks 22.22–22.28 add the runner materialized injection execution gate, materi
 - the materialized prompt assembly is never sent to Codex or OpenCode
 - run planner sets `worker_execution_planned: false` and `prompt_injection_planned: false`
 - provider run-plan sets `sent_to_provider: false`, `provider_call_allowed_now: false`, and `would_use_assembled_prompt: true` without dispatching Codex/OpenCode
-- all metadata-only artifacts (gate, assembly dry-run JSON/text, assembly report JSON/text, runtime validate output, run-plan JSON/text, enablement validate output, provider run-plan JSON/text) must block `text_excerpt`, alpha text, prompt-output content, and assembled-output content
+- provider payload dry-run sets `provider_call: false`, `network_call: false`, `sent_to_provider: false`, and renders payload-output only under explicit confirm flag
+- all metadata-only artifacts (gate, assembly dry-run JSON/text, assembly report JSON/text, runtime validate output, run-plan JSON/text, enablement validate output, provider run-plan JSON/text, dispatch validate output, payload dry-run JSON, payload report JSON/text) must block `text_excerpt`, alpha text, prompt-output content, assembled-output content, and payload-output content
 
 Boundary
 

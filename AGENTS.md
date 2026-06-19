@@ -116,6 +116,9 @@ Implemented:
 - materialized injection run planner (`worker codex materialized-injection-run-plan`), no worker execution
 - materialized injection execution enablement policy (`worker codex materialized-injection-execution-enable validate`), no worker execution
 - materialized injection provider run-plan (`worker codex materialized-injection-provider-run-plan`), no provider call
+- materialized provider dispatch contract (`worker codex materialized-provider-dispatch validate`), no provider call
+- materialized provider payload dry-run (`worker codex materialized-provider-payload-dry-run`), no provider call
+- materialized provider payload report (`worker codex materialized-provider-payload-report`), no provider call
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
