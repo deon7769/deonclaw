@@ -53,6 +53,8 @@ retrieval-context (runner metadata attachment)
 | 22.24 | `worker codex materialized-prompt-assembly-report` (prompt assembly QA, no worker execution) |
 | 22.25 | `worker codex materialized-injection-runtime validate` (runtime config schema, no worker execution) |
 | 22.26 | `worker codex materialized-injection-run-plan` (run planner, no worker execution) |
+| 22.27 | `worker codex materialized-injection-execution-enable validate` (execution enablement policy schema, no worker execution) |
+| 22.28 | `worker codex materialized-injection-provider-run-plan` (provider run-plan, no provider call) |
 
 ### What already exists
 
@@ -151,7 +153,11 @@ Future injection design and implementation must **not** include:
 
 **Task 22.26 (implemented):** *Materialized injection run planner* — `deonctl worker codex materialized-injection-run-plan` binds task declaration, runtime config, execution gate, and assembly report into a run-plan JSON artifact with `run_plan_ready: true`, `worker_execution_planned: false`, `prompt_injection_planned: false`, `implementation_allows_execution_now: false`. **Still no runner execution**, no real prompt injection, no worker materialized text injection; normal runner prompt unchanged.
 
-**Task 22.27+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
+**Task 22.27 (implemented):** *Materialized injection execution enablement policy* — `deonctl worker codex materialized-injection-execution-enable validate` validates YAML schema for future execution enablement (`enabled: false`, `allow_provider_call: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`, `blocked_reason: implementation_not_enabled`). **Still no runner execution**, no provider call, no real prompt injection.
+
+**Task 22.28 (implemented):** *Materialized injection provider run-plan* — `deonctl worker codex materialized-injection-provider-run-plan` binds task declaration, enablement policy, execution gate, and assembly report into a provider run-plan JSON with `provider_run_plan_ready: true`, `would_use_assembled_prompt: true`, `sent_to_provider: false`, `provider_call_allowed_now: false`. **Still no provider call**, no Codex/OpenCode dispatch, no real prompt injection; normal runner prompt unchanged.
+
+**Task 22.29+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

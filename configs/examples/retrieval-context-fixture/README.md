@@ -348,6 +348,28 @@ deonctl worker codex materialized-injection-run-plan \
   --output-format json
 ~~~
 
+### 29. Materialized injection execution enablement policy validate
+
+~~~bash
+deonctl worker codex materialized-injection-execution-enable validate \
+  --config ../materialized-injection-execution-enable.yaml \
+  --output-format json
+~~~
+
+### 30. Materialized injection provider run-plan (no provider call)
+
+~~~bash
+deonctl worker codex materialized-injection-provider-run-plan \
+  --task materialized-injection-task.yaml \
+  --enable-config ../materialized-injection-execution-enable.yaml \
+  --execution-gate retrieval-context-materialized-injection-execution-gate.json \
+  --assembly-report retrieval-context-materialized-prompt-assembly-report.json \
+  --assembled-output retrieval-context-materialized-prompt-assembly.md \
+  --output retrieval-context-materialized-injection-provider-run-plan.json \
+  --confirm-inject-materialized-context \
+  --output-format json
+~~~
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
@@ -369,6 +391,8 @@ deonctl worker codex materialized-injection-run-plan \
 - optional materialized-prompt-assembly-report returns `status: ok`, `assembled_prompt_validated: true`, `worker_execution: false`, `sent_to_worker: false`, `prompt_changed_in_real_runner: false`, and does not print preview chunk text in report output
 - optional materialized-injection-runtime validate returns `status: ok`, `enabled: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`, `blocked_reason: implementation_not_enabled`
 - optional materialized-injection-run-plan returns `run_plan_ready: true`, `worker_execution_planned: false`, `prompt_injection_planned: false`, `implementation_allows_execution_now: false`, `blocked_reason: implementation_not_enabled`, and does not print preview chunk text in plan output
+- optional materialized-injection-execution-enable validate returns `status: ok`, `enabled: false`, `allow_provider_call: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`, `blocked_reason: implementation_not_enabled`
+- optional materialized-injection-provider-run-plan returns `provider_run_plan_ready: true`, `would_use_assembled_prompt: true`, `sent_to_provider: false`, `provider_call_allowed_now: false`, `worker_execution_allowed_now: false`, `prompt_injection_allowed_now: false`, `blocked_reason: implementation_not_enabled`, and does not print preview chunk text in plan output
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

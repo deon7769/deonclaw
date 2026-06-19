@@ -41,6 +41,8 @@ Implemented now:
 - `deonctl worker codex materialized-prompt-assembly-report` (Task 22.24, prompt assembly report only)
 - `deonctl worker codex materialized-injection-runtime validate` (Task 22.25, runtime config schema only)
 - `deonctl worker codex materialized-injection-run-plan` (Task 22.26, run planner only)
+- `deonctl worker codex materialized-injection-execution-enable validate` (Task 22.27, execution enablement policy schema only)
+- `deonctl worker codex materialized-injection-provider-run-plan` (Task 22.28, provider run-plan only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -766,6 +768,59 @@ Rules:
 - normal runner prompt and worker execution remain unchanged
 
 Optional fixture step 28 exercises this path after materialized-prompt-assembly-report.
+
+## Materialized injection execution enablement policy (Task 22.27)
+
+Schema validation for future materialized injection execution enablement. Config must keep `enabled: false`, `allow_provider_call: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`, and `blocked_reason: implementation_not_enabled`. Config and validate output must not contain `text_excerpt` or alpha text.
+
+Example: `configs/examples/materialized-injection-execution-enable.yaml`
+
+~~~bash
+deonctl worker codex materialized-injection-execution-enable validate \
+  --config configs/examples/materialized-injection-execution-enable.yaml \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on `--config`
+- rejects config containing `text_excerpt` or alpha text
+- requires `require_confirm_flag`, `require_readiness_report`, `require_execution_gate`, and `require_assembly_report` all `true`
+- requires `max_total_chars > 0`
+- validate output echoes `enabled`, `allow_provider_call`, `allow_worker_execution`, `allow_prompt_injection`, `blocked_reason`, `max_total_chars`; exit code 1 on `status: failed`
+- normal runner prompt and worker execution remain unchanged
+
+Optional fixture step 29 exercises this path.
+
+## Materialized injection provider run-plan (Task 22.28)
+
+Plan-only artifact binding task `retrieval_context.materialized_injection`, execution enablement policy, execution gate, assembly report, and assembled-output hash. Requires `--confirm-inject-materialized-context`. Writes provider run-plan JSON; does not call Codex/OpenCode or any provider API.
+
+~~~bash
+deonctl worker codex materialized-injection-provider-run-plan \
+  --task configs/examples/retrieval-context-fixture/materialized-injection-task.yaml \
+  --enable-config configs/examples/materialized-injection-execution-enable.yaml \
+  --execution-gate artifacts/<run-id>/materialized-injection-execution-gate.json \
+  --assembly-report artifacts/<run-id>/materialized-prompt-assembly-report.json \
+  --assembled-output artifacts/<run-id>/materialized-prompt-assembly.md \
+  --output artifacts/<run-id>/materialized-injection-provider-run-plan.json \
+  --confirm-inject-materialized-context \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input/output paths
+- rejects gate/report JSON containing `text_excerpt` or alpha text
+- validates task `materialized_injection` declaration with `enabled: false`
+- validates enablement config via Task 22.27 rules (`enabled: false`, `allow_provider_call: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`)
+- validates execution gate `execution_gate_ready: true`, `implementation_allows_execution_now: false`, `worker_execution_allowed: false`, `prompt_injection_allowed_now: false`, `blocked_reason: implementation_not_enabled`
+- validates assembly report `assembled_prompt_validated: true`, `worker_execution: false`, `sent_to_worker: false`, `prompt_changed_in_real_runner: false`, and `assembled_output_sha256` match
+- on success sets `provider_run_plan_ready: true`, `would_use_assembled_prompt: true`, `assembled_prompt_validated: true`, `sent_to_provider: false`, `provider_call_allowed_now: false`, `worker_execution_allowed_now: false`, `prompt_injection_allowed_now: false`, `blocked_reason: implementation_not_enabled`
+- plan text/json output must not contain `text_excerpt` or assembled-output content; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 30 exercises this path after execution enablement validate.
 
 ### Debugging `status: failed`
 
