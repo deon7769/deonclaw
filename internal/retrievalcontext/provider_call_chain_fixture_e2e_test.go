@@ -207,6 +207,23 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 		t.Fatalf("WriteFile(audit) error = %v", err)
 	}
 	assertProviderCallChainMetadataNoTextLeak(t, chain, auditBuf.Bytes())
+
+	validateResult, err := retrievalcontext.ProviderCallExecutorValidate(providerCallExecutorOpts(chain))
+	if err != nil {
+		t.Fatalf("ProviderCallExecutorValidate() error = %v", err)
+	}
+	assertProviderCallExecutorBlocked(t, validateResult)
+
+	const planPath = "provider-call-executor-plan.json"
+	planResult, err := retrievalcontext.ProviderCallExecutorPlan(retrievalcontext.ProviderCallExecutorPlanOptions{
+		ProviderCallExecutorOptions: providerCallExecutorOpts(chain),
+		OutputPath:                  planPath,
+	})
+	if err != nil {
+		t.Fatalf("ProviderCallExecutorPlan() error = %v", err)
+	}
+	assertProviderCallExecutorBlocked(t, planResult)
+	assertNoTextExcerpt(t, planPath)
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -345,6 +362,45 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 	}
 	assertProviderCallChainHashCoherence(t, chain)
 	assertProviderCallChainMetadataNoTextLeak(t, chain, auditStdout.Bytes())
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor", "validate",
+		"--dispatch-config", dispatchPath,
+		"--provider-run-plan", runPlanPath,
+		"--payload-dry-run", "materialized-provider-payload-dry-run.json",
+		"--payload-output", "materialized-provider-payload.md",
+		"--payload-report", "materialized-provider-payload-report.json",
+		"--provider-call-gate", "materialized-provider-call-gate.json",
+		"--readiness-report", "materialized-provider-call-readiness-report.json",
+		"--approval-request", "provider-call-approval-request.json",
+		"--approval", "provider-call-approval.json",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--output-format", "json",
+	})
+
+	var executorStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor", "plan",
+		"--dispatch-config", dispatchPath,
+		"--provider-run-plan", runPlanPath,
+		"--payload-dry-run", "materialized-provider-payload-dry-run.json",
+		"--payload-output", "materialized-provider-payload.md",
+		"--payload-report", "materialized-provider-payload-report.json",
+		"--provider-call-gate", "materialized-provider-call-gate.json",
+		"--readiness-report", "materialized-provider-call-readiness-report.json",
+		"--approval-request", "provider-call-approval-request.json",
+		"--approval", "provider-call-approval.json",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--output", "provider-call-executor-plan.json",
+		"--output-format", "json",
+	}, &executorStdout)
+
+	var executor retrievalcontext.ProviderCallExecutorResult
+	if err := json.Unmarshal(executorStdout.Bytes(), &executor); err != nil {
+		t.Fatalf("Unmarshal(executor plan) error = %v", err)
+	}
+	assertProviderCallExecutorBlocked(t, executor)
+	assertNoTextExcerpt(t, "provider-call-executor-plan.json")
 }
 
 func buildDeonctlBinaryAt(t *testing.T, root string) string {
