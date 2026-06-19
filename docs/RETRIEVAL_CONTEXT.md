@@ -55,6 +55,10 @@ Implemented now:
 - `deonctl worker codex provider-call-executor config validate` (Task 22.39, executor policy schema only)
 - `deonctl worker codex provider-call-executor validate/plan` (Tasks 22.38–22.39, executor skeleton only)
 - `deonctl worker codex provider-call-executor dry-run` / `dry-run-report` (Task 22.40, executor dry-run contract only)
+- `deonctl worker codex provider-call-executor preflight` (Task 22.41, executor preflight only)
+- `deonctl worker codex provider-call-executor-dispatch-approval new/approve/inspect` (Task 22.42, dispatch approval only)
+- `deonctl worker codex provider-transport-plan` (Task 22.43, blocked transport plan only)
+- `deonctl worker codex provider-executor-release-bundle` / `release-gate` (Task 22.44, release activation gate only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -1133,6 +1137,108 @@ Rules:
 - stdout/json must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
 
 Optional fixture steps 41–42 exercise dry-run and dry-run-report after executor validate/plan.
+
+### Executor preflight (Task 22.41)
+
+~~~bash
+deonctl worker codex provider-call-executor preflight \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --dry-run artifacts/<run-id>/provider-call-executor-dry-run.json \
+  --dry-run-report artifacts/<run-id>/provider-call-executor-dry-run-report.json \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --approval artifacts/<run-id>/provider-call-approval.json \
+  --output artifacts/<run-id>/provider-call-executor-preflight.json \
+  --output-format json
+~~~
+
+Rules:
+
+- validates executor-config, dry-run-report, execution-bundle, and approval; reconciles hashes
+- does not read payload markdown or call transport
+- on success sets `executor_preflight_ready: true`, `execution_allowed_now: false`, `required_future_confirm_flag: --confirm-provider-executor-dispatch`
+- keeps all execution flags false and `blocked_reason: implementation_not_enabled`
+
+### Dispatch approval (Task 22.42)
+
+~~~bash
+deonctl worker codex provider-call-executor-dispatch-approval new \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --dry-run artifacts/<run-id>/provider-call-executor-dry-run.json \
+  --dry-run-report artifacts/<run-id>/provider-call-executor-dry-run-report.json \
+  --preflight artifacts/<run-id>/provider-call-executor-preflight.json \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --approval artifacts/<run-id>/provider-call-approval.json \
+  --output artifacts/<run-id>/provider-call-executor-dispatch-approval-request.json
+
+deonctl worker codex provider-call-executor-dispatch-approval approve \
+  --request artifacts/<run-id>/provider-call-executor-dispatch-approval-request.json \
+  --output artifacts/<run-id>/provider-call-executor-dispatch-approval.json \
+  --confirm-executor-config-sha256 <sha256> \
+  --confirm-execution-bundle-sha256 <sha256> \
+  --confirm-provider-payload-sha256 <sha256>
+
+deonctl worker codex provider-call-executor-dispatch-approval inspect \
+  --approval artifacts/<run-id>/provider-call-executor-dispatch-approval.json \
+  --request artifacts/<run-id>/provider-call-executor-dispatch-approval-request.json \
+  --output-format json
+~~~
+
+Rules:
+
+- separate from payload approval (`provider-call-approval`); authorize future dispatch only
+- approve requires explicit confirm hashes; sets `dispatch_authorized_for_future: true`, `dispatch_allowed_now: false`
+- no provider call, no network, no transport
+
+### Transport plan (Task 22.43)
+
+~~~bash
+deonctl worker codex provider-transport-plan \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --executor-preflight artifacts/<run-id>/provider-call-executor-preflight.json \
+  --dispatch-approval artifacts/<run-id>/provider-call-executor-dispatch-approval.json \
+  --output artifacts/<run-id>/provider-transport-plan.json \
+  --output-format json
+~~~
+
+Rules:
+
+- metadata-only transport layer plan using `BlockedProviderTransport`
+- does not instantiate SDK, open network, or call `Deliver`
+- on success sets `transport_plan_ready: true`, `transport_enabled: false`, all execution flags false
+
+### Release bundle / gate (Task 22.44)
+
+~~~bash
+deonctl worker codex provider-executor-release-bundle \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --dry-run artifacts/<run-id>/provider-call-executor-dry-run.json \
+  --dry-run-report artifacts/<run-id>/provider-call-executor-dry-run-report.json \
+  --executor-preflight artifacts/<run-id>/provider-call-executor-preflight.json \
+  --dispatch-approval artifacts/<run-id>/provider-call-executor-dispatch-approval.json \
+  --transport-plan artifacts/<run-id>/provider-transport-plan.json \
+  --output artifacts/<run-id>/provider-executor-release-bundle.json \
+  --output-format json
+
+deonctl worker codex provider-executor-release-gate \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --dry-run artifacts/<run-id>/provider-call-executor-dry-run.json \
+  --dry-run-report artifacts/<run-id>/provider-call-executor-dry-run-report.json \
+  --executor-preflight artifacts/<run-id>/provider-call-executor-preflight.json \
+  --dispatch-approval artifacts/<run-id>/provider-call-executor-dispatch-approval.json \
+  --transport-plan artifacts/<run-id>/provider-transport-plan.json \
+  --release-bundle artifacts/<run-id>/provider-executor-release-bundle.json \
+  --output-format json
+~~~
+
+Rules:
+
+- consolidates artifacts 22.38–22.43; revalidates hashes and blocked flags
+- release gate sets `activation_gate_ready: true`, `activation_allowed_now: false`, `execution_supported_now: false`
+- no provider call, no network, no worker execution, no transport
+
+Optional fixture steps 43–50 exercise preflight through release gate and final smoke.
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 

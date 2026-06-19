@@ -540,7 +540,106 @@ deonctl worker codex provider-call-executor dry-run-report \
   --output-format json
 ~~~
 
-## CI smoke (Tasks 22.37–22.40)
+### 43. Provider call executor preflight (no provider call)
+
+~~~bash
+deonctl worker codex provider-call-executor preflight \
+  --executor-config ../provider-call-executor.yaml \
+  --dry-run retrieval-context-provider-call-executor-dry-run.json \
+  --dry-run-report retrieval-context-provider-call-executor-dry-run-report.json \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --approval retrieval-context-provider-call-approval.json \
+  --output retrieval-context-provider-call-executor-preflight.json \
+  --output-format json
+~~~
+
+Save dry-run report first (step 42 stdout → file) as `retrieval-context-provider-call-executor-dry-run-report.json`.
+
+### 44. Provider executor dispatch approval request
+
+~~~bash
+deonctl worker codex provider-call-executor-dispatch-approval new \
+  --executor-config ../provider-call-executor.yaml \
+  --dry-run retrieval-context-provider-call-executor-dry-run.json \
+  --dry-run-report retrieval-context-provider-call-executor-dry-run-report.json \
+  --preflight retrieval-context-provider-call-executor-preflight.json \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --approval retrieval-context-provider-call-approval.json \
+  --output retrieval-context-provider-call-executor-dispatch-approval-request.json
+~~~
+
+### 45. Provider executor dispatch approval approve
+
+~~~bash
+deonctl worker codex provider-call-executor-dispatch-approval approve \
+  --request retrieval-context-provider-call-executor-dispatch-approval-request.json \
+  --output retrieval-context-provider-call-executor-dispatch-approval.json \
+  --confirm-executor-config-sha256 <sha256> \
+  --confirm-execution-bundle-sha256 <sha256> \
+  --confirm-provider-payload-sha256 <sha256>
+~~~
+
+Use hashes from the preflight artifact (step 43).
+
+### 46. Provider executor dispatch approval inspect
+
+~~~bash
+deonctl worker codex provider-call-executor-dispatch-approval inspect \
+  --approval retrieval-context-provider-call-executor-dispatch-approval.json \
+  --request retrieval-context-provider-call-executor-dispatch-approval-request.json \
+  --output-format json
+~~~
+
+### 47. Provider transport plan (blocked)
+
+~~~bash
+deonctl worker codex provider-transport-plan \
+  --executor-config ../provider-call-executor.yaml \
+  --executor-preflight retrieval-context-provider-call-executor-preflight.json \
+  --dispatch-approval retrieval-context-provider-call-executor-dispatch-approval.json \
+  --output retrieval-context-provider-transport-plan.json \
+  --output-format json
+~~~
+
+### 48. Provider executor release bundle
+
+~~~bash
+deonctl worker codex provider-executor-release-bundle \
+  --executor-config ../provider-call-executor.yaml \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --dry-run retrieval-context-provider-call-executor-dry-run.json \
+  --dry-run-report retrieval-context-provider-call-executor-dry-run-report.json \
+  --executor-preflight retrieval-context-provider-call-executor-preflight.json \
+  --dispatch-approval retrieval-context-provider-call-executor-dispatch-approval.json \
+  --transport-plan retrieval-context-provider-transport-plan.json \
+  --output retrieval-context-provider-executor-release-bundle.json \
+  --output-format json
+~~~
+
+### 49. Provider executor release gate
+
+~~~bash
+deonctl worker codex provider-executor-release-gate \
+  --executor-config ../provider-call-executor.yaml \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --dry-run retrieval-context-provider-call-executor-dry-run.json \
+  --dry-run-report retrieval-context-provider-call-executor-dry-run-report.json \
+  --executor-preflight retrieval-context-provider-call-executor-preflight.json \
+  --dispatch-approval retrieval-context-provider-call-executor-dispatch-approval.json \
+  --transport-plan retrieval-context-provider-transport-plan.json \
+  --release-bundle retrieval-context-provider-executor-release-bundle.json \
+  --output-format json
+~~~
+
+### 50. Smoke / audit final
+
+~~~bash
+make provider-call-chain-smoke
+~~~
+
+Re-runs library + CLI fixture e2e (steps 29–49 equivalent) and asserts release gate `activation_allowed_now: false` with all execution flags blocked.
+
+## CI smoke (Tasks 22.37–22.44)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -550,7 +649,7 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false. It also exercises executor policy validate, executor validate/plan, and executor dry-run with `transport_called: false`.
+This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false. It also exercises executor policy validate, executor validate/plan, executor dry-run, preflight, dispatch approval, blocked transport plan, release bundle, and release gate with `activation_allowed_now: false`.
 
 See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
@@ -588,7 +687,11 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-call-executor config validate returns `status: ok`, `enabled: false`, `allow_provider_call: false`, `allow_network: false`, `blocked_reason: implementation_not_enabled`
 - optional provider-call-executor validate/plan returns `executor_policy_validated: true`, `executor_config_validated: true`, `execution_supported_now: false`, `provider_call_authorized_for_future: true`, `chain_continuity_ready: true`, all execution flags false, and does not print payload-output content
 - optional provider-call-executor dry-run/dry-run-report returns `executor_dry_run_ready: true`, `transport_called: false`, `contains_text: false`, `preview_only: true`, all execution flags false, and does not read or print payload markdown
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.40)
+- optional provider-call-executor preflight returns `executor_preflight_ready: true`, `execution_allowed_now: false`, `required_future_confirm_flag: --confirm-provider-executor-dispatch`, all execution flags false
+- optional provider-call-executor-dispatch-approval returns `dispatch_authorized_for_future: true`, `dispatch_allowed_now: false`, all execution flags false
+- optional provider-transport-plan returns `transport_plan_ready: true`, `transport_enabled: false`, `transport_mode: BlockedProviderTransport`, all execution flags false
+- optional provider-executor-release-bundle/gate returns `release_bundle_ready: true`, `activation_gate_ready: true`, `activation_allowed_now: false`, `execution_supported_now: false`, all execution flags false
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.44)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

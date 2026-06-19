@@ -68,6 +68,10 @@ retrieval-context (runner metadata attachment)
 | 22.38 | `worker codex provider-call-executor validate/plan` (executor skeleton, no provider call) |
 | 22.39 | `worker codex provider-call-executor config validate` + `configs/examples/provider-call-executor.yaml` (executor policy schema, no provider call) |
 | 22.40 | `worker codex provider-call-executor dry-run` / `dry-run-report` (executor dry-run contract, no provider call) |
+| 22.41 | `worker codex provider-call-executor preflight` (executor preflight, no provider call) |
+| 22.42 | `worker codex provider-call-executor-dispatch-approval new/approve/inspect` (dispatch approval, no provider call) |
+| 22.43 | `worker codex provider-transport-plan` (blocked transport plan, no provider call) |
+| 22.44 | `worker codex provider-executor-release-bundle` / `release-gate` (release activation gate, no provider call) |
 
 ### What already exists
 
@@ -193,6 +197,14 @@ Future injection design and implementation must **not** include:
 **Task 22.39 (implemented):** *Provider executor policy config* — `configs/examples/provider-call-executor.yaml` plus `deonctl worker codex provider-call-executor config validate`; integrated into executor validate/plan via `--executor-config`. **Still no provider call**, no network, no worker execution.
 
 **Task 22.40 (implemented):** *Provider executor dry-run contract* — `deonctl worker codex provider-call-executor dry-run` and `dry-run-report` produce metadata-only artifacts without reading payload markdown or calling transport. **Still no provider call**, no network, no worker execution.
+
+**Task 22.41 (implemented):** *Provider executor preflight* — reconciles executor-config, dry-run, dry-run-report, execution-bundle, and approval hashes. Sets `executor_preflight_ready: true`, `execution_allowed_now: false`. **Still no provider call**, no transport.
+
+**Task 22.42 (implemented):** *Dispatch approval* — separate from payload approval; `dispatch_authorized_for_future: true`, `dispatch_allowed_now: false`. **Still no provider call**, no transport.
+
+**Task 22.43 (implemented):** *Blocked transport plan* — metadata-only plan with `BlockedProviderTransport`; no SDK, no network, no `Deliver`.
+
+**Task 22.44 (implemented):** *Release bundle / activation gate* — consolidates 22.38–22.43; `activation_allowed_now: false`, `execution_supported_now: false`. **Still no provider call**, no transport activation.
 
 **Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
 

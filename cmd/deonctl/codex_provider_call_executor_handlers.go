@@ -577,3 +577,107 @@ func runCodexProviderCallExecutorDryRunReport(opts codexProviderCallExecutorDryR
 	}
 	return 0
 }
+
+type codexProviderCallExecutorPreflightOptions struct {
+	executorConfigPath  string
+	dryRunPath          string
+	dryRunReportPath    string
+	executionBundlePath string
+	approvalPath        string
+	outputPath          string
+	outputFormat        string
+}
+
+func parseCodexProviderCallExecutorPreflightOptions(args []string) (codexProviderCallExecutorPreflightOptions, error) {
+	opts := codexProviderCallExecutorPreflightOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--executor-config":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing value for --executor-config")
+			}
+			opts.executorConfigPath = args[i+1]
+			i++
+		case "--dry-run":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing value for --dry-run")
+			}
+			opts.dryRunPath = args[i+1]
+			i++
+		case "--dry-run-report":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing value for --dry-run-report")
+			}
+			opts.dryRunReportPath = args[i+1]
+			i++
+		case "--execution-bundle":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing value for --execution-bundle")
+			}
+			opts.executionBundlePath = args[i+1]
+			i++
+		case "--approval":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing value for --approval")
+			}
+			opts.approvalPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	for flag, value := range map[string]string{
+		"--executor-config": opts.executorConfigPath, "--dry-run": opts.dryRunPath,
+		"--dry-run-report": opts.dryRunReportPath, "--execution-bundle": opts.executionBundlePath,
+		"--approval": opts.approvalPath, "--output": opts.outputPath,
+	} {
+		if value == "" {
+			return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("missing %s", flag)
+		}
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexProviderCallExecutorPreflightOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexProviderCallExecutorPreflight(opts codexProviderCallExecutorPreflightOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.ProviderCallExecutorPreflight(retrievalcontext.ProviderCallExecutorPreflightOptions{
+		ExecutorConfigPath: opts.executorConfigPath, DryRunPath: opts.dryRunPath,
+		DryRunReportPath: opts.dryRunReportPath, ExecutionBundlePath: opts.executionBundlePath,
+		ApprovalPath: opts.approvalPath, OutputPath: opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-executor preflight failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteProviderCallExecutorPreflightJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteProviderCallExecutorPreflightText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-executor preflight failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}

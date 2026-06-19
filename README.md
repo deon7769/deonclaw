@@ -136,7 +136,10 @@ Implemented:
 - provider call execution bundle (`worker codex provider-call-execution-bundle`), no provider call
 - provider call chain continuity audit (`worker codex provider-call-chain-audit`), no provider call
 - provider call chain fixture smoke / CI guard (`make provider-call-chain-smoke`), no provider call
-- provider call executor skeleton (`worker codex provider-call-executor config validate`, `validate`, `plan`, `dry-run`, `dry-run-report`), no provider call
+- provider call executor skeleton (`worker codex provider-call-executor config validate`, `validate`, `plan`, `dry-run`, `dry-run-report`, `preflight`), no provider call
+- provider call executor dispatch approval (`worker codex provider-call-executor-dispatch-approval new/approve/inspect`), no provider call
+- provider transport plan (`worker codex provider-transport-plan`), blocked, no provider call
+- provider executor release bundle / gate (`worker codex provider-executor-release-bundle`, `release-gate`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
 
 Not implemented yet:

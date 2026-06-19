@@ -156,6 +156,13 @@ Usage:
   deonctl worker codex provider-call-executor plan --executor-config <provider-call-executor.yaml> --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> --output <provider-call-executor-plan.json> [--output-format text|json]
   deonctl worker codex provider-call-executor dry-run --executor-config <provider-call-executor.yaml> --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> --output <provider-call-executor-dry-run.json> [--output-format text|json]
   deonctl worker codex provider-call-executor dry-run-report --dry-run <provider-call-executor-dry-run.json> --executor-config <provider-call-executor.yaml> [--output-format text|json]
+  deonctl worker codex provider-call-executor preflight --executor-config <provider-call-executor.yaml> --dry-run <provider-call-executor-dry-run.json> --dry-run-report <provider-call-executor-dry-run-report.json> --execution-bundle <provider-call-execution-bundle.json> --approval <provider-call-approval.json> --output <provider-call-executor-preflight.json> [--output-format text|json]
+  deonctl worker codex provider-call-executor-dispatch-approval new --executor-config <provider-call-executor.yaml> --dry-run <provider-call-executor-dry-run.json> --dry-run-report <provider-call-executor-dry-run-report.json> --preflight <provider-call-executor-preflight.json> --execution-bundle <provider-call-execution-bundle.json> --approval <provider-call-approval.json> --output <provider-call-executor-dispatch-approval-request.json>
+  deonctl worker codex provider-call-executor-dispatch-approval approve --request <provider-call-executor-dispatch-approval-request.json> --output <provider-call-executor-dispatch-approval.json> --confirm-executor-config-sha256 <sha256> --confirm-execution-bundle-sha256 <sha256> --confirm-provider-payload-sha256 <sha256>
+  deonctl worker codex provider-call-executor-dispatch-approval inspect --approval <provider-call-executor-dispatch-approval.json> [--request <provider-call-executor-dispatch-approval-request.json>] [--output-format text|json]
+  deonctl worker codex provider-transport-plan --executor-config <provider-call-executor.yaml> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --output <provider-transport-plan.json> [--output-format text|json]
+  deonctl worker codex provider-executor-release-bundle --executor-config <provider-call-executor.yaml> --execution-bundle <provider-call-execution-bundle.json> --dry-run <provider-call-executor-dry-run.json> --dry-run-report <provider-call-executor-dry-run-report.json> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --transport-plan <provider-transport-plan.json> --output <provider-executor-release-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-executor-release-gate --executor-config <provider-call-executor.yaml> --execution-bundle <provider-call-execution-bundle.json> --dry-run <provider-call-executor-dry-run.json> --dry-run-report <provider-call-executor-dry-run-report.json> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --transport-plan <provider-transport-plan.json> --release-bundle <provider-executor-release-bundle.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1105,10 +1112,76 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 						return 2
 					}
 					return runCodexProviderCallExecutorDryRunReport(subOpts, stdout, stderr)
+				case "preflight":
+					subOpts, err := parseCodexProviderCallExecutorPreflightOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCallExecutorPreflight(subOpts, stdout, stderr)
 				default:
 					fmt.Fprint(stderr, usage)
 					return 2
 				}
+			case "provider-call-executor-dispatch-approval":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					subOpts, err := parseCodexProviderCallExecutorDispatchApprovalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCallExecutorDispatchApprovalNew(subOpts, stdout, stderr)
+				case "approve":
+					subOpts, err := parseCodexProviderCallExecutorDispatchApprovalApproveOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCallExecutorDispatchApprovalApprove(subOpts, stdout, stderr)
+				case "inspect":
+					subOpts, err := parseCodexProviderCallExecutorDispatchApprovalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCallExecutorDispatchApprovalInspect(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-transport-plan":
+				opts, err := parseCodexProviderTransportPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderTransportPlan(opts, stdout, stderr)
+			case "provider-executor-release-bundle":
+				opts, err := parseCodexProviderExecutorReleaseBundleOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderExecutorReleaseBundle(opts, stdout, stderr)
+			case "provider-executor-release-gate":
+				opts, err := parseCodexProviderExecutorReleaseGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderExecutorReleaseGate(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {

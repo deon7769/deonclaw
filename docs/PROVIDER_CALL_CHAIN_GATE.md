@@ -1,6 +1,6 @@
-# Provider call chain gate (Tasks 22.37–22.40)
+# Provider call chain gate (Tasks 22.37–22.44)
 
-This document defines the **governance gates before any real provider executor dispatch** (Task 22.40+).
+This document defines the **governance gates before any real provider executor dispatch** (Task 22.44+).
 
 ## Purpose
 
@@ -14,6 +14,14 @@ Task 22.39 adds the **executor policy config** (`provider-call-executor.yaml`), 
 
 Task 22.40 adds the **executor dry-run contract** (`dry-run` + `dry-run-report`) with metadata-only artifacts; no payload markdown reads and no transport dispatch.
 
+Task 22.41 adds **executor preflight** — reconciles executor-config, dry-run, dry-run-report, execution-bundle, and approval hashes without reading payload markdown.
+
+Task 22.42 adds **dispatch approval** — separate from payload approval; authorizes future dispatch only (`dispatch_authorized_for_future: true`, `dispatch_allowed_now: false`).
+
+Task 22.43 adds **blocked transport plan** — metadata-only plan using `BlockedProviderTransport`; no SDK, no network, no `Deliver`.
+
+Task 22.44 adds **release bundle / activation gate** — consolidates artifacts 22.38–22.43; `activation_allowed_now: false`.
+
 ## Chain boundary (must stay false)
 
 | Flag | Meaning |
@@ -23,6 +31,8 @@ Task 22.40 adds the **executor dry-run contract** (`dry-run` + `dry-run-report`)
 | `worker_execution` | No worker run |
 | `sent_to_provider` | Payload not transmitted |
 | `prompt_injection_real_runner` | Normal runner prompt unchanged |
+| `transport_called` | No transport `Deliver` invocation |
+| `execution_supported_now` | No real executor activation |
 
 ## Last gate artifacts
 
@@ -40,8 +50,12 @@ Before any future real provider dispatch:
 10. **`provider-call-executor.yaml`** — executor policy (`enabled: false`, all `allow_*: false`)
 11. **`provider-call-executor validate/plan`** — skeleton executor re-validation (no dispatch)
 12. **`provider-call-executor dry-run`** + **`dry-run-report`** — metadata-only dry-run contract (no transport)
+13. **`provider-call-executor preflight`** — hash reconciliation gate (`executor_preflight_ready: true`)
+14. **`provider-call-executor-dispatch-approval`** — future dispatch authorization (separate from payload approval)
+15. **`provider-transport-plan`** — blocked transport metadata plan (`transport_enabled: false`)
+16. **`provider-executor-release-bundle`** + **`release-gate`** — final activation gate (`activation_allowed_now: false`)
 
-The **execution bundle**, **chain audit**, **executor policy**, **executor validate/plan**, and **executor dry-run** are the last gates. A future real dispatch (22.41+) must still require an explicit confirm flag.
+The **execution bundle**, **chain audit**, **executor policy**, **executor validate/plan**, **executor dry-run**, **preflight**, **dispatch approval**, **transport plan**, and **release gate** are the last gates. A future real dispatch must still require `--confirm-provider-executor-dispatch`.
 
 ## Final audit expectations
 
@@ -100,7 +114,77 @@ The **execution bundle**, **chain audit**, **executor policy**, **executor valid
 }
 ```
 
-Audit, executor, and dry-run JSON/stdout must not contain `text_excerpt` or payload content.
+Audit, executor, dry-run, preflight, dispatch approval, transport plan, and release JSON/stdout must not contain `text_excerpt` or payload content.
+
+## Executor preflight expectations (Task 22.41)
+
+`deonctl worker codex provider-call-executor preflight` must return:
+
+```json
+{
+  "status": "ok",
+  "executor_preflight_ready": true,
+  "execution_allowed_now": false,
+  "transport_called": false,
+  "provider_call": false,
+  "network_call": false,
+  "worker_execution": false,
+  "sent_to_provider": false,
+  "prompt_injection_real_runner": false,
+  "required_future_confirm_flag": "--confirm-provider-executor-dispatch",
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+## Dispatch approval expectations (Task 22.42)
+
+`deonctl worker codex provider-call-executor-dispatch-approval approve` must return:
+
+```json
+{
+  "dispatch_authorized_for_future": true,
+  "dispatch_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "sent_to_provider": false
+}
+```
+
+## Transport plan expectations (Task 22.43)
+
+`deonctl worker codex provider-transport-plan` must return:
+
+```json
+{
+  "status": "ok",
+  "transport_plan_ready": true,
+  "transport_enabled": false,
+  "transport_called": false,
+  "provider_call": false,
+  "network_call": false,
+  "sent_to_provider": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+## Release gate expectations (Task 22.44)
+
+`deonctl worker codex provider-executor-release-gate` must return:
+
+```json
+{
+  "release_bundle_ready": true,
+  "activation_gate_ready": true,
+  "activation_allowed_now": false,
+  "execution_supported_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "worker_execution": false,
+  "transport_called": false,
+  "sent_to_provider": false
+}
+```
 
 ## CI smoke
 
@@ -116,16 +200,16 @@ make provider-call-chain-smoke
 
 This runs:
 
-- `TestProviderCallChainFixtureSmokeE2E` — library chain 29–42 equivalent with hash coherence and anti-leak assertions
-- `TestProviderCallChainFixtureCLISmokeE2E` — same chain via `deonctl` CLI (steps 31–42 + audit + executor + dry-run)
+- `TestProviderCallChainFixtureSmokeE2E` — library chain 29–49 equivalent with hash coherence and anti-leak assertions
+- `TestProviderCallChainFixtureCLISmokeE2E` — same chain via `deonctl` CLI (steps 31–49 + audit + executor sprint)
 
 GitHub Actions also runs `make provider-call-chain-smoke` explicitly before `go test ./...`.
 
 ## Manual fixture
 
-See [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md) steps 29–42.
+See [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md) steps 29–50.
 
-## What 22.41+ may do (proposal)
+## What 22.45+ may do (proposal)
 
 - Enable executor policy with explicit operator approval and confirm flag
 - Invoke transport behind policy gates

@@ -265,6 +265,8 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 	if !dryRunReport.ExecutorDryRunValidated {
 		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
 	}
+
+	runProviderExecutorSprintChain(t, chain)
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -487,6 +489,119 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
 	}
 	assertNoTextExcerpt(t, "provider-call-executor-dry-run.json")
+
+	var dryRunReportBuf bytes.Buffer
+	if err := retrievalcontext.WriteProviderCallExecutorDryRunReportJSON(dryRunReport, &dryRunReportBuf); err != nil {
+		t.Fatalf("WriteProviderCallExecutorDryRunReportJSON() error = %v", err)
+	}
+	if err := os.WriteFile("provider-call-executor-dry-run-report.json", dryRunReportBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(dry-run report) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor", "preflight",
+		"--executor-config", "provider-call-executor.yaml",
+		"--dry-run", "provider-call-executor-dry-run.json",
+		"--dry-run-report", "provider-call-executor-dry-run-report.json",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--approval", "provider-call-approval.json",
+		"--output", "provider-call-executor-preflight.json",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor-dispatch-approval", "new",
+		"--executor-config", "provider-call-executor.yaml",
+		"--dry-run", "provider-call-executor-dry-run.json",
+		"--dry-run-report", "provider-call-executor-dry-run-report.json",
+		"--preflight", "provider-call-executor-preflight.json",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--approval", "provider-call-approval.json",
+		"--output", "provider-call-executor-dispatch-approval-request.json",
+	})
+
+	var preflight retrievalcontext.ProviderCallExecutorPreflightResult
+	preflightData, err := os.ReadFile("provider-call-executor-preflight.json")
+	if err != nil {
+		t.Fatalf("ReadFile(preflight) error = %v", err)
+	}
+	if err := json.Unmarshal(preflightData, &preflight); err != nil {
+		t.Fatalf("Unmarshal(preflight) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor-dispatch-approval", "approve",
+		"--request", "provider-call-executor-dispatch-approval-request.json",
+		"--output", "provider-call-executor-dispatch-approval.json",
+		"--confirm-executor-config-sha256", preflight.ExecutorConfigSHA256,
+		"--confirm-execution-bundle-sha256", preflight.ExecutionBundleSHA256,
+		"--confirm-provider-payload-sha256", preflight.ProviderPayloadSHA256,
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor-dispatch-approval", "inspect",
+		"--approval", "provider-call-executor-dispatch-approval.json",
+		"--request", "provider-call-executor-dispatch-approval-request.json",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-transport-plan",
+		"--executor-config", "provider-call-executor.yaml",
+		"--executor-preflight", "provider-call-executor-preflight.json",
+		"--dispatch-approval", "provider-call-executor-dispatch-approval.json",
+		"--output", "provider-transport-plan.json",
+		"--output-format", "json",
+	})
+
+	var releaseBundleStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-executor-release-bundle",
+		"--executor-config", "provider-call-executor.yaml",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--dry-run", "provider-call-executor-dry-run.json",
+		"--dry-run-report", "provider-call-executor-dry-run-report.json",
+		"--executor-preflight", "provider-call-executor-preflight.json",
+		"--dispatch-approval", "provider-call-executor-dispatch-approval.json",
+		"--transport-plan", "provider-transport-plan.json",
+		"--output", "provider-executor-release-bundle.json",
+		"--output-format", "json",
+	}, &releaseBundleStdout)
+
+	var releaseGateStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-executor-release-gate",
+		"--executor-config", "provider-call-executor.yaml",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--dry-run", "provider-call-executor-dry-run.json",
+		"--dry-run-report", "provider-call-executor-dry-run-report.json",
+		"--executor-preflight", "provider-call-executor-preflight.json",
+		"--dispatch-approval", "provider-call-executor-dispatch-approval.json",
+		"--transport-plan", "provider-transport-plan.json",
+		"--release-bundle", "provider-executor-release-bundle.json",
+		"--output-format", "json",
+	}, &releaseGateStdout)
+
+	var releaseGate retrievalcontext.ProviderExecutorReleaseGateResult
+	if err := json.Unmarshal(releaseGateStdout.Bytes(), &releaseGate); err != nil {
+		t.Fatalf("Unmarshal(release gate) error = %v", err)
+	}
+	assertProviderExecutorReleaseGateBlocked(t, releaseGate)
+
+	sprintPaths := []string{
+		"provider-call-executor-dry-run-report.json",
+		"provider-call-executor-preflight.json",
+		"provider-call-executor-dispatch-approval-request.json",
+		"provider-call-executor-dispatch-approval.json",
+		"provider-transport-plan.json",
+		"provider-executor-release-bundle.json",
+	}
+	for _, path := range sprintPaths {
+		assertNoTextExcerpt(t, path)
+	}
+	if strings.Contains(releaseGateStdout.String(), "text_excerpt") || strings.Contains(releaseBundleStdout.String(), "alpha text") {
+		t.Fatal("release gate/bundle stdout must not contain materialized preview text")
+	}
 }
 
 func buildDeonctlBinaryAt(t *testing.T, root string) string {
