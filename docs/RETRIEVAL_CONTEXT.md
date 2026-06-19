@@ -43,8 +43,14 @@ Implemented now:
 - `deonctl worker codex materialized-injection-run-plan` (Task 22.26, run planner only)
 - `deonctl worker codex materialized-injection-execution-enable validate` (Task 22.27, execution enablement policy schema only)
 - `deonctl worker codex materialized-injection-provider-run-plan` (Task 22.28, provider run-plan only)
+- `deonctl worker codex materialized-provider-dispatch validate` (Task 22.29, provider dispatch contract schema only)
+- `deonctl worker codex materialized-provider-payload-dry-run` (Task 22.30, provider payload dry-run only)
+- `deonctl worker codex materialized-provider-payload-report` (Task 22.31, provider payload report only)
+- `deonctl worker codex materialized-provider-call-gate` (Task 22.32, provider call gate only)
+- `deonctl worker codex materialized-provider-call-readiness-report` (Task 22.33, provider call readiness report only)
 - `deonctl worker codex provider-call-approval new/approve/inspect` (Task 22.34, provider call approval only)
 - `deonctl worker codex provider-call-execution-bundle` (Task 22.35, provider call execution bundle only)
+- `deonctl worker codex provider-call-chain-audit` (Task 22.36, provider call chain continuity audit only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -824,9 +830,131 @@ Rules:
 
 Optional fixture step 30 exercises this path after execution enablement validate.
 
+## Materialized provider dispatch contract (Task 22.29)
+
+Schema validation for future provider dispatch gates. Config must keep `enabled: false`, `provider: codex`, `allow_provider_call: false`, `allow_network: false`, and `blocked_reason: implementation_not_enabled`. Config and validate output must not contain `text_excerpt` or alpha text.
+
+Example: `configs/examples/materialized-provider-dispatch.yaml`
+
+~~~bash
+deonctl worker codex materialized-provider-dispatch validate \
+  --config configs/examples/materialized-provider-dispatch.yaml \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on `--config`
+- rejects config containing `text_excerpt` or alpha text
+- requires `require_confirm_flag`, `require_provider_run_plan`, and `require_assembled_prompt` all `true`
+- requires `max_total_chars > 0` and `max_payload_bytes > 0`
+- validate output echoes schema fields; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 31 exercises this path.
+
+## Materialized provider payload dry-run (Task 22.30)
+
+Dry-run provider payload artifact from validated provider run-plan and assembled-output. Requires `--confirm-inject-materialized-context`. Writes payload dry-run JSON and payload-output markdown; does not call Codex/OpenCode or any provider API.
+
+~~~bash
+deonctl worker codex materialized-provider-payload-dry-run \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
+  --provider-run-plan artifacts/<run-id>/materialized-injection-provider-run-plan.json \
+  --assembled-output artifacts/<run-id>/materialized-prompt-assembly.md \
+  --output artifacts/<run-id>/materialized-provider-payload-dry-run.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --confirm-inject-materialized-context \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input/output paths
+- validates dispatch config via Task 22.29 rules
+- validates provider run-plan `provider_run_plan_ready: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `would_use_assembled_prompt: true`, `assembled_prompt_validated: true`, `blocked_reason: implementation_not_enabled`
+- validates `assembled_output_sha256` match and size caps (`max_total_chars`, `max_payload_bytes`)
+- on success sets `provider_payload_rendered: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `worker_execution: false`, `prompt_injection_real_runner: false`
+- dry-run JSON/stdout must not contain payload content, `text_excerpt`, or alpha text; only `--payload-output` may contain `text_excerpt`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 32 exercises this path after provider dispatch validate.
+
+## Materialized provider payload report (Task 22.31)
+
+QA report for provider payload dry-run JSON and payload-output hash. Does not print payload content.
+
+~~~bash
+deonctl worker codex materialized-provider-payload-report \
+  --payload-dry-run artifacts/<run-id>/materialized-provider-payload-dry-run.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on both input paths
+- rejects payload dry-run JSON containing `text_excerpt` or alpha text
+- validates payload `provider_payload_rendered: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `worker_execution: false`, `prompt_injection_real_runner: false`, `blocked_reason: implementation_not_enabled`
+- validates `provider_payload_sha256 == sha256(payload-output)` and payload-output contains dry-run notice and `text_excerpt`
+- report sets `provider_payload_validated: true`; report text/json must not contain payload content; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 33 exercises this path after provider payload dry-run.
+
+## Materialized provider call gate (Task 22.32)
+
+Final metadata-only gate before any future provider call. Binds dispatch config, payload report, and payload-output hash. Requires `--confirm-inject-materialized-context`. Writes call gate JSON; does not call Codex/OpenCode or any provider API.
+
+~~~bash
+deonctl worker codex materialized-provider-call-gate \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
+  --payload-report artifacts/<run-id>/materialized-provider-payload-report.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --confirm-inject-materialized-context \
+  --output artifacts/<run-id>/materialized-provider-call-gate.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input/output paths
+- validates dispatch config via Task 22.29 rules
+- validates payload report `provider_payload_validated: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `prompt_injection_real_runner: false`
+- validates `provider_payload_sha256` match with payload-output (hash only; does not print payload content)
+- on success sets `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `worker_execution_allowed_now: false`, `prompt_injection_allowed_now: false`, `payload_ready_for_future_call: true`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
+- gate text/json output must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 34 exercises this path after provider payload report.
+
+## Materialized provider call readiness report (Task 22.33)
+
+Consolidates provider call gate and payload report into a readiness artifact. Does not call providers or print payload content.
+
+~~~bash
+deonctl worker codex materialized-provider-call-readiness-report \
+  --provider-call-gate artifacts/<run-id>/materialized-provider-call-gate.json \
+  --payload-report artifacts/<run-id>/materialized-provider-payload-report.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on both input paths
+- rejects gate/report JSON containing `text_excerpt` or alpha text
+- validates gate `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `payload_ready_for_future_call: true`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
+- validates payload report `provider_payload_validated: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`
+- validates `materialized_sha256` and `provider_payload_sha256` coherence between gate and report when present
+- on success sets `provider_call_readiness_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
+- report text/json must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 35 exercises this path after provider call gate.
+
 ## Provider call approval (Task 22.34)
 
-Explicit approval workflow for future provider calls. Binds `provider-call-readiness-report`, `provider-call-gate`, and `payload-report` metadata. Requires `--confirm-payload-output-sha256` on approve matching `payload_output_sha256` from the payload report. Does **not** read or print `payload-output` content.
+Explicit approval workflow for future provider calls. Binds `provider-call-readiness-report`, `provider-call-gate`, and `payload-report` metadata. Requires `--confirm-provider-payload-sha256` on approve matching `provider_payload_sha256` from the payload report. Does **not** read or print `payload-output` content.
 
 ~~~bash
 deonctl worker codex provider-call-approval new \
@@ -838,7 +966,7 @@ deonctl worker codex provider-call-approval new \
 deonctl worker codex provider-call-approval approve \
   --request artifacts/<run-id>/provider-call-approval-request.json \
   --output artifacts/<run-id>/provider-call-approval.json \
-  --confirm-payload-output-sha256 <sha256-from-payload-report>
+  --confirm-provider-payload-sha256 <sha256-from-payload-report>
 
 deonctl worker codex provider-call-approval inspect \
   --approval artifacts/<run-id>/provider-call-approval.json \
@@ -852,8 +980,8 @@ Rules:
 - rejects readiness/gate/payload-report JSON containing `text_excerpt` or alpha text
 - validates readiness report `provider_call_readiness_ready: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`
 - validates gate `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
-- validates payload report `payload_validated: true`, `sent_to_provider: false`, `payload_output_sha256` present
-- cross-checks `provider_run_plan_sha256`, `payload_report_sha256`, `payload_output_sha256`, and `provider_call_gate_sha256` across artifacts
+- validates payload report `provider_payload_validated: true`, `sent_to_provider: false`, `provider_payload_sha256` present
+- cross-checks `materialized_sha256`, `payload_report_sha256`, `provider_payload_sha256`, and `provider_call_gate_sha256` across artifacts
 - approval sets `provider_call_authorized_for_future: true` while keeping `provider_call_allowed_now: false` and `sent_to_provider: false`
 - approval/inspect output must not contain `text_excerpt` or payload-output content
 - no provider call, no network, no worker execution
@@ -862,11 +990,11 @@ Rules:
 
 Final metadata-only consolidation before any future provider call. Binds `dispatch-config`, `payload-report`, `provider-call-gate`, `provider-call-readiness-report`, and `provider-call-approval`. Does not read `payload-output`, does not call providers, and does not dispatch workers.
 
-Example dispatch config: `configs/examples/materialized-injection-dispatch.yaml`
+Example dispatch config: `configs/examples/materialized-provider-dispatch.yaml`
 
 ~~~bash
 deonctl worker codex provider-call-execution-bundle \
-  --dispatch-config configs/examples/materialized-injection-dispatch.yaml \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
   --payload-report artifacts/<run-id>/payload-report.json \
   --provider-call-gate artifacts/<run-id>/provider-call-gate.json \
   --readiness-report artifacts/<run-id>/provider-call-readiness-report.json \
@@ -881,9 +1009,41 @@ Rules:
 - validates dispatch config `enabled: false`, `allow_provider_call: false`, `allow_network: false`, `allow_worker_execution: false`, `blocked_reason: implementation_not_enabled`
 - validates payload report, gate, readiness report, and approval via Task 22.34 rules
 - cross-checks hashes across dispatch config, reports, gate, readiness, and approval
-- on success sets `provider_call_authorized_for_future: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `network_allowed: false`, `runner_execution: false`, `execution_supported_now: false`, `contains_text: false`, `blocked_reason: implementation_not_enabled`
+- on success sets `provider_call_authorized_for_future: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `provider_call: false`, `network_call: false`, `worker_execution: false`, `execution_supported_now: false`, `contains_text: false`, `blocked_reason: implementation_not_enabled`
 - bundle text/json output must not contain `text_excerpt` or payload-output content; exit code 1 on `status: failed`
 - no provider call, no network, no worker execution
+
+Optional fixture step 37 exercises this path after provider call approval.
+
+## Provider call chain continuity audit (Task 22.36)
+
+Reconciles the full provider-call artifact chain from dispatch validate through execution bundle. Confirms producer commands (Tasks 22.29–22.33) are active and loaders match artifact schemas. Does not call providers, read payload-output content, or dispatch workers.
+
+~~~bash
+deonctl worker codex provider-call-chain-audit \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
+  --provider-run-plan artifacts/<run-id>/materialized-injection-provider-run-plan.json \
+  --payload-dry-run artifacts/<run-id>/materialized-provider-payload-dry-run.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --payload-report artifacts/<run-id>/materialized-provider-payload-report.json \
+  --provider-call-gate artifacts/<run-id>/materialized-provider-call-gate.json \
+  --readiness-report artifacts/<run-id>/materialized-provider-call-readiness-report.json \
+  --approval-request artifacts/<run-id>/provider-call-approval-request.json \
+  --approval artifacts/<run-id>/provider-call-approval.json \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input paths
+- validates each chain step via Tasks 22.29–22.35 loaders and flags
+- on success sets `chain_continuity_ready: true`, `loaders_reconciled: true`, `producer_commands_active: true`
+- keeps `provider_call: false`, `network_call: false`, `worker_execution: false`, `sent_to_provider: false` across the chain
+- audit text/json must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+- no provider call, no network, no worker execution
+
+Optional fixture step 38 exercises this path after provider call execution bundle.
 
 ### Debugging `status: failed`
 

@@ -129,8 +129,12 @@ Implemented:
 - materialized injection run planner (`worker codex materialized-injection-run-plan`), no worker execution
 - materialized injection execution enablement policy (`worker codex materialized-injection-execution-enable validate`), no worker execution
 - materialized injection provider run-plan (`worker codex materialized-injection-provider-run-plan`), no provider call
+- materialized provider dispatch validate (`worker codex materialized-provider-dispatch validate`), no provider call
+- materialized provider payload dry-run/report (`worker codex materialized-provider-payload-dry-run`, `materialized-provider-payload-report`), no provider call
+- materialized provider call gate/readiness report (`worker codex materialized-provider-call-gate`, `materialized-provider-call-readiness-report`), no provider call
 - provider call approval (`worker codex provider-call-approval new/approve/inspect`), no provider call
 - provider call execution bundle (`worker codex provider-call-execution-bundle`), no provider call
+- provider call chain continuity audit (`worker codex provider-call-chain-audit`), no provider call
 
 Not implemented yet:
 

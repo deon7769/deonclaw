@@ -158,7 +158,7 @@ Before merging or tagging retrieval-governance work:
 
 Task 22.13 is documentation and operability only. Runner materialized text injection, active runner search, natural-language retrieval, provider APIs, MCP integration, fallback execution, and UI remain out of scope.
 
-Tasks 22.22–22.35 add the runner materialized injection execution gate through provider call execution bundle. They are **metadata-only and dry-run** artifacts:
+Tasks 22.22–22.36 add the runner materialized injection execution gate through provider call chain continuity audit. They are **metadata-only and dry-run** artifacts:
 
 - worker execution with materialized text is still not implemented
 - normal runner prompt injection is still not implemented
@@ -166,9 +166,11 @@ Tasks 22.22–22.35 add the runner materialized injection execution gate through
 - the materialized prompt assembly is never sent to Codex or OpenCode
 - run planner sets `worker_execution_planned: false` and `prompt_injection_planned: false`
 - provider run-plan sets `sent_to_provider: false`, `provider_call_allowed_now: false`, and `would_use_assembled_prompt: true` without dispatching Codex/OpenCode
-- provider call approval keeps `provider_call_allowed_now: false` and `sent_to_provider: false` even after approve; approve requires explicit `--confirm-payload-output-sha256`
-- provider call execution bundle keeps `network_allowed: false`, `provider_call_allowed_now: false`, and `sent_to_provider: false`
-- approval and bundle must not read or print payload-output content
+- provider payload dry-run keeps `provider_call: false`, `network_call: false`, `worker_execution: false`, and `sent_to_provider: false`
+- provider call approval keeps `provider_call_allowed_now: false` and `sent_to_provider: false` even after approve; approve requires explicit `--confirm-provider-payload-sha256`
+- provider call execution bundle keeps `provider_call: false`, `network_call: false`, `worker_execution: false`, `provider_call_allowed_now: false`, and `sent_to_provider: false`
+- provider call chain audit confirms producer commands (22.29–22.33) and loaders are reconciled without provider call
+- approval, bundle, and chain audit must not read or print payload-output content
 - all metadata-only artifacts must block `text_excerpt`, alpha text, prompt-output content, assembled-output content, and payload-output content
 
 Boundary

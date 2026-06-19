@@ -55,8 +55,15 @@ retrieval-context (runner metadata attachment)
 | 22.26 | `worker codex materialized-injection-run-plan` (run planner, no worker execution) |
 | 22.27 | `worker codex materialized-injection-execution-enable validate` (execution enablement policy schema, no worker execution) |
 | 22.28 | `worker codex materialized-injection-provider-run-plan` (provider run-plan, no provider call) |
+| 22.28 | `worker codex materialized-injection-provider-run-plan` (provider run-plan, no provider call) |
+| 22.29 | `worker codex materialized-provider-dispatch validate` (provider dispatch contract, no provider call) |
+| 22.30 | `worker codex materialized-provider-payload-dry-run` (provider payload dry-run, no provider call) |
+| 22.31 | `worker codex materialized-provider-payload-report` (provider payload report, no provider call) |
+| 22.32 | `worker codex materialized-provider-call-gate` (provider call gate, no provider call) |
+| 22.33 | `worker codex materialized-provider-call-readiness-report` (provider call readiness report, no provider call) |
 | 22.34 | `worker codex provider-call-approval new/approve/inspect` (provider call approval, no provider call) |
 | 22.35 | `worker codex provider-call-execution-bundle` (provider call execution bundle, no provider call) |
+| 22.36 | `worker codex provider-call-chain-audit` (provider call chain continuity audit, no provider call) |
 
 ### What already exists
 
@@ -159,11 +166,23 @@ Future injection design and implementation must **not** include:
 
 **Task 22.28 (implemented):** *Materialized injection provider run-plan* — `deonctl worker codex materialized-injection-provider-run-plan` binds task declaration, enablement policy, execution gate, and assembly report into a provider run-plan JSON with `provider_run_plan_ready: true`, `would_use_assembled_prompt: true`, `sent_to_provider: false`, `provider_call_allowed_now: false`. **Still no provider call**, no Codex/OpenCode dispatch, no real prompt injection; normal runner prompt unchanged.
 
-**Task 22.34 (implemented):** *Provider call approval* — `deonctl worker codex provider-call-approval new/approve/inspect` binds readiness report, provider-call gate, and payload-report metadata with explicit `--confirm-payload-output-sha256` on approve. Keeps `provider_call_allowed_now: false` and `sent_to_provider: false`. Does not read or print payload-output. **Still no provider call**, no network, no worker execution.
+**Task 22.29 (implemented):** *Materialized provider dispatch contract* — `deonctl worker codex materialized-provider-dispatch validate` validates YAML schema for future provider dispatch (`enabled: false`, `allow_provider_call: false`, `allow_network: false`, `blocked_reason: implementation_not_enabled`). **Still no provider call**, no network, no worker execution.
 
-**Task 22.35 (implemented):** *Provider call execution bundle* — `deonctl worker codex provider-call-execution-bundle` consolidates dispatch config, payload report, gate, readiness report, and approval into a final metadata-only bundle with hash validation. **Still no provider call**, no network, no worker execution.
+**Task 22.30 (implemented):** *Materialized provider payload dry-run* — `deonctl worker codex materialized-provider-payload-dry-run` renders provider payload markdown and dry-run JSON from provider run-plan and assembled prompt. Keeps `provider_call: false`, `network_call: false`, `worker_execution: false`, `sent_to_provider: false`. **Still no provider call**, no network, no worker execution.
 
-**Task 22.36+ (proposal):** actual provider call execution behind explicit confirm flag at dispatch time.
+**Task 22.31 (implemented):** *Materialized provider payload report* — `deonctl worker codex materialized-provider-payload-report` validates payload dry-run flags and `provider_payload_sha256` without printing payload content. **Still no provider call**, no network, no worker execution.
+
+**Task 22.32 (implemented):** *Materialized provider call gate* — `deonctl worker codex materialized-provider-call-gate` binds dispatch config, payload report, and payload-output hash into a call gate with `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`. **Still no provider call**, no network, no worker execution.
+
+**Task 22.33 (implemented):** *Materialized provider call readiness report* — `deonctl worker codex materialized-provider-call-readiness-report` consolidates gate and payload report into `provider_call_readiness_ready: true` while keeping `provider_call_allowed_now: false` and `sent_to_provider: false`. **Still no provider call**, no network, no worker execution.
+
+**Task 22.34 (implemented):** *Provider call approval* — `deonctl worker codex provider-call-approval new/approve/inspect` binds readiness report, provider-call gate, and payload-report metadata with explicit `--confirm-provider-payload-sha256` on approve. Keeps `provider_call_allowed_now: false` and `sent_to_provider: false`. Does not read or print payload-output. **Still no provider call**, no network, no worker execution.
+
+**Task 22.35 (implemented):** *Provider call execution bundle* — `deonctl worker codex provider-call-execution-bundle` consolidates dispatch config, payload report, gate, readiness report, and approval into a final metadata-only bundle with hash validation. Keeps `provider_call: false`, `network_call: false`, `worker_execution: false`, `sent_to_provider: false`. **Still no provider call**, no network, no worker execution.
+
+**Task 22.36 (implemented):** *Provider call chain continuity audit* — `deonctl worker codex provider-call-chain-audit` reconciles the full artifact chain from dispatch validate through execution bundle, confirming producer commands and loaders are aligned. **Still no provider call**, no network, no worker execution.
+
+**Task 22.37+ (proposal):** actual provider call execution behind explicit confirm flag at dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

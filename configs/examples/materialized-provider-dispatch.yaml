@@ -1,0 +1,13 @@
+materialized_provider_dispatch:
+  enabled: false
+  provider: codex
+  require_confirm_flag: true
+  require_provider_run_plan: true
+  require_assembled_prompt: true
+  allow_provider_call: false
+  allow_network: false
+  allow_worker_execution: false
+  allow_prompt_injection: false
+  blocked_reason: implementation_not_enabled
+  max_total_chars: 6000
+  max_payload_bytes: 120000

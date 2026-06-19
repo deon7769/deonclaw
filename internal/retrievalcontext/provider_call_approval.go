@@ -14,7 +14,7 @@ import (
 
 const (
 	AllowedUseProviderCallPolicyOnly = "provider_call_policy_only"
-	confirmPayloadOutputSHA256       = "confirm_payload_output_sha256"
+	confirmProviderPayloadSHA256     = "confirm_provider_payload_sha256"
 )
 
 type ProviderCallApprovalRequest struct {
@@ -23,12 +23,12 @@ type ProviderCallApprovalRequest struct {
 	ReadinessReportSHA256           string    `json:"readiness_report_sha256"`
 	ProviderCallGateSHA256          string    `json:"provider_call_gate_sha256"`
 	PayloadReportSHA256             string    `json:"payload_report_sha256"`
-	PayloadOutputSHA256             string    `json:"payload_output_sha256"`
-	ProviderRunPlanSHA256           string    `json:"provider_run_plan_sha256"`
+	ProviderPayloadSHA256           string    `json:"provider_payload_sha256"`
 	MaterializedSHA256              string    `json:"materialized_sha256,omitempty"`
-	AssembledOutputSHA256           string    `json:"assembled_output_sha256,omitempty"`
 	RequestedProviderCallAuthorized bool      `json:"requested_provider_call_authorized"`
 	ProviderCallAllowedNow          bool      `json:"provider_call_allowed_now"`
+	NetworkCallAllowedNow           bool      `json:"network_call_allowed_now"`
+	WorkerExecutionAllowedNow       bool      `json:"worker_execution_allowed_now"`
 	SentToProvider                  bool      `json:"sent_to_provider"`
 	ContainsText                    bool      `json:"contains_text"`
 	Warnings                        []string  `json:"warnings,omitempty"`
@@ -41,15 +41,15 @@ type ProviderCallApproval struct {
 	ReadinessReportSHA256           string    `json:"readiness_report_sha256"`
 	ProviderCallGateSHA256          string    `json:"provider_call_gate_sha256"`
 	PayloadReportSHA256             string    `json:"payload_report_sha256"`
-	PayloadOutputSHA256             string    `json:"payload_output_sha256"`
-	ProviderRunPlanSHA256           string    `json:"provider_run_plan_sha256"`
+	ProviderPayloadSHA256           string    `json:"provider_payload_sha256"`
 	MaterializedSHA256              string    `json:"materialized_sha256,omitempty"`
-	AssembledOutputSHA256           string    `json:"assembled_output_sha256,omitempty"`
 	AllowedUse                      string    `json:"allowed_use"`
 	ProviderCallAuthorizedForFuture bool      `json:"provider_call_authorized_for_future"`
 	ProviderCallAllowedNow          bool      `json:"provider_call_allowed_now"`
+	NetworkCallAllowedNow           bool      `json:"network_call_allowed_now"`
+	WorkerExecutionAllowedNow       bool      `json:"worker_execution_allowed_now"`
 	SentToProvider                  bool      `json:"sent_to_provider"`
-	ConfirmPayloadOutputSHA256      bool      `json:"confirm_payload_output_sha256"`
+	ConfirmProviderPayloadSHA256    bool      `json:"confirm_provider_payload_sha256"`
 	Warnings                        []string  `json:"warnings,omitempty"`
 }
 
@@ -61,10 +61,10 @@ type NewProviderCallApprovalRequestOptions struct {
 }
 
 type ApproveProviderCallOptions struct {
-	RequestPath                string
-	OutputPath                 string
-	ConfirmPayloadOutputSHA256 string
-	ApprovedAt                 time.Time
+	RequestPath                  string
+	OutputPath                   string
+	ConfirmProviderPayloadSHA256 string
+	ApprovedAt                   time.Time
 }
 
 type InspectProviderCallApprovalOptions struct {
@@ -76,9 +76,11 @@ type InspectProviderCallApprovalResult struct {
 	Approved                        bool     `json:"approved"`
 	ProviderCallAuthorizedForFuture bool     `json:"provider_call_authorized_for_future"`
 	ProviderCallAllowedNow          bool     `json:"provider_call_allowed_now"`
+	NetworkCallAllowedNow           bool     `json:"network_call_allowed_now"`
+	WorkerExecutionAllowedNow       bool     `json:"worker_execution_allowed_now"`
 	SentToProvider                  bool     `json:"sent_to_provider"`
 	AllowedUse                      string   `json:"allowed_use"`
-	PayloadOutputSHA256             string   `json:"payload_output_sha256"`
+	ProviderPayloadSHA256           string   `json:"provider_payload_sha256"`
 	MaterializedSHA256              string   `json:"materialized_sha256,omitempty"`
 	Warnings                        []string `json:"warnings"`
 	Failures                        []string `json:"failures,omitempty"`
@@ -99,27 +101,27 @@ func NewProviderCallApprovalRequest(opts NewProviderCallApprovalRequestOptions) 
 		}
 	}
 
-	readiness, readinessData, err := LoadProviderCallReadinessReport(opts.ReadinessReportPath)
+	readiness, readinessData, err := LoadMaterializedProviderCallReadinessReport(opts.ReadinessReportPath)
 	if err != nil {
 		return ProviderCallApprovalRequest{}, err
 	}
-	if err := validateProviderCallReadinessReportForProviderCallChain(readiness); err != nil {
+	if err := validateMaterializedProviderCallReadinessReportForApproval(readiness); err != nil {
 		return ProviderCallApprovalRequest{}, err
 	}
 
-	gate, gateData, err := LoadProviderCallGate(opts.ProviderCallGatePath)
+	gate, gateData, err := LoadMaterializedProviderCallGate(opts.ProviderCallGatePath)
 	if err != nil {
 		return ProviderCallApprovalRequest{}, err
 	}
-	if err := validateProviderCallGateForProviderCallChain(gate); err != nil {
+	if err := validateMaterializedProviderCallGateForApproval(gate); err != nil {
 		return ProviderCallApprovalRequest{}, err
 	}
 
-	payloadReport, payloadReportData, err := LoadPayloadReport(opts.PayloadReportPath)
+	payloadReport, payloadReportData, err := LoadMaterializedProviderPayloadReport(opts.PayloadReportPath)
 	if err != nil {
 		return ProviderCallApprovalRequest{}, err
 	}
-	if err := validatePayloadReportForProviderCallChain(payloadReport); err != nil {
+	if err := validateMaterializedProviderPayloadReportForApproval(payloadReport); err != nil {
 		return ProviderCallApprovalRequest{}, err
 	}
 
@@ -128,20 +130,14 @@ func NewProviderCallApprovalRequest(opts NewProviderCallApprovalRequestOptions) 
 	payloadReportSHA := sha256Hex(payloadReportData)
 
 	var failures []string
-	if gate.ProviderRunPlanSHA256 != readiness.ProviderRunPlanSHA256 {
-		failures = append(failures, "provider_run_plan_sha256 mismatch between readiness report and gate")
+	if gate.ProviderPayloadSHA256 != readiness.ProviderPayloadSHA256 || payloadReport.ProviderPayloadSHA256 != readiness.ProviderPayloadSHA256 {
+		failures = append(failures, "provider_payload_sha256 mismatch across readiness report, gate, and payload report")
 	}
-	if gate.PayloadReportSHA256 != readiness.PayloadReportSHA256 || payloadReportSHA != readiness.PayloadReportSHA256 {
-		failures = append(failures, "payload_report_sha256 mismatch across readiness report, gate, and payload report")
+	if gate.MaterializedSHA256 != "" && readiness.MaterializedSHA256 != "" && gate.MaterializedSHA256 != readiness.MaterializedSHA256 {
+		failures = append(failures, "materialized_sha256 mismatch between readiness report and gate")
 	}
-	if gate.PayloadOutputSHA256 != readiness.PayloadOutputSHA256 || payloadReport.PayloadOutputSHA256 != readiness.PayloadOutputSHA256 {
-		failures = append(failures, "payload_output_sha256 mismatch across readiness report, gate, and payload report")
-	}
-	if gateSHA != readiness.ProviderCallGateSHA256 {
-		failures = append(failures, "provider_call_gate_sha256 mismatch between readiness report and gate artifact")
-	}
-	if payloadReport.ProviderRunPlanSHA256 != readiness.ProviderRunPlanSHA256 {
-		failures = append(failures, "provider_run_plan_sha256 mismatch between readiness report and payload report")
+	if payloadReport.MaterializedSHA256 != "" && readiness.MaterializedSHA256 != "" && payloadReport.MaterializedSHA256 != readiness.MaterializedSHA256 {
+		failures = append(failures, "materialized_sha256 mismatch between readiness report and payload report")
 	}
 	if len(failures) > 0 {
 		return ProviderCallApprovalRequest{}, fmt.Errorf("%s", strings.Join(failures, "; "))
@@ -153,12 +149,12 @@ func NewProviderCallApprovalRequest(opts NewProviderCallApprovalRequestOptions) 
 		ReadinessReportSHA256:           readinessSHA,
 		ProviderCallGateSHA256:          gateSHA,
 		PayloadReportSHA256:             payloadReportSHA,
-		PayloadOutputSHA256:             payloadReport.PayloadOutputSHA256,
-		ProviderRunPlanSHA256:           readiness.ProviderRunPlanSHA256,
+		ProviderPayloadSHA256:           payloadReport.ProviderPayloadSHA256,
 		MaterializedSHA256:              firstNonEmpty(readiness.MaterializedSHA256, gate.MaterializedSHA256, payloadReport.MaterializedSHA256),
-		AssembledOutputSHA256:           firstNonEmpty(readiness.AssembledOutputSHA256, gate.AssembledOutputSHA256, payloadReport.AssembledOutputSHA256),
 		RequestedProviderCallAuthorized: true,
 		ProviderCallAllowedNow:          false,
+		NetworkCallAllowedNow:           false,
+		WorkerExecutionAllowedNow:       false,
 		SentToProvider:                  false,
 		ContainsText:                    false,
 		Warnings: mergeWarnings(
@@ -181,8 +177,8 @@ func NewProviderCallApprovalRequest(opts NewProviderCallApprovalRequestOptions) 
 }
 
 func ApproveProviderCall(opts ApproveProviderCallOptions) (ProviderCallApproval, error) {
-	if strings.TrimSpace(opts.ConfirmPayloadOutputSHA256) == "" {
-		return ProviderCallApproval{}, fmt.Errorf("--confirm-payload-output-sha256 is required")
+	if strings.TrimSpace(opts.ConfirmProviderPayloadSHA256) == "" {
+		return ProviderCallApproval{}, fmt.Errorf("--confirm-provider-payload-sha256 is required")
 	}
 	if err := validateRelativeSafePath("request path", opts.RequestPath); err != nil {
 		return ProviderCallApproval{}, err
@@ -205,8 +201,8 @@ func ApproveProviderCall(opts ApproveProviderCallOptions) (ProviderCallApproval,
 	if request.Status != RequestStatusPending {
 		return ProviderCallApproval{}, fmt.Errorf("provider call approval request status %q must be pending", request.Status)
 	}
-	if request.PayloadOutputSHA256 != opts.ConfirmPayloadOutputSHA256 {
-		return ProviderCallApproval{}, fmt.Errorf("confirm payload output sha256 mismatch")
+	if request.ProviderPayloadSHA256 != opts.ConfirmProviderPayloadSHA256 {
+		return ProviderCallApproval{}, fmt.Errorf("confirm provider payload sha256 mismatch")
 	}
 
 	approvedAt := opts.ApprovedAt
@@ -221,15 +217,15 @@ func ApproveProviderCall(opts ApproveProviderCallOptions) (ProviderCallApproval,
 		ReadinessReportSHA256:           request.ReadinessReportSHA256,
 		ProviderCallGateSHA256:          request.ProviderCallGateSHA256,
 		PayloadReportSHA256:             request.PayloadReportSHA256,
-		PayloadOutputSHA256:             request.PayloadOutputSHA256,
-		ProviderRunPlanSHA256:           request.ProviderRunPlanSHA256,
+		ProviderPayloadSHA256:           request.ProviderPayloadSHA256,
 		MaterializedSHA256:              request.MaterializedSHA256,
-		AssembledOutputSHA256:           request.AssembledOutputSHA256,
 		AllowedUse:                      AllowedUseProviderCallPolicyOnly,
 		ProviderCallAuthorizedForFuture: true,
 		ProviderCallAllowedNow:          false,
+		NetworkCallAllowedNow:           false,
+		WorkerExecutionAllowedNow:       false,
 		SentToProvider:                  false,
-		ConfirmPayloadOutputSHA256:      true,
+		ConfirmProviderPayloadSHA256:    true,
 		Warnings:                        append([]string(nil), request.Warnings...),
 	}
 	if err := approval.Validate(); err != nil {
@@ -304,9 +300,11 @@ func InspectProviderCallApprovalBytes(data []byte, opts InspectProviderCallAppro
 		Approved:                        approval.Approved,
 		ProviderCallAuthorizedForFuture: approval.ProviderCallAuthorizedForFuture,
 		ProviderCallAllowedNow:          approval.ProviderCallAllowedNow,
+		NetworkCallAllowedNow:           approval.NetworkCallAllowedNow,
+		WorkerExecutionAllowedNow:       approval.WorkerExecutionAllowedNow,
 		SentToProvider:                  approval.SentToProvider,
 		AllowedUse:                      approval.AllowedUse,
-		PayloadOutputSHA256:             approval.PayloadOutputSHA256,
+		ProviderPayloadSHA256:           approval.ProviderPayloadSHA256,
 		MaterializedSHA256:              approval.MaterializedSHA256,
 		Warnings:                        append([]string(nil), approval.Warnings...),
 	}
@@ -334,6 +332,60 @@ func InspectProviderCallApprovalBytes(data []byte, opts InspectProviderCallAppro
 	return result, nil
 }
 
+func validateMaterializedProviderCallReadinessReportForApproval(report MaterializedProviderCallReadinessReportResult) error {
+	switch report.Status {
+	case lancedbpolicy.StatusOK, lancedbpolicy.StatusWarning:
+	default:
+		return fmt.Errorf("readiness report status %q must be ok or warning", report.Status)
+	}
+	if !report.ProviderCallReadinessReady {
+		return fmt.Errorf("readiness report provider_call_readiness_ready must be true")
+	}
+	if report.ProviderCallAllowedNow || report.NetworkCallAllowedNow || report.WorkerExecutionAllowedNow || report.SentToProvider {
+		return fmt.Errorf("readiness report must keep provider_call, network_call, worker_execution, and sent_to_provider blocked")
+	}
+	if strings.TrimSpace(report.ProviderPayloadSHA256) == "" {
+		return fmt.Errorf("readiness report provider_payload_sha256 is required")
+	}
+	return nil
+}
+
+func validateMaterializedProviderCallGateForApproval(gate MaterializedProviderCallGateResult) error {
+	switch gate.Status {
+	case lancedbpolicy.StatusOK, lancedbpolicy.StatusWarning:
+	default:
+		return fmt.Errorf("provider call gate status %q must be ok or warning", gate.Status)
+	}
+	if !gate.ProviderCallGateReady {
+		return fmt.Errorf("provider call gate provider_call_gate_ready must be true")
+	}
+	if gate.ProviderCallAllowedNow || gate.NetworkCallAllowedNow || gate.WorkerExecutionAllowedNow || gate.SentToProvider {
+		return fmt.Errorf("provider call gate must keep provider_call, network_call, worker_execution, and sent_to_provider blocked")
+	}
+	if strings.TrimSpace(gate.ProviderPayloadSHA256) == "" {
+		return fmt.Errorf("provider call gate provider_payload_sha256 is required")
+	}
+	return nil
+}
+
+func validateMaterializedProviderPayloadReportForApproval(report MaterializedProviderPayloadReportResult) error {
+	switch report.Status {
+	case lancedbpolicy.StatusOK, lancedbpolicy.StatusWarning:
+	default:
+		return fmt.Errorf("payload report status %q must be ok or warning", report.Status)
+	}
+	if !report.ProviderPayloadValidated {
+		return fmt.Errorf("payload report provider_payload_validated must be true")
+	}
+	if report.ProviderCall || report.NetworkCall || report.WorkerExecution || report.SentToProvider {
+		return fmt.Errorf("payload report must keep provider_call, network_call, worker_execution, and sent_to_provider false")
+	}
+	if strings.TrimSpace(report.ProviderPayloadSHA256) == "" {
+		return fmt.Errorf("payload report provider_payload_sha256 is required")
+	}
+	return nil
+}
+
 func (r ProviderCallApprovalRequest) Validate() error {
 	if r.Status != RequestStatusPending {
 		return fmt.Errorf("status %q must be pending", r.Status)
@@ -348,8 +400,7 @@ func (r ProviderCallApprovalRequest) Validate() error {
 		{"readiness_report_sha256", r.ReadinessReportSHA256},
 		{"provider_call_gate_sha256", r.ProviderCallGateSHA256},
 		{"payload_report_sha256", r.PayloadReportSHA256},
-		{"payload_output_sha256", r.PayloadOutputSHA256},
-		{"provider_run_plan_sha256", r.ProviderRunPlanSHA256},
+		{"provider_payload_sha256", r.ProviderPayloadSHA256},
 	} {
 		if strings.TrimSpace(field.value) == "" {
 			return fmt.Errorf("%s is required", field.name)
@@ -358,11 +409,8 @@ func (r ProviderCallApprovalRequest) Validate() error {
 	if !r.RequestedProviderCallAuthorized {
 		return fmt.Errorf("requested_provider_call_authorized must be true")
 	}
-	if r.ProviderCallAllowedNow {
-		return fmt.Errorf("provider_call_allowed_now must be false")
-	}
-	if r.SentToProvider {
-		return fmt.Errorf("sent_to_provider must be false")
+	if r.ProviderCallAllowedNow || r.NetworkCallAllowedNow || r.WorkerExecutionAllowedNow || r.SentToProvider {
+		return fmt.Errorf("approval request must keep provider_call, network_call, worker_execution, and sent_to_provider blocked")
 	}
 	if r.ContainsText {
 		return fmt.Errorf("contains_text must be false")
@@ -380,17 +428,14 @@ func (a ProviderCallApproval) Validate() error {
 	if !a.ProviderCallAuthorizedForFuture {
 		return fmt.Errorf("provider_call_authorized_for_future must be true")
 	}
-	if a.ProviderCallAllowedNow {
-		return fmt.Errorf("provider_call_allowed_now must be false")
-	}
-	if a.SentToProvider {
-		return fmt.Errorf("sent_to_provider must be false")
+	if a.ProviderCallAllowedNow || a.NetworkCallAllowedNow || a.WorkerExecutionAllowedNow || a.SentToProvider {
+		return fmt.Errorf("approval must keep provider_call, network_call, worker_execution, and sent_to_provider blocked")
 	}
 	if a.AllowedUse != AllowedUseProviderCallPolicyOnly {
 		return fmt.Errorf("allowed_use %q must be %q", a.AllowedUse, AllowedUseProviderCallPolicyOnly)
 	}
-	if !a.ConfirmPayloadOutputSHA256 {
-		return fmt.Errorf("%s must be true", confirmPayloadOutputSHA256)
+	if !a.ConfirmProviderPayloadSHA256 {
+		return fmt.Errorf("%s must be true", confirmProviderPayloadSHA256)
 	}
 	for _, field := range []struct {
 		name  string
@@ -400,8 +445,7 @@ func (a ProviderCallApproval) Validate() error {
 		{"readiness_report_sha256", a.ReadinessReportSHA256},
 		{"provider_call_gate_sha256", a.ProviderCallGateSHA256},
 		{"payload_report_sha256", a.PayloadReportSHA256},
-		{"payload_output_sha256", a.PayloadOutputSHA256},
-		{"provider_run_plan_sha256", a.ProviderRunPlanSHA256},
+		{"provider_payload_sha256", a.ProviderPayloadSHA256},
 	} {
 		if strings.TrimSpace(field.value) == "" {
 			return fmt.Errorf("%s is required", field.name)
@@ -458,9 +502,11 @@ func WriteInspectProviderCallApprovalText(result InspectProviderCallApprovalResu
 		{"approved", fmt.Sprintf("%t", result.Approved)},
 		{"provider_call_authorized_for_future", fmt.Sprintf("%t", result.ProviderCallAuthorizedForFuture)},
 		{"provider_call_allowed_now", fmt.Sprintf("%t", result.ProviderCallAllowedNow)},
+		{"network_call_allowed_now", fmt.Sprintf("%t", result.NetworkCallAllowedNow)},
+		{"worker_execution_allowed_now", fmt.Sprintf("%t", result.WorkerExecutionAllowedNow)},
 		{"sent_to_provider", fmt.Sprintf("%t", result.SentToProvider)},
 		{"allowed_use", result.AllowedUse},
-		{"payload_output_sha256", result.PayloadOutputSHA256},
+		{"provider_payload_sha256", result.ProviderPayloadSHA256},
 		{"materialized_sha256", result.MaterializedSHA256},
 	}
 	for _, line := range lines {

@@ -141,10 +141,16 @@ Usage:
   deonctl worker codex materialized-injection-run-plan --task <path> --runtime-config <materialized-injection-runtime.yaml> --execution-gate <materialized-injection-execution-gate.json> --assembly-report <materialized-prompt-assembly-report.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-injection-run-plan.json> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex materialized-injection-execution-enable validate --config <materialized-injection-execution-enable.yaml> [--output-format text|json]
   deonctl worker codex materialized-injection-provider-run-plan --task <path> --enable-config <materialized-injection-execution-enable.yaml> --execution-gate <materialized-injection-execution-gate.json> --assembly-report <materialized-prompt-assembly-report.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-injection-provider-run-plan.json> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex materialized-provider-dispatch validate --config <materialized-provider-dispatch.yaml> [--output-format text|json]
+  deonctl worker codex materialized-provider-payload-dry-run --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --confirm-inject-materialized-context [--output-format text|json]
+  deonctl worker codex materialized-provider-payload-report --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> [--output-format text|json]
+  deonctl worker codex materialized-provider-call-gate --dispatch-config <materialized-provider-dispatch.yaml> --payload-report <materialized-provider-payload-report.json> --payload-output <materialized-provider-payload.md> --confirm-inject-materialized-context --output <materialized-provider-call-gate.json> [--output-format text|json]
+  deonctl worker codex materialized-provider-call-readiness-report --provider-call-gate <materialized-provider-call-gate.json> --payload-report <materialized-provider-payload-report.json> [--output-format text|json]
   deonctl worker codex provider-call-approval new --readiness-report <provider-call-readiness-report.json> --provider-call-gate <provider-call-gate.json> --payload-report <payload-report.json> --output <provider-call-approval-request.json>
-  deonctl worker codex provider-call-approval approve --request <provider-call-approval-request.json> --output <provider-call-approval.json> --confirm-payload-output-sha256 <sha256>
+  deonctl worker codex provider-call-approval approve --request <provider-call-approval-request.json> --output <provider-call-approval.json> --confirm-provider-payload-sha256 <sha256>
   deonctl worker codex provider-call-approval inspect --approval <provider-call-approval.json> [--request <provider-call-approval-request.json>] [--output-format text|json]
-  deonctl worker codex provider-call-execution-bundle --dispatch-config <materialized-injection-dispatch.yaml> --payload-report <payload-report.json> --provider-call-gate <provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval <provider-call-approval.json> --output <provider-call-execution-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-call-execution-bundle --dispatch-config <materialized-provider-dispatch.yaml> --payload-report <payload-report.json> --provider-call-gate <provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval <provider-call-approval.json> --output <provider-call-execution-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-call-chain-audit --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -938,6 +944,56 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedInjectionProviderRunPlan(opts, stdout, stderr)
+			case "materialized-provider-dispatch":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "validate":
+					subOpts, err := parseCodexMaterializedProviderDispatchValidateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexMaterializedProviderDispatchValidate(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "materialized-provider-payload-dry-run":
+				opts, err := parseCodexMaterializedProviderPayloadDryRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderPayloadDryRun(opts, stdout, stderr)
+			case "materialized-provider-payload-report":
+				opts, err := parseCodexMaterializedProviderPayloadReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderPayloadReport(opts, stdout, stderr)
+			case "materialized-provider-call-gate":
+				opts, err := parseCodexMaterializedProviderCallGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderCallGate(opts, stdout, stderr)
+			case "materialized-provider-call-readiness-report":
+				opts, err := parseCodexMaterializedProviderCallReadinessReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderCallReadinessReport(opts, stdout, stderr)
 			case "provider-call-approval":
 				if len(args) < 4 {
 					fmt.Fprint(stderr, usage)
@@ -980,6 +1036,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexProviderCallExecutionBundle(opts, stdout, stderr)
+			case "provider-call-chain-audit":
+				opts, err := parseCodexProviderCallChainAuditOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderCallChainAudit(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -7551,16 +7615,16 @@ func runCodexProviderCallApprovalNew(opts codexProviderCallApprovalNewOptions, s
 	fmt.Fprintln(stdout, "worker codex provider-call-approval new: ok")
 	fmt.Fprintf(stdout, "status: %s\n", request.Status)
 	fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
-	fmt.Fprintf(stdout, "payload_output_sha256: %s\n", request.PayloadOutputSHA256)
+	fmt.Fprintf(stdout, "provider_payload_sha256: %s\n", request.ProviderPayloadSHA256)
 	fmt.Fprintf(stdout, "provider_call_allowed_now: %t\n", request.ProviderCallAllowedNow)
 	fmt.Fprintf(stdout, "sent_to_provider: %t\n", request.SentToProvider)
 	return 0
 }
 
 type codexProviderCallApprovalApproveOptions struct {
-	requestPath                string
-	outputPath                 string
-	confirmPayloadOutputSHA256 string
+	requestPath                  string
+	outputPath                   string
+	confirmProviderPayloadSHA256 string
 }
 
 func parseCodexProviderCallApprovalApproveOptions(args []string) (codexProviderCallApprovalApproveOptions, error) {
@@ -7579,11 +7643,11 @@ func parseCodexProviderCallApprovalApproveOptions(args []string) (codexProviderC
 			}
 			opts.outputPath = args[i+1]
 			i++
-		case "--confirm-payload-output-sha256":
+		case "--confirm-provider-payload-sha256", "--confirm-payload-output-sha256":
 			if i+1 >= len(args) {
-				return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("missing value for --confirm-payload-output-sha256")
+				return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("missing value for %s", args[i])
 			}
-			opts.confirmPayloadOutputSHA256 = args[i+1]
+			opts.confirmProviderPayloadSHA256 = args[i+1]
 			i++
 		default:
 			return codexProviderCallApprovalApproveOptions{}, fmt.Errorf("unknown argument %q", args[i])
@@ -7600,9 +7664,9 @@ func parseCodexProviderCallApprovalApproveOptions(args []string) (codexProviderC
 
 func runCodexProviderCallApprovalApprove(opts codexProviderCallApprovalApproveOptions, stdout io.Writer, stderr io.Writer) int {
 	approval, err := retrievalcontext.ApproveProviderCall(retrievalcontext.ApproveProviderCallOptions{
-		RequestPath:                opts.requestPath,
-		OutputPath:                 opts.outputPath,
-		ConfirmPayloadOutputSHA256: opts.confirmPayloadOutputSHA256,
+		RequestPath:                  opts.requestPath,
+		OutputPath:                   opts.outputPath,
+		ConfirmProviderPayloadSHA256: opts.confirmProviderPayloadSHA256,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "worker codex provider-call-approval approve failed: %v\n", err)
