@@ -127,6 +127,8 @@ Implemented:
 - provider call executor dispatch approval (`worker codex provider-call-executor-dispatch-approval new/approve/inspect`), no provider call
 - provider transport plan (`worker codex provider-transport-plan`), blocked, no provider call
 - provider executor release bundle / gate (`worker codex provider-executor-release-bundle`, `release-gate`), no provider call
+- provider execution simulation layer (`provider-request-envelope`, `provider-adapter-registry`, `provider-adapter-plan`, `provider-response-fixture`, `provider-execution-simulation-bundle`, `provider-execution-simulation-report`), no provider call
+- provider adapters config (`configs/examples/provider-adapters.yaml`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries

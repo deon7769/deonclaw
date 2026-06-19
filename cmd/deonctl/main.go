@@ -163,6 +163,14 @@ Usage:
   deonctl worker codex provider-transport-plan --executor-config <provider-call-executor.yaml> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --output <provider-transport-plan.json> [--output-format text|json]
   deonctl worker codex provider-executor-release-bundle --executor-config <provider-call-executor.yaml> --execution-bundle <provider-call-execution-bundle.json> --dry-run <provider-call-executor-dry-run.json> --dry-run-report <provider-call-executor-dry-run-report.json> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --transport-plan <provider-transport-plan.json> --output <provider-executor-release-bundle.json> [--output-format text|json]
   deonctl worker codex provider-executor-release-gate --executor-config <provider-call-executor.yaml> --execution-bundle <provider-call-execution-bundle.json> --dry-run <provider-call-executor-dry-run.json> --dry-run-report <provider-call-executor-dry-run-report.json> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --transport-plan <provider-transport-plan.json> --release-bundle <provider-executor-release-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-request-envelope dry-run --executor-config <provider-call-executor.yaml> --execution-bundle <provider-call-execution-bundle.json> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --transport-plan <provider-transport-plan.json> --release-bundle <provider-executor-release-bundle.json> --release-gate <provider-executor-release-gate.json> --output <provider-request-envelope.json> [--output-format text|json]
+  deonctl worker codex provider-request-envelope report --request-envelope <provider-request-envelope.json> --executor-config <provider-call-executor.yaml> --execution-bundle <provider-call-execution-bundle.json> --executor-preflight <provider-call-executor-preflight.json> --dispatch-approval <provider-call-executor-dispatch-approval.json> --transport-plan <provider-transport-plan.json> --release-bundle <provider-executor-release-bundle.json> --release-gate <provider-executor-release-gate.json> [--output-format text|json]
+  deonctl worker codex provider-adapter-registry validate --config <provider-adapters.yaml> [--output-format text|json]
+  deonctl worker codex provider-adapter-plan --config <provider-adapters.yaml> --request-envelope <provider-request-envelope.json> --output <provider-adapter-plan.json> [--output-format text|json]
+  deonctl worker codex provider-response-fixture generate --request-envelope <provider-request-envelope.json> --adapter-plan <provider-adapter-plan.json> --output <provider-response-fixture.json> [--output-format text|json]
+  deonctl worker codex provider-response-fixture inspect --fixture <provider-response-fixture.json> [--request-envelope <provider-request-envelope.json>] [--adapter-plan <provider-adapter-plan.json>] [--output-format text|json]
+  deonctl worker codex provider-execution-simulation-bundle --request-envelope <provider-request-envelope.json> --adapter-plan <provider-adapter-plan.json> --response-fixture <provider-response-fixture.json> --release-gate <provider-executor-release-gate.json> --executor-config <provider-call-executor.yaml> --output <provider-execution-simulation-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-execution-simulation-report --simulation-bundle <provider-execution-simulation-bundle.json> --request-envelope <provider-request-envelope.json> --adapter-plan <provider-adapter-plan.json> --response-fixture <provider-response-fixture.json> --release-gate <provider-executor-release-gate.json> --executor-config <provider-call-executor.yaml> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1182,6 +1190,100 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexProviderExecutorReleaseGate(opts, stdout, stderr)
+			case "provider-request-envelope":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "dry-run":
+					subOpts, err := parseCodexProviderRequestEnvelopeDryRunOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRequestEnvelopeDryRun(subOpts, stdout, stderr)
+				case "report":
+					subOpts, err := parseCodexProviderRequestEnvelopeReportOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRequestEnvelopeReport(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-adapter-registry":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "validate":
+					subOpts, err := parseCodexProviderAdapterRegistryValidateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderAdapterRegistryValidate(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-adapter-plan":
+				opts, err := parseCodexProviderAdapterPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderAdapterPlan(opts, stdout, stderr)
+			case "provider-response-fixture":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "generate":
+					subOpts, err := parseCodexProviderResponseFixtureGenerateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderResponseFixtureGenerate(subOpts, stdout, stderr)
+				case "inspect":
+					subOpts, err := parseCodexProviderResponseFixtureInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderResponseFixtureInspect(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-execution-simulation-bundle":
+				opts, err := parseCodexProviderExecutionSimulationBundleOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderExecutionSimulationBundle(opts, stdout, stderr)
+			case "provider-execution-simulation-report":
+				opts, err := parseCodexProviderExecutionSimulationReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderExecutionSimulationReport(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {

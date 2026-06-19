@@ -72,6 +72,10 @@ retrieval-context (runner metadata attachment)
 | 22.42 | `worker codex provider-call-executor-dispatch-approval new/approve/inspect` (dispatch approval, no provider call) |
 | 22.43 | `worker codex provider-transport-plan` (blocked transport plan, no provider call) |
 | 22.44 | `worker codex provider-executor-release-bundle` / `release-gate` (release activation gate, no provider call) |
+| 22.45 | `worker codex provider-request-envelope dry-run` / `report` (request envelope, no provider call) |
+| 22.46 | `worker codex provider-adapter-registry validate` / `provider-adapter-plan` (blocked adapter plan, no provider call) |
+| 22.47 | `worker codex provider-response-fixture generate` / `inspect` (fake response fixture, no provider call) |
+| 22.48 | `worker codex provider-execution-simulation-bundle` / `report` (execution simulation, no provider call) |
 
 ### What already exists
 
@@ -205,6 +209,14 @@ Future injection design and implementation must **not** include:
 **Task 22.43 (implemented):** *Blocked transport plan* — metadata-only plan with `BlockedProviderTransport`; no SDK, no network, no `Deliver`.
 
 **Task 22.44 (implemented):** *Release bundle / activation gate* — consolidates 22.38–22.43; `activation_allowed_now: false`, `execution_supported_now: false`. **Still no provider call**, no transport activation.
+
+**Task 22.45 (implemented):** *Request envelope* — metadata-only future request shape with hash references only. **Still no provider call**, no payload text.
+
+**Task 22.46 (implemented):** *Adapter registry / plan* — schema-only `provider-adapters.yaml`; codex adapter blocked. **Still no SDK**, no network.
+
+**Task 22.47 (implemented):** *Response fixture* — deterministic fake response; `response_source: fixture`, `received_from_provider: false`.
+
+**Task 22.48 (implemented):** *Execution simulation bundle/report* — metadata-only outcome simulation; `execution_result_available: false`. **Still no provider call**, no workspace changes.
 
 **Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
 

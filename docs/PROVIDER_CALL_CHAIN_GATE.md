@@ -1,6 +1,6 @@
-# Provider call chain gate (Tasks 22.37–22.44)
+# Provider call chain gate (Tasks 22.37–22.48)
 
-This document defines the **governance gates before any real provider executor dispatch** (Task 22.44+).
+This document defines the **governance gates before any real provider executor dispatch** (Task 22.48+).
 
 ## Purpose
 
@@ -21,6 +21,14 @@ Task 22.42 adds **dispatch approval** — separate from payload approval; author
 Task 22.43 adds **blocked transport plan** — metadata-only plan using `BlockedProviderTransport`; no SDK, no network, no `Deliver`.
 
 Task 22.44 adds **release bundle / activation gate** — consolidates artifacts 22.38–22.43; `activation_allowed_now: false`.
+
+Task 22.45 adds **request envelope dry-run/report** — metadata-only future request shape; hash references only, no payload text.
+
+Task 22.46 adds **adapter registry / capability plan** — schema-only `provider-adapters.yaml`; codex adapter blocked for future use.
+
+Task 22.47 adds **response fixture generate/inspect** — deterministic fake response schema; `response_source: fixture`, no provider receive.
+
+Task 22.48 adds **execution simulation bundle/report** — consolidates envelope + adapter plan + fixture response; `execution_result_available: false`.
 
 ## Chain boundary (must stay false)
 
@@ -54,8 +62,12 @@ Before any future real provider dispatch:
 14. **`provider-call-executor-dispatch-approval`** — future dispatch authorization (separate from payload approval)
 15. **`provider-transport-plan`** — blocked transport metadata plan (`transport_enabled: false`)
 16. **`provider-executor-release-bundle`** + **`release-gate`** — final activation gate (`activation_allowed_now: false`)
+17. **`provider-request-envelope`** — future request metadata envelope (`provider_request_ready: true`)
+18. **`provider-adapter-registry`** + **`provider-adapter-plan`** — blocked adapter capability plan
+19. **`provider-response-fixture`** — deterministic fake response schema
+20. **`provider-execution-simulation-bundle`** + **`report`** — metadata-only outcome simulation (`execution_result_available: false`)
 
-The **execution bundle**, **chain audit**, **executor policy**, **executor validate/plan**, **executor dry-run**, **preflight**, **dispatch approval**, **transport plan**, and **release gate** are the last gates. A future real dispatch must still require `--confirm-provider-executor-dispatch`.
+The full chain through **execution simulation report** is the last gate before any real provider dispatch.
 
 ## Final audit expectations
 
@@ -114,7 +126,53 @@ The **execution bundle**, **chain audit**, **executor policy**, **executor valid
 }
 ```
 
-Audit, executor, dry-run, preflight, dispatch approval, transport plan, and release JSON/stdout must not contain `text_excerpt` or payload content.
+## Simulation layer expectations (Tasks 22.45–22.48)
+
+`deonctl worker codex provider-request-envelope dry-run` must return:
+
+```json
+{
+  "status": "ok",
+  "provider_request_ready": true,
+  "request_contains_text": false,
+  "sent_to_provider": false,
+  "provider_call": false,
+  "network_call": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-adapter-plan` must return:
+
+```json
+{
+  "adapter_registry_validated": true,
+  "provider": "codex",
+  "adapter_available_for_future": true,
+  "adapter_enabled_now": false,
+  "transport_enabled": false,
+  "network_call": false,
+  "provider_call": false
+}
+```
+
+`deonctl worker codex provider-execution-simulation-report` must return:
+
+```json
+{
+  "simulation_bundle_ready": true,
+  "simulated_response_ready": true,
+  "execution_result_available": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "sent_to_provider": false,
+  "received_from_provider": false,
+  "worker_execution": false
+}
+```
+
+Audit, executor, simulation, and fixture JSON/stdout must not contain `text_excerpt` or payload content.
 
 ## Executor preflight expectations (Task 22.41)
 
@@ -200,16 +258,16 @@ make provider-call-chain-smoke
 
 This runs:
 
-- `TestProviderCallChainFixtureSmokeE2E` — library chain 29–49 equivalent with hash coherence and anti-leak assertions
-- `TestProviderCallChainFixtureCLISmokeE2E` — same chain via `deonctl` CLI (steps 31–49 + audit + executor sprint)
+- `TestProviderCallChainFixtureSmokeE2E` — library chain 29–58 equivalent with hash coherence and anti-leak assertions
+- `TestProviderCallChainFixtureCLISmokeE2E` — same chain via `deonctl` CLI (steps 31–58 + audit + executor + simulation)
 
 GitHub Actions also runs `make provider-call-chain-smoke` explicitly before `go test ./...`.
 
 ## Manual fixture
 
-See [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md) steps 29–50.
+See [configs/examples/retrieval-context-fixture/README.md](../configs/examples/retrieval-context-fixture/README.md) steps 29–58.
 
-## What 22.45+ may do (proposal)
+## What 22.49+ may do (proposal)
 
 - Enable executor policy with explicit operator approval and confirm flag
 - Invoke transport behind policy gates

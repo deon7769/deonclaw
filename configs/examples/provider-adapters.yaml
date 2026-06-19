@@ -1,0 +1,13 @@
+provider_adapters:
+  enabled: false
+  blocked_reason: implementation_not_enabled
+  adapters:
+    codex:
+      enabled: false
+      provider: codex
+      adapter_available_for_future: true
+      adapter_enabled_now: false
+      transport_enabled: false
+      allow_provider_call: false
+      allow_network: false
+      blocked_reason: implementation_not_enabled

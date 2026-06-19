@@ -59,6 +59,10 @@ Implemented now:
 - `deonctl worker codex provider-call-executor-dispatch-approval new/approve/inspect` (Task 22.42, dispatch approval only)
 - `deonctl worker codex provider-transport-plan` (Task 22.43, blocked transport plan only)
 - `deonctl worker codex provider-executor-release-bundle` / `release-gate` (Task 22.44, release activation gate only)
+- `deonctl worker codex provider-request-envelope dry-run` / `report` (Task 22.45, request envelope only)
+- `deonctl worker codex provider-adapter-registry validate` / `provider-adapter-plan` (Task 22.46, blocked adapter plan only)
+- `deonctl worker codex provider-response-fixture generate` / `inspect` (Task 22.47, fake response fixture only)
+- `deonctl worker codex provider-execution-simulation-bundle` / `report` (Task 22.48, execution simulation only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -1239,6 +1243,101 @@ Rules:
 - no provider call, no network, no worker execution, no transport
 
 Optional fixture steps 43–50 exercise preflight through release gate and final smoke.
+
+### Request envelope (Task 22.45)
+
+~~~bash
+deonctl worker codex provider-request-envelope dry-run \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --executor-preflight artifacts/<run-id>/provider-call-executor-preflight.json \
+  --dispatch-approval artifacts/<run-id>/provider-call-executor-dispatch-approval.json \
+  --transport-plan artifacts/<run-id>/provider-transport-plan.json \
+  --release-bundle artifacts/<run-id>/provider-executor-release-bundle.json \
+  --release-gate artifacts/<run-id>/provider-executor-release-gate.json \
+  --output artifacts/<run-id>/provider-request-envelope.json \
+  --output-format json
+
+deonctl worker codex provider-request-envelope report \
+  --request-envelope artifacts/<run-id>/provider-request-envelope.json \
+  ...same chain paths... \
+  --output-format json
+~~~
+
+Rules:
+
+- metadata-only future request envelope; hash references only
+- does not read payload markdown or include request text
+- sets `provider_request_ready: true`, `request_contains_text: false`, `sent_to_provider: false`
+
+### Adapter registry / plan (Task 22.46)
+
+~~~bash
+deonctl worker codex provider-adapter-registry validate \
+  --config configs/examples/provider-adapters.yaml \
+  --output-format json
+
+deonctl worker codex provider-adapter-plan \
+  --config configs/examples/provider-adapters.yaml \
+  --request-envelope artifacts/<run-id>/provider-request-envelope.json \
+  --output artifacts/<run-id>/provider-adapter-plan.json \
+  --output-format json
+~~~
+
+Rules:
+
+- schema-only adapter registry; codex adapter blocked for future use
+- no SDK, no network, no secrets required
+- sets `adapter_available_for_future: true`, `adapter_enabled_now: false`, `transport_enabled: false`
+
+### Response fixture (Task 22.47)
+
+~~~bash
+deonctl worker codex provider-response-fixture generate \
+  --request-envelope artifacts/<run-id>/provider-request-envelope.json \
+  --adapter-plan artifacts/<run-id>/provider-adapter-plan.json \
+  --output artifacts/<run-id>/provider-response-fixture.json \
+  --output-format json
+
+deonctl worker codex provider-response-fixture inspect \
+  --fixture artifacts/<run-id>/provider-response-fixture.json \
+  --request-envelope artifacts/<run-id>/provider-request-envelope.json \
+  --adapter-plan artifacts/<run-id>/provider-adapter-plan.json \
+  --output-format json
+~~~
+
+Rules:
+
+- deterministic fake response from envelope + adapter plan hashes
+- `response_source: fixture`, `received_from_provider: false`
+- no diff application, no worker execution
+
+### Execution simulation (Task 22.48)
+
+~~~bash
+deonctl worker codex provider-execution-simulation-bundle \
+  --request-envelope artifacts/<run-id>/provider-request-envelope.json \
+  --adapter-plan artifacts/<run-id>/provider-adapter-plan.json \
+  --response-fixture artifacts/<run-id>/provider-response-fixture.json \
+  --release-gate artifacts/<run-id>/provider-executor-release-gate.json \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --output artifacts/<run-id>/provider-execution-simulation-bundle.json \
+  --output-format json
+
+deonctl worker codex provider-execution-simulation-report \
+  --simulation-bundle artifacts/<run-id>/provider-execution-simulation-bundle.json \
+  ...same simulation inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- consolidates envelope + adapter plan + fixture response
+- validates hashes and blocked transport flags
+- sets `simulation_bundle_ready: true`, `execution_result_available: false`
+- no workspace changes, no PR creation
+
+Optional fixture steps 51–58 exercise request envelope through execution simulation report.
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 

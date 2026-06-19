@@ -170,7 +170,7 @@ Tasks 22.22–22.36 add the runner materialized injection execution gate through
 - provider call approval keeps `provider_call_allowed_now: false` and `sent_to_provider: false` even after approve; approve requires explicit `--confirm-provider-payload-sha256`
 - provider call execution bundle keeps `provider_call: false`, `network_call: false`, `worker_execution: false`, `provider_call_allowed_now: false`, and `sent_to_provider: false`
 - provider call chain audit confirms producer commands (22.29–22.33) and loaders are reconciled without provider call
-- `make provider-call-chain-smoke` runs library + CLI fixture e2e guards (Tasks 22.37–22.44) with hash coherence and anti-leak assertions
+- `make provider-call-chain-smoke` runs library + CLI fixture e2e guards (Tasks 22.37–22.48) with hash coherence and anti-leak assertions
 - provider call executor policy config (`provider-call-executor.yaml`) keeps `enabled: false` and all `allow_*: false`
 - provider call executor validate/plan re-validates bundle + audit + approval and keeps `execution_supported_now: false`
 - provider call executor dry-run produces metadata-only artifacts without reading payload markdown or calling transport
@@ -178,6 +178,10 @@ Tasks 22.22–22.36 add the runner materialized injection execution gate through
 - provider executor dispatch approval keeps `dispatch_allowed_now: false` even after approve
 - provider transport plan keeps `transport_enabled: false` and uses `BlockedProviderTransport` only
 - provider executor release gate keeps `activation_allowed_now: false` and `execution_supported_now: false`
+- provider request envelope keeps `request_contains_text: false` and `sent_to_provider: false`
+- provider adapter plan keeps `adapter_enabled_now: false` and `transport_enabled: false`
+- provider response fixture keeps `received_from_provider: false` and `response_source: fixture`
+- provider execution simulation keeps `execution_result_available: false` and all execution flags false
 - approval, bundle, and chain audit must not read or print payload-output content
 - all metadata-only artifacts must block `text_excerpt`, alpha text, prompt-output content, assembled-output content, and payload-output content
 

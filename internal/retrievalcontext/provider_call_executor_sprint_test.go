@@ -19,6 +19,7 @@ type providerExecutorSprintArtifacts struct {
 	dispatchApprovalPath string
 	transportPlanPath    string
 	releaseBundlePath    string
+	releaseGatePath      string
 }
 
 func runProviderExecutorSprintChain(t *testing.T, chain providerCallChainFixture) providerExecutorSprintArtifacts {

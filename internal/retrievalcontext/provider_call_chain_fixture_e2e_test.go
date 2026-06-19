@@ -266,7 +266,7 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
 	}
 
-	runProviderExecutorSprintChain(t, chain)
+	runProviderExecutionSimulationChain(t, chain)
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -587,6 +587,99 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		t.Fatalf("Unmarshal(release gate) error = %v", err)
 	}
 	assertProviderExecutorReleaseGateBlocked(t, releaseGate)
+	if err := os.WriteFile("provider-executor-release-gate.json", releaseGateStdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(release gate) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-request-envelope", "dry-run",
+		"--executor-config", "provider-call-executor.yaml",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--executor-preflight", "provider-call-executor-preflight.json",
+		"--dispatch-approval", "provider-call-executor-dispatch-approval.json",
+		"--transport-plan", "provider-transport-plan.json",
+		"--release-bundle", "provider-executor-release-bundle.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--output", "provider-request-envelope.json",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-request-envelope", "report",
+		"--request-envelope", "provider-request-envelope.json",
+		"--executor-config", "provider-call-executor.yaml",
+		"--execution-bundle", "provider-call-execution-bundle.json",
+		"--executor-preflight", "provider-call-executor-preflight.json",
+		"--dispatch-approval", "provider-call-executor-dispatch-approval.json",
+		"--transport-plan", "provider-transport-plan.json",
+		"--release-bundle", "provider-executor-release-bundle.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--output-format", "json",
+	})
+
+	if err := os.WriteFile("provider-adapters.yaml", []byte(validProviderAdaptersConfigYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile(provider adapters) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-adapter-registry", "validate",
+		"--config", "provider-adapters.yaml",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-adapter-plan",
+		"--config", "provider-adapters.yaml",
+		"--request-envelope", "provider-request-envelope.json",
+		"--output", "provider-adapter-plan.json",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-response-fixture", "generate",
+		"--request-envelope", "provider-request-envelope.json",
+		"--adapter-plan", "provider-adapter-plan.json",
+		"--output", "provider-response-fixture.json",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-response-fixture", "inspect",
+		"--fixture", "provider-response-fixture.json",
+		"--request-envelope", "provider-request-envelope.json",
+		"--adapter-plan", "provider-adapter-plan.json",
+		"--output-format", "json",
+	})
+
+	var simulationBundleStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-execution-simulation-bundle",
+		"--request-envelope", "provider-request-envelope.json",
+		"--adapter-plan", "provider-adapter-plan.json",
+		"--response-fixture", "provider-response-fixture.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--executor-config", "provider-call-executor.yaml",
+		"--output", "provider-execution-simulation-bundle.json",
+		"--output-format", "json",
+	}, &simulationBundleStdout)
+
+	var simulationReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-execution-simulation-report",
+		"--simulation-bundle", "provider-execution-simulation-bundle.json",
+		"--request-envelope", "provider-request-envelope.json",
+		"--adapter-plan", "provider-adapter-plan.json",
+		"--response-fixture", "provider-response-fixture.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--executor-config", "provider-call-executor.yaml",
+		"--output-format", "json",
+	}, &simulationReportStdout)
+
+	var simulationReport retrievalcontext.ProviderExecutionSimulationBundleResult
+	if err := json.Unmarshal(simulationReportStdout.Bytes(), &simulationReport); err != nil {
+		t.Fatalf("Unmarshal(simulation report) error = %v", err)
+	}
+	assertProviderExecutionSimulationBundleBlocked(t, simulationReport)
 
 	sprintPaths := []string{
 		"provider-call-executor-dry-run-report.json",
@@ -595,12 +688,20 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		"provider-call-executor-dispatch-approval.json",
 		"provider-transport-plan.json",
 		"provider-executor-release-bundle.json",
+		"provider-executor-release-gate.json",
+		"provider-request-envelope.json",
+		"provider-adapter-plan.json",
+		"provider-response-fixture.json",
+		"provider-execution-simulation-bundle.json",
 	}
 	for _, path := range sprintPaths {
 		assertNoTextExcerpt(t, path)
 	}
 	if strings.Contains(releaseGateStdout.String(), "text_excerpt") || strings.Contains(releaseBundleStdout.String(), "alpha text") {
 		t.Fatal("release gate/bundle stdout must not contain materialized preview text")
+	}
+	if strings.Contains(simulationBundleStdout.String(), "text_excerpt") || strings.Contains(simulationReportStdout.String(), "alpha text") {
+		t.Fatal("simulation stdout must not contain materialized preview text")
 	}
 }
 

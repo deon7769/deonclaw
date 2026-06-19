@@ -637,9 +637,105 @@ deonctl worker codex provider-executor-release-gate \
 make provider-call-chain-smoke
 ~~~
 
-Re-runs library + CLI fixture e2e (steps 29–49 equivalent) and asserts release gate `activation_allowed_now: false` with all execution flags blocked.
+Re-runs library + CLI fixture e2e (steps 29–58 equivalent) and asserts simulation `execution_result_available: false` with all execution flags blocked.
 
-## CI smoke (Tasks 22.37–22.44)
+### 51. Provider request envelope dry-run
+
+~~~bash
+deonctl worker codex provider-request-envelope dry-run \
+  --executor-config ../provider-call-executor.yaml \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --executor-preflight retrieval-context-provider-call-executor-preflight.json \
+  --dispatch-approval retrieval-context-provider-call-executor-dispatch-approval.json \
+  --transport-plan retrieval-context-provider-transport-plan.json \
+  --release-bundle retrieval-context-provider-executor-release-bundle.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --output retrieval-context-provider-request-envelope.json \
+  --output-format json
+~~~
+
+Save release gate stdout from step 49 as `retrieval-context-provider-executor-release-gate.json`.
+
+### 52. Provider request envelope report
+
+~~~bash
+deonctl worker codex provider-request-envelope report \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --executor-config ../provider-call-executor.yaml \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --executor-preflight retrieval-context-provider-call-executor-preflight.json \
+  --dispatch-approval retrieval-context-provider-call-executor-dispatch-approval.json \
+  --transport-plan retrieval-context-provider-transport-plan.json \
+  --release-bundle retrieval-context-provider-executor-release-bundle.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --output-format json
+~~~
+
+### 53. Provider adapter registry validate
+
+~~~bash
+deonctl worker codex provider-adapter-registry validate \
+  --config ../provider-adapters.yaml \
+  --output-format json
+~~~
+
+### 54. Provider adapter plan
+
+~~~bash
+deonctl worker codex provider-adapter-plan \
+  --config ../provider-adapters.yaml \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --output retrieval-context-provider-adapter-plan.json \
+  --output-format json
+~~~
+
+### 55. Provider response fixture generate
+
+~~~bash
+deonctl worker codex provider-response-fixture generate \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --adapter-plan retrieval-context-provider-adapter-plan.json \
+  --output retrieval-context-provider-response-fixture.json \
+  --output-format json
+~~~
+
+### 56. Provider response fixture inspect
+
+~~~bash
+deonctl worker codex provider-response-fixture inspect \
+  --fixture retrieval-context-provider-response-fixture.json \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --adapter-plan retrieval-context-provider-adapter-plan.json \
+  --output-format json
+~~~
+
+### 57. Provider execution simulation bundle
+
+~~~bash
+deonctl worker codex provider-execution-simulation-bundle \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --adapter-plan retrieval-context-provider-adapter-plan.json \
+  --response-fixture retrieval-context-provider-response-fixture.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --executor-config ../provider-call-executor.yaml \
+  --output retrieval-context-provider-execution-simulation-bundle.json \
+  --output-format json
+~~~
+
+### 58. Provider execution simulation report
+
+~~~bash
+deonctl worker codex provider-execution-simulation-report \
+  --simulation-bundle retrieval-context-provider-execution-simulation-bundle.json \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --adapter-plan retrieval-context-provider-adapter-plan.json \
+  --response-fixture retrieval-context-provider-response-fixture.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --executor-config ../provider-call-executor.yaml \
+  --output-format json
+~~~
+
+## CI smoke (Tasks 22.37–22.48)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -649,7 +745,7 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false. It also exercises executor policy validate, executor validate/plan, executor dry-run, preflight, dispatch approval, blocked transport plan, release bundle, and release gate with `activation_allowed_now: false`.
+This executes the chain in isolated temp dirs and asserts final simulation report keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, and `received_from_provider` false. It exercises executor sprint (22.41–22.44) and execution simulation layer (22.45–22.48).
 
 See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
@@ -691,7 +787,11 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-call-executor-dispatch-approval returns `dispatch_authorized_for_future: true`, `dispatch_allowed_now: false`, all execution flags false
 - optional provider-transport-plan returns `transport_plan_ready: true`, `transport_enabled: false`, `transport_mode: BlockedProviderTransport`, all execution flags false
 - optional provider-executor-release-bundle/gate returns `release_bundle_ready: true`, `activation_gate_ready: true`, `activation_allowed_now: false`, `execution_supported_now: false`, all execution flags false
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.44)
+- optional provider-request-envelope dry-run/report returns `provider_request_ready: true`, `request_contains_text: false`, `sent_to_provider: false`, all execution flags false
+- optional provider-adapter-registry validate/plan returns `adapter_registry_validated: true`, `adapter_available_for_future: true`, `adapter_enabled_now: false`, `transport_enabled: false`, all execution flags false
+- optional provider-response-fixture generate/inspect returns `response_fixture_ready: true`, `response_source: fixture`, `received_from_provider: false`, all execution flags false
+- optional provider-execution-simulation-bundle/report returns `simulation_bundle_ready: true`, `simulated_response_ready: true`, `execution_result_available: false`, all execution flags false
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.48)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`
