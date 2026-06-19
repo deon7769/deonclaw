@@ -24,5 +24,8 @@ jobs:
       - name: Check whitespace
         run: git diff --check
 
+      - name: Provider call chain fixture smoke
+        run: make provider-call-chain-smoke
+
       - name: Test
         run: go test ./...

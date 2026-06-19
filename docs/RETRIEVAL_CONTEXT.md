@@ -52,6 +52,8 @@ Implemented now:
 - `deonctl worker codex provider-call-execution-bundle` (Task 22.35, provider call execution bundle only)
 - `deonctl worker codex provider-call-chain-audit` (Task 22.36, provider call chain continuity audit only)
 - `make provider-call-chain-smoke` / `scripts/provider-call-chain-fixture-smoke.sh` (Task 22.37, fixture smoke / CI guard only)
+- `deonctl worker codex provider-call-executor config validate` (Task 22.39, executor policy schema only)
+- `deonctl worker codex provider-call-executor validate/plan` (Tasks 22.38–22.39, executor skeleton only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -1045,6 +1047,57 @@ Rules:
 - no provider call, no network, no worker execution
 
 Optional fixture step 38 exercises this path after provider call execution bundle.
+
+## Provider call executor skeleton (Tasks 22.38–22.39)
+
+Re-validates execution bundle, chain audit, approval, and executor policy config. Does not call providers, open network connections, or dispatch workers.
+
+### Executor policy config validate (Task 22.39)
+
+~~~bash
+deonctl worker codex provider-call-executor config validate \
+  --config configs/examples/provider-call-executor.yaml \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on config path
+- validates `enabled: false`, all `allow_*: false`, required artifact flags true, `blocked_reason: implementation_not_enabled`
+- config must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+
+### Executor validate / plan (Tasks 22.38–22.39)
+
+~~~bash
+deonctl worker codex provider-call-executor validate \
+  --executor-config configs/examples/provider-call-executor.yaml \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
+  --provider-run-plan artifacts/<run-id>/materialized-injection-provider-run-plan.json \
+  --payload-dry-run artifacts/<run-id>/materialized-provider-payload-dry-run.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --payload-report artifacts/<run-id>/materialized-provider-payload-report.json \
+  --provider-call-gate artifacts/<run-id>/materialized-provider-call-gate.json \
+  --readiness-report artifacts/<run-id>/materialized-provider-call-readiness-report.json \
+  --approval-request artifacts/<run-id>/provider-call-approval-request.json \
+  --approval artifacts/<run-id>/provider-call-approval.json \
+  --execution-bundle artifacts/<run-id>/provider-call-execution-bundle.json \
+  --output-format json
+
+deonctl worker codex provider-call-executor plan \
+  ...same flags... \
+  --output artifacts/<run-id>/provider-call-executor-plan.json
+~~~
+
+Rules:
+
+- requires validated executor policy config plus full chain artifact paths
+- re-loads execution bundle, runs chain audit, inspects approval, reconciles hashes
+- on success sets `executor_policy_validated: true`, `executor_config_validated: true`, `provider_call_authorized_for_future: true`, `chain_continuity_ready: true`
+- keeps `execution_supported_now: false`, `provider_call_allowed_now: false`, `sent_to_provider: false`, all execution flags false, `blocked_reason: implementation_not_enabled`
+- plan writes metadata-only JSON artifact; stdout/json must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+- no provider call, no network, no worker execution
+
+Optional fixture steps 39–40 exercise config validate and executor validate/plan after chain audit.
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 

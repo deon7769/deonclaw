@@ -11,6 +11,7 @@ This fixture does **not** run LanceDB search, call embedding providers, or injec
 - `retrieval-injection-policy.yaml` — plan-only injection policy over generated artifacts (Task 22.15.1)
 - `materialized-injection-task.yaml` — schema-only materialized injection task declaration (Task 22.19)
 - `base-worker-prompt-fixture.md` — dry-run base worker prompt fixture for materialized prompt assembly (Task 22.23)
+- `../provider-call-executor.yaml` — executor policy config for provider-call-executor validate/plan (Task 22.39)
 
 Generated artifacts (created by the steps below) stay in this directory when commands use `--output` paths here.
 
@@ -471,7 +472,48 @@ deonctl worker codex provider-call-chain-audit \
   --output-format json
 ~~~
 
-## CI smoke (Task 22.37)
+### 39. Provider call executor policy config validate
+
+~~~bash
+deonctl worker codex provider-call-executor config validate \
+  --config ../provider-call-executor.yaml \
+  --output-format json
+~~~
+
+### 40. Provider call executor validate / plan (no provider call)
+
+~~~bash
+deonctl worker codex provider-call-executor validate \
+  --executor-config ../provider-call-executor.yaml \
+  --dispatch-config ../materialized-provider-dispatch.yaml \
+  --provider-run-plan retrieval-context-materialized-injection-provider-run-plan.json \
+  --payload-dry-run retrieval-context-materialized-provider-payload-dry-run.json \
+  --payload-output retrieval-context-materialized-provider-payload.md \
+  --payload-report retrieval-context-materialized-provider-payload-report.json \
+  --provider-call-gate retrieval-context-materialized-provider-call-gate.json \
+  --readiness-report retrieval-context-materialized-provider-call-readiness-report.json \
+  --approval-request retrieval-context-provider-call-approval-request.json \
+  --approval retrieval-context-provider-call-approval.json \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --output-format json
+
+deonctl worker codex provider-call-executor plan \
+  --executor-config ../provider-call-executor.yaml \
+  --dispatch-config ../materialized-provider-dispatch.yaml \
+  --provider-run-plan retrieval-context-materialized-injection-provider-run-plan.json \
+  --payload-dry-run retrieval-context-materialized-provider-payload-dry-run.json \
+  --payload-output retrieval-context-materialized-provider-payload.md \
+  --payload-report retrieval-context-materialized-provider-payload-report.json \
+  --provider-call-gate retrieval-context-materialized-provider-call-gate.json \
+  --readiness-report retrieval-context-materialized-provider-call-readiness-report.json \
+  --approval-request retrieval-context-provider-call-approval-request.json \
+  --approval retrieval-context-provider-call-approval.json \
+  --execution-bundle retrieval-context-provider-call-execution-bundle.json \
+  --output retrieval-context-provider-call-executor-plan.json \
+  --output-format json
+~~~
+
+## CI smoke (Tasks 22.37–22.39)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -481,9 +523,9 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false.
+This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false. It also exercises executor policy validate and executor validate/plan with `execution_supported_now: false`.
 
-See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before a future provider executor skeleton.
+See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
 ## Expected outcome
 
@@ -516,7 +558,9 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-call-approval inspect returns `provider_call_authorized_for_future: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, and does not print payload-output content
 - optional provider-call-execution-bundle returns `provider_call_authorized_for_future: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `provider_call: false`, `network_call: false`, `worker_execution: false`, `execution_supported_now: false`, and does not print payload-output content
 - optional provider-call-chain-audit returns `chain_continuity_ready: true`, `loaders_reconciled: true`, `producer_commands_active: true`, `provider_call: false`, `network_call: false`, `worker_execution: false`, `sent_to_provider: false`, and does not print payload-output content
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Task 22.37)
+- optional provider-call-executor config validate returns `status: ok`, `enabled: false`, `allow_provider_call: false`, `allow_network: false`, `blocked_reason: implementation_not_enabled`
+- optional provider-call-executor validate/plan returns `executor_policy_validated: true`, `executor_config_validated: true`, `execution_supported_now: false`, `provider_call_authorized_for_future: true`, `chain_continuity_ready: true`, all execution flags false, and does not print payload-output content
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.39)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

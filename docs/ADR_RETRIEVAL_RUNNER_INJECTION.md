@@ -65,6 +65,8 @@ retrieval-context (runner metadata attachment)
 | 22.35 | `worker codex provider-call-execution-bundle` (provider call execution bundle, no provider call) |
 | 22.36 | `worker codex provider-call-chain-audit` (provider call chain continuity audit, no provider call) |
 | 22.37 | `scripts/provider-call-chain-fixture-smoke.sh` / `make provider-call-chain-smoke` (fixture smoke / CI guard, no provider call) |
+| 22.38 | `worker codex provider-call-executor validate/plan` (executor skeleton, no provider call) |
+| 22.39 | `worker codex provider-call-executor config validate` + `configs/examples/provider-call-executor.yaml` (executor policy schema, no provider call) |
 
 ### What already exists
 
@@ -185,7 +187,11 @@ Future injection design and implementation must **not** include:
 
 **Task 22.37 (implemented):** *Provider call chain fixture smoke / CI guard* — `make provider-call-chain-smoke` runs library + CLI e2e over the documented fixture chain with hash coherence and anti-leak assertions. **Still no provider call**, no network, no worker execution.
 
-**Task 22.38+ (proposal):** provider executor skeleton behind explicit confirm flag at dispatch time.
+**Task 22.38 (implemented):** *Provider executor skeleton* — `deonctl worker codex provider-call-executor validate/plan` consumes execution bundle, chain audit, and approval; re-validates hashes and policy flags. **Still no provider call**, no network, no worker execution.
+
+**Task 22.39 (implemented):** *Provider executor policy config* — `configs/examples/provider-call-executor.yaml` plus `deonctl worker codex provider-call-executor config validate`; integrated into executor validate/plan via `--executor-config`. **Still no provider call**, no network, no worker execution.
+
+**Task 22.40+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

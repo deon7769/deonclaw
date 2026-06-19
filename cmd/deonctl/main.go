@@ -151,8 +151,9 @@ Usage:
   deonctl worker codex provider-call-approval inspect --approval <provider-call-approval.json> [--request <provider-call-approval-request.json>] [--output-format text|json]
   deonctl worker codex provider-call-execution-bundle --dispatch-config <materialized-provider-dispatch.yaml> --payload-report <payload-report.json> --provider-call-gate <provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval <provider-call-approval.json> --output <provider-call-execution-bundle.json> [--output-format text|json]
   deonctl worker codex provider-call-chain-audit --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> [--output-format text|json]
-  deonctl worker codex provider-call-executor validate --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> [--output-format text|json]
-  deonctl worker codex provider-call-executor plan --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> --output <provider-call-executor-plan.json> [--output-format text|json]
+  deonctl worker codex provider-call-executor config validate --config <provider-call-executor.yaml> [--output-format text|json]
+  deonctl worker codex provider-call-executor validate --executor-config <provider-call-executor.yaml> --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-call-executor plan --executor-config <provider-call-executor.yaml> --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --payload-report <materialized-provider-payload-report.json> --provider-call-gate <materialized-provider-call-gate.json> --readiness-report <provider-call-readiness-report.json> --approval-request <provider-call-approval-request.json> --approval <provider-call-approval.json> --execution-bundle <provider-call-execution-bundle.json> --output <provider-call-executor-plan.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1052,6 +1053,24 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				switch args[3] {
+				case "config":
+					if len(args) < 5 {
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					switch args[4] {
+					case "validate":
+						subOpts, err := parseCodexProviderCallExecutorConfigValidateOptions(args[5:])
+						if err != nil {
+							fmt.Fprintf(stderr, "error: %v\n", err)
+							fmt.Fprint(stderr, usage)
+							return 2
+						}
+						return runCodexProviderCallExecutorConfigValidate(subOpts, stdout, stderr)
+					default:
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
 				case "validate":
 					subOpts, err := parseCodexProviderCallExecutorOptions(args[4:])
 					if err != nil {

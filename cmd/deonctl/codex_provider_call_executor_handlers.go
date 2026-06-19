@@ -9,6 +9,7 @@ import (
 )
 
 type codexProviderCallExecutorOptions struct {
+	executorConfigPath   string
 	dispatchConfigPath   string
 	providerRunPlanPath  string
 	payloadDryRunPath    string
@@ -27,10 +28,77 @@ type codexProviderCallExecutorPlanOptions struct {
 	outputPath string
 }
 
+type codexProviderCallExecutorConfigValidateOptions struct {
+	configPath   string
+	outputFormat string
+}
+
+func parseCodexProviderCallExecutorConfigValidateOptions(args []string) (codexProviderCallExecutorConfigValidateOptions, error) {
+	opts := codexProviderCallExecutorConfigValidateOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--config":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorConfigValidateOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorConfigValidateOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexProviderCallExecutorConfigValidateOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.configPath == "" {
+		return codexProviderCallExecutorConfigValidateOptions{}, fmt.Errorf("missing --config")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexProviderCallExecutorConfigValidateOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexProviderCallExecutorConfigValidate(opts codexProviderCallExecutorConfigValidateOptions, stdout io.Writer, stderr io.Writer) int {
+	cfg, err := retrievalcontext.LoadProviderCallExecutorConfig(opts.configPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-executor config validate failed: %v\n", err)
+		return 1
+	}
+	result, err := retrievalcontext.ProviderCallExecutorConfigValidate(cfg)
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-executor config validate failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteProviderCallExecutorConfigValidateJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteProviderCallExecutorConfigValidateText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex provider-call-executor config validate failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
 func parseCodexProviderCallExecutorOptions(args []string) (codexProviderCallExecutorOptions, error) {
 	opts := codexProviderCallExecutorOptions{outputFormat: "text"}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--executor-config":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorOptions{}, fmt.Errorf("missing value for --executor-config")
+			}
+			opts.executorConfigPath = args[i+1]
+			i++
 		case "--dispatch-config":
 			if i+1 >= len(args) {
 				return codexProviderCallExecutorOptions{}, fmt.Errorf("missing value for --dispatch-config")
@@ -102,7 +170,7 @@ func parseCodexProviderCallExecutorOptions(args []string) (codexProviderCallExec
 		}
 	}
 	required := map[string]string{
-		"--dispatch-config": opts.dispatchConfigPath, "--provider-run-plan": opts.providerRunPlanPath,
+		"--executor-config": opts.executorConfigPath, "--dispatch-config": opts.dispatchConfigPath, "--provider-run-plan": opts.providerRunPlanPath,
 		"--payload-dry-run": opts.payloadDryRunPath, "--payload-output": opts.payloadOutputPath,
 		"--payload-report": opts.payloadReportPath, "--provider-call-gate": opts.providerCallGatePath,
 		"--readiness-report": opts.readinessReportPath, "--approval-request": opts.approvalRequestPath,
@@ -125,6 +193,12 @@ func parseCodexProviderCallExecutorPlanOptions(args []string) (codexProviderCall
 	}
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
+		case "--executor-config":
+			if i+1 >= len(args) {
+				return codexProviderCallExecutorPlanOptions{}, fmt.Errorf("missing value for --executor-config")
+			}
+			opts.executorConfigPath = args[i+1]
+			i++
 		case "--dispatch-config":
 			if i+1 >= len(args) {
 				return codexProviderCallExecutorPlanOptions{}, fmt.Errorf("missing value for --dispatch-config")
@@ -202,7 +276,7 @@ func parseCodexProviderCallExecutorPlanOptions(args []string) (codexProviderCall
 		}
 	}
 	required := map[string]string{
-		"--dispatch-config": opts.dispatchConfigPath, "--provider-run-plan": opts.providerRunPlanPath,
+		"--executor-config": opts.executorConfigPath, "--dispatch-config": opts.dispatchConfigPath, "--provider-run-plan": opts.providerRunPlanPath,
 		"--payload-dry-run": opts.payloadDryRunPath, "--payload-output": opts.payloadOutputPath,
 		"--payload-report": opts.payloadReportPath, "--provider-call-gate": opts.providerCallGatePath,
 		"--readiness-report": opts.readinessReportPath, "--approval-request": opts.approvalRequestPath,
@@ -222,6 +296,7 @@ func parseCodexProviderCallExecutorPlanOptions(args []string) (codexProviderCall
 
 func toProviderCallExecutorOptions(opts codexProviderCallExecutorOptions) retrievalcontext.ProviderCallExecutorOptions {
 	return retrievalcontext.ProviderCallExecutorOptions{
+		ExecutorConfigPath:   opts.executorConfigPath,
 		DispatchConfigPath:   opts.dispatchConfigPath,
 		ProviderRunPlanPath:  opts.providerRunPlanPath,
 		PayloadDryRunPath:    opts.payloadDryRunPath,

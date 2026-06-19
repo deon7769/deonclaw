@@ -1,0 +1,15 @@
+provider_call_executor:
+  enabled: false
+  provider: codex
+  require_confirm_flag: true
+  require_execution_bundle: true
+  require_chain_audit: true
+  require_approval: true
+  require_dispatch_config: true
+  allow_provider_call: false
+  allow_network: false
+  allow_worker_execution: false
+  allow_prompt_injection: false
+  blocked_reason: implementation_not_enabled
+  max_total_chars: 6000
+  max_payload_bytes: 120000

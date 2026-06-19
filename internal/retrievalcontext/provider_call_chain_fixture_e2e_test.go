@@ -18,6 +18,7 @@ import (
 type providerCallChainFixture struct {
 	fullProviderCallChain
 	executionBundlePath string
+	executorConfigPath  string
 }
 
 func setupProviderCallChainFixture(t *testing.T) providerCallChainFixture {
@@ -36,9 +37,15 @@ func setupProviderCallChainFixture(t *testing.T) providerCallChainFixture {
 		t.Fatalf("ProviderCallExecutionBundle() error = %v", err)
 	}
 
+	const executorConfigPath = "provider-call-executor.yaml"
+	if err := os.WriteFile(executorConfigPath, []byte(validProviderCallExecutorConfigYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile(executor config) error = %v", err)
+	}
+
 	return providerCallChainFixture{
 		fullProviderCallChain: chain,
 		executionBundlePath:   executionBundlePath,
+		executorConfigPath:    executorConfigPath,
 	}
 }
 
@@ -208,6 +215,18 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 	}
 	assertProviderCallChainMetadataNoTextLeak(t, chain, auditBuf.Bytes())
 
+	cfg, err := retrievalcontext.LoadProviderCallExecutorConfig(chain.executorConfigPath)
+	if err != nil {
+		t.Fatalf("LoadProviderCallExecutorConfig() error = %v", err)
+	}
+	configResult, err := retrievalcontext.ProviderCallExecutorConfigValidate(cfg)
+	if err != nil {
+		t.Fatalf("ProviderCallExecutorConfigValidate() error = %v", err)
+	}
+	if configResult.Status != lancedbpolicy.StatusOK {
+		t.Fatalf("executor config status = %q, want ok", configResult.Status)
+	}
+
 	validateResult, err := retrievalcontext.ProviderCallExecutorValidate(providerCallExecutorOpts(chain))
 	if err != nil {
 		t.Fatalf("ProviderCallExecutorValidate() error = %v", err)
@@ -363,8 +382,19 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 	assertProviderCallChainHashCoherence(t, chain)
 	assertProviderCallChainMetadataNoTextLeak(t, chain, auditStdout.Bytes())
 
+	if err := os.WriteFile("provider-call-executor.yaml", []byte(validProviderCallExecutorConfigYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile(executor config) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-call-executor", "config", "validate",
+		"--config", "provider-call-executor.yaml",
+		"--output-format", "json",
+	})
+
 	mustDeonctlOK(t, deonctl, []string{
 		"worker", "codex", "provider-call-executor", "validate",
+		"--executor-config", "provider-call-executor.yaml",
 		"--dispatch-config", dispatchPath,
 		"--provider-run-plan", runPlanPath,
 		"--payload-dry-run", "materialized-provider-payload-dry-run.json",
@@ -381,6 +411,7 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 	var executorStdout bytes.Buffer
 	mustDeonctlOK(t, deonctl, []string{
 		"worker", "codex", "provider-call-executor", "plan",
+		"--executor-config", "provider-call-executor.yaml",
 		"--dispatch-config", dispatchPath,
 		"--provider-run-plan", runPlanPath,
 		"--payload-dry-run", "materialized-provider-payload-dry-run.json",

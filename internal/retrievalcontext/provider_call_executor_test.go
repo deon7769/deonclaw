@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/deon7769/deonclaw/internal/lancedbpolicy"
@@ -12,6 +13,7 @@ import (
 
 func providerCallExecutorOpts(chain providerCallChainFixture) retrievalcontext.ProviderCallExecutorOptions {
 	return retrievalcontext.ProviderCallExecutorOptions{
+		ExecutorConfigPath:   chain.executorConfigPath,
 		DispatchConfigPath:   chain.dispatchPath,
 		ProviderRunPlanPath:  chain.runPlanPath,
 		PayloadDryRunPath:    chain.dryRunPath,
@@ -27,6 +29,9 @@ func providerCallExecutorOpts(chain providerCallChainFixture) retrievalcontext.P
 
 func assertProviderCallExecutorBlocked(t *testing.T, result retrievalcontext.ProviderCallExecutorResult) {
 	t.Helper()
+	if !result.ExecutorPolicyValidated {
+		t.Fatal("executor_policy_validated = false, want true")
+	}
 	if !result.ExecutorConfigValidated {
 		t.Fatalf("executor_config_validated = false, want true; failures=%#v", result.Failures)
 	}
@@ -48,6 +53,9 @@ func assertProviderCallExecutorBlocked(t *testing.T, result retrievalcontext.Pro
 	}
 	if result.ExecutionBundleSHA256 == "" || result.ApprovalSHA256 == "" || result.ProviderPayloadSHA256 == "" {
 		t.Fatalf("executor hashes missing: bundle=%q approval=%q payload=%q", result.ExecutionBundleSHA256, result.ApprovalSHA256, result.ProviderPayloadSHA256)
+	}
+	if result.ExecutorConfigSHA256 == "" {
+		t.Fatal("executor_config_sha256 must be set")
 	}
 }
 
@@ -137,6 +145,28 @@ func TestLoadProviderCallExecutionBundle(t *testing.T) {
 	}
 	if len(data) == 0 {
 		t.Fatal("bundle raw bytes must be non-empty")
+	}
+}
+
+func TestProviderCallExecutorValidateFailsWhenPolicyDisabled(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	chain := setupProviderCallChainFixture(t)
+
+	content := strings.Replace(validProviderCallExecutorConfigYAML, "enabled: false", "enabled: true", 1)
+	if err := os.WriteFile(chain.executorConfigPath, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(executor config) error = %v", err)
+	}
+
+	result, err := retrievalcontext.ProviderCallExecutorValidate(providerCallExecutorOpts(chain))
+	if err != nil {
+		t.Fatalf("ProviderCallExecutorValidate() error = %v", err)
+	}
+	if result.Status != lancedbpolicy.StatusFailed {
+		t.Fatalf("status = %q, want failed", result.Status)
+	}
+	if result.ExecutorConfigValidated || result.ExecutorPolicyValidated {
+		t.Fatal("executor validation flags must be false when policy config is invalid")
 	}
 }
 

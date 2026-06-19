@@ -48,6 +48,7 @@ func (e *SkeletonProviderExecutor) Plan(ctx context.Context, opts ProviderCallEx
 }
 
 type ProviderCallExecutorOptions struct {
+	ExecutorConfigPath   string
 	DispatchConfigPath   string
 	ProviderRunPlanPath  string
 	PayloadDryRunPath    string
@@ -67,6 +68,7 @@ type ProviderCallExecutorPlanOptions struct {
 
 type ProviderCallExecutorResult struct {
 	Status                          string   `json:"status"`
+	ExecutorPolicyValidated         bool     `json:"executor_policy_validated"`
 	ExecutorConfigValidated         bool     `json:"executor_config_validated"`
 	ExecutionSupportedNow           bool     `json:"execution_supported_now"`
 	ProviderCallAuthorizedForFuture bool     `json:"provider_call_authorized_for_future"`
@@ -78,6 +80,7 @@ type ProviderCallExecutorResult struct {
 	SentToProvider                  bool     `json:"sent_to_provider"`
 	PromptInjectionRealRunner       bool     `json:"prompt_injection_real_runner"`
 	BlockedReason                   string   `json:"blocked_reason"`
+	ExecutorConfigSHA256            string   `json:"executor_config_sha256"`
 	ExecutionBundleSHA256           string   `json:"execution_bundle_sha256"`
 	ApprovalSHA256                  string   `json:"approval_sha256"`
 	ProviderPayloadSHA256           string   `json:"provider_payload_sha256"`
@@ -115,6 +118,7 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 		field string
 		path  string
 	}{
+		{"executor config path", opts.ExecutorConfigPath},
 		{"dispatch config path", opts.DispatchConfigPath},
 		{"provider run plan path", opts.ProviderRunPlanPath},
 		{"payload dry-run path", opts.PayloadDryRunPath},
@@ -133,6 +137,7 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 
 	result := ProviderCallExecutorResult{
 		Status:                    lancedbpolicy.StatusOK,
+		ExecutorPolicyValidated:   false,
 		ExecutorConfigValidated:   false,
 		ExecutionSupportedNow:     false,
 		ProviderCallAllowedNow:    false,
@@ -141,11 +146,33 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 		WorkerExecution:           false,
 		SentToProvider:            false,
 		PromptInjectionRealRunner: false,
-		BlockedReason:             MaterializedProviderDispatchBlockedReason,
+		BlockedReason:             ProviderCallExecutorBlockedReason,
 	}
 
 	var failures []string
 	var warnings []string
+
+	executorCfgData, err := readArtifactBytesNoTextExcerpt("executor config", opts.ExecutorConfigPath)
+	if err != nil {
+		failures = append(failures, err.Error())
+	} else {
+		result.ExecutorConfigSHA256 = sha256Hex(executorCfgData)
+		executorCfg, err := ParseProviderCallExecutorConfig(executorCfgData)
+		if err != nil {
+			failures = append(failures, err.Error())
+		} else {
+			validateResult, err := ProviderCallExecutorConfigValidate(executorCfg)
+			if err != nil {
+				failures = append(failures, err.Error())
+			} else if validateResult.Status == lancedbpolicy.StatusFailed {
+				failures = append(failures, "executor config validation failed")
+				failures = append(failures, validateResult.Failures...)
+			} else {
+				result.ExecutorPolicyValidated = true
+				warnings = mergeWarnings(warnings, validateResult.Warnings)
+			}
+		}
+	}
 
 	bundle, bundleData, err := LoadProviderCallExecutionBundle(opts.ExecutionBundlePath)
 	bundleLoaded := err == nil
@@ -173,8 +200,8 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 		if bundle.ProviderCall || bundle.NetworkCall || bundle.WorkerExecution {
 			failures = append(failures, "execution bundle must keep provider_call, network_call, and worker_execution false")
 		}
-		if bundle.BlockedReason != MaterializedProviderDispatchBlockedReason {
-			failures = append(failures, fmt.Sprintf("execution bundle blocked_reason %q must be %q", bundle.BlockedReason, MaterializedProviderDispatchBlockedReason))
+		if bundle.BlockedReason != MaterializedProviderDispatchBlockedReason && bundle.BlockedReason != ProviderCallExecutorBlockedReason {
+			failures = append(failures, fmt.Sprintf("execution bundle blocked_reason %q must be %q", bundle.BlockedReason, ProviderCallExecutorBlockedReason))
 		}
 	}
 
@@ -255,7 +282,7 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 
 	result.Warnings = warnings
 	result.Failures = failures
-	if len(failures) == 0 {
+	if len(failures) == 0 && result.ExecutorPolicyValidated {
 		result.ExecutorConfigValidated = true
 		result.ProviderCallAuthorizedForFuture = true
 		result.ChainContinuityReady = true
@@ -264,6 +291,7 @@ func providerCallExecutorCore(opts ProviderCallExecutorOptions, planMode bool, p
 		}
 		if planMode {
 			result.PlanSteps = []string{
+				"validate_executor_policy",
 				"load_execution_bundle",
 				"run_chain_continuity_audit",
 				"inspect_provider_call_approval",
@@ -307,6 +335,7 @@ func WriteProviderCallExecutorText(result ProviderCallExecutorResult, out io.Wri
 		value string
 	}{
 		{"status", result.Status},
+		{"executor_policy_validated", fmt.Sprintf("%t", result.ExecutorPolicyValidated)},
 		{"executor_config_validated", fmt.Sprintf("%t", result.ExecutorConfigValidated)},
 		{"execution_supported_now", fmt.Sprintf("%t", result.ExecutionSupportedNow)},
 		{"provider_call_authorized_for_future", fmt.Sprintf("%t", result.ProviderCallAuthorizedForFuture)},
@@ -318,6 +347,7 @@ func WriteProviderCallExecutorText(result ProviderCallExecutorResult, out io.Wri
 		{"sent_to_provider", fmt.Sprintf("%t", result.SentToProvider)},
 		{"prompt_injection_real_runner", fmt.Sprintf("%t", result.PromptInjectionRealRunner)},
 		{"blocked_reason", result.BlockedReason},
+		{"executor_config_sha256", result.ExecutorConfigSHA256},
 		{"execution_bundle_sha256", result.ExecutionBundleSHA256},
 		{"approval_sha256", result.ApprovalSHA256},
 		{"provider_payload_sha256", result.ProviderPayloadSHA256},
