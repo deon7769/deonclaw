@@ -266,7 +266,7 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
 	}
 
-	runProviderExecutionSimulationChain(t, chain)
+	runProviderActivationReadinessChain(t, chain)
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -681,6 +681,121 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 	}
 	assertProviderExecutionSimulationBundleBlocked(t, simulationReport)
 
+	if err := os.WriteFile("provider-execution-simulation-report.json", simulationReportStdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(simulation report) error = %v", err)
+	}
+
+	if err := os.WriteFile("provider-credential-policy.yaml", []byte(validProviderCredentialPolicyConfigYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile(credential policy) error = %v", err)
+	}
+
+	var credentialValidateStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-credential-policy", "validate",
+		"--config", "provider-credential-policy.yaml",
+		"--output-format", "json",
+	}, &credentialValidateStdout)
+
+	var credentialValidate retrievalcontext.ProviderCredentialPolicyValidateResult
+	if err := json.Unmarshal(credentialValidateStdout.Bytes(), &credentialValidate); err != nil {
+		t.Fatalf("Unmarshal(credential validate) error = %v", err)
+	}
+	assertProviderCredentialPolicyBlocked(t, credentialValidate)
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-credential-policy", "plan",
+		"--config", "provider-credential-policy.yaml",
+		"--output", "provider-credential-policy-plan.json",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-call-proposal", "new",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--request-envelope", "provider-request-envelope.json",
+		"--adapter-plan", "provider-adapter-plan.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--output", "provider-real-call-proposal.json",
+	})
+
+	var realCallInspectStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-call-proposal", "inspect",
+		"--proposal", "provider-real-call-proposal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--request-envelope", "provider-request-envelope.json",
+		"--adapter-plan", "provider-adapter-plan.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--output-format", "json",
+	}, &realCallInspectStdout)
+
+	var realCallInspect retrievalcontext.ProviderRealCallProposalInspectResult
+	if err := json.Unmarshal(realCallInspectStdout.Bytes(), &realCallInspect); err != nil {
+		t.Fatalf("Unmarshal(real call inspect) error = %v", err)
+	}
+	assertProviderRealCallProposalInspectBlocked(t, realCallInspect)
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-response-change-proposal",
+		"--response-fixture", "provider-response-fixture.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--output", "provider-response-change-proposal.json",
+		"--output-format", "json",
+	})
+
+	var changeReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-response-change-proposal-report",
+		"--change-proposal", "provider-response-change-proposal.json",
+		"--response-fixture", "provider-response-fixture.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--output-format", "json",
+	}, &changeReportStdout)
+
+	var changeReport retrievalcontext.ProviderResponseChangeProposalResult
+	if err := json.Unmarshal(changeReportStdout.Bytes(), &changeReport); err != nil {
+		t.Fatalf("Unmarshal(change report) error = %v", err)
+	}
+	assertProviderResponseChangeProposalBlocked(t, changeReport)
+
+	var activationAuditStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-readiness-audit",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--change-proposal", "provider-response-change-proposal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--output-format", "json",
+	}, &activationAuditStdout)
+
+	var activationAudit retrievalcontext.ProviderActivationReadinessAuditResult
+	if err := json.Unmarshal(activationAuditStdout.Bytes(), &activationAudit); err != nil {
+		t.Fatalf("Unmarshal(activation audit) error = %v", err)
+	}
+	assertProviderActivationReadinessBlocked(t, activationAudit)
+
+	var activationReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-readiness-report",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--change-proposal", "provider-response-change-proposal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--release-gate", "provider-executor-release-gate.json",
+		"--output-format", "json",
+	}, &activationReportStdout)
+
+	var activationReport retrievalcontext.ProviderActivationReadinessAuditResult
+	if err := json.Unmarshal(activationReportStdout.Bytes(), &activationReport); err != nil {
+		t.Fatalf("Unmarshal(activation report) error = %v", err)
+	}
+	assertProviderActivationReadinessBlocked(t, activationReport)
+
 	sprintPaths := []string{
 		"provider-call-executor-dry-run-report.json",
 		"provider-call-executor-preflight.json",
@@ -693,6 +808,10 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		"provider-adapter-plan.json",
 		"provider-response-fixture.json",
 		"provider-execution-simulation-bundle.json",
+		"provider-execution-simulation-report.json",
+		"provider-credential-policy-plan.json",
+		"provider-real-call-proposal.json",
+		"provider-response-change-proposal.json",
 	}
 	for _, path := range sprintPaths {
 		assertNoTextExcerpt(t, path)

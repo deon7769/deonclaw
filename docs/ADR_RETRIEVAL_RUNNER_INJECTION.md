@@ -76,6 +76,10 @@ retrieval-context (runner metadata attachment)
 | 22.46 | `worker codex provider-adapter-registry validate` / `provider-adapter-plan` (blocked adapter plan, no provider call) |
 | 22.47 | `worker codex provider-response-fixture generate` / `inspect` (fake response fixture, no provider call) |
 | 22.48 | `worker codex provider-execution-simulation-bundle` / `report` (execution simulation, no provider call) |
+| 22.49 | `worker codex provider-credential-policy` validate/plan (credential policy blocked, no secret reads) |
+| 22.50 | `worker codex provider-real-call-proposal` new/inspect (future call proposal, not executable) |
+| 22.51 | `worker codex provider-response-change-proposal` / `report` (fixture-only change proposal) |
+| 22.52 | `worker codex provider-activation-readiness-audit` / `report` (activation readiness, no provider call) |
 
 ### What already exists
 
@@ -217,6 +221,14 @@ Future injection design and implementation must **not** include:
 **Task 22.47 (implemented):** *Response fixture* — deterministic fake response; `response_source: fixture`, `received_from_provider: false`.
 
 **Task 22.48 (implemented):** *Execution simulation bundle/report* — metadata-only outcome simulation; `execution_result_available: false`. **Still no provider call**, no workspace changes.
+
+**Task 22.49 (implemented):** *Credential policy validate/plan* — env var name allowlist only; `secret_values_read: false`, `credential_check_enabled: false`. **Still no provider call**, no secret reads.
+
+**Task 22.50 (implemented):** *Real-call proposal new/inspect* — consolidates simulation + readiness hashes; `would_call_provider_if_enabled: true`, `provider_call_allowed_now: false`. **Still no transport**, no execution confirm.
+
+**Task 22.51 (implemented):** *Response change proposal/report* — fixture-only response-to-change contract; `workspace_modified: false`, `diff_applied: false`. **Still no worker execution**, no commits/PRs.
+
+**Task 22.52 (implemented):** *Activation readiness audit/report* — final audit revalidating chain 22.29–22.51; `activation_allowed_now: false`, `blocked_reason: implementation_not_enabled`. **Still no real provider call**.
 
 **Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
 

@@ -732,10 +732,98 @@ deonctl worker codex provider-execution-simulation-report \
   --response-fixture retrieval-context-provider-response-fixture.json \
   --release-gate retrieval-context-provider-executor-release-gate.json \
   --executor-config ../provider-call-executor.yaml \
+  --output-format json > retrieval-context-provider-execution-simulation-report.json
+~~~
+
+### 59. Provider credential policy validate
+
+~~~bash
+deonctl worker codex provider-credential-policy validate \
+  --config ../provider-credential-policy.yaml \
   --output-format json
 ~~~
 
-## CI smoke (Tasks 22.37–22.48)
+### 60. Provider credential policy plan
+
+~~~bash
+deonctl worker codex provider-credential-policy plan \
+  --config ../provider-credential-policy.yaml \
+  --output retrieval-context-provider-credential-policy-plan.json \
+  --output-format json
+~~~
+
+### 61. Provider real-call proposal new
+
+~~~bash
+deonctl worker codex provider-real-call-proposal new \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --adapter-plan retrieval-context-provider-adapter-plan.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --output retrieval-context-provider-real-call-proposal.json
+~~~
+
+### 62. Provider real-call proposal inspect
+
+~~~bash
+deonctl worker codex provider-real-call-proposal inspect \
+  --proposal retrieval-context-provider-real-call-proposal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --request-envelope retrieval-context-provider-request-envelope.json \
+  --adapter-plan retrieval-context-provider-adapter-plan.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --output-format json
+~~~
+
+### 63. Provider response change proposal
+
+~~~bash
+deonctl worker codex provider-response-change-proposal \
+  --response-fixture retrieval-context-provider-response-fixture.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --output retrieval-context-provider-response-change-proposal.json \
+  --output-format json
+~~~
+
+### 64. Provider response change proposal report
+
+~~~bash
+deonctl worker codex provider-response-change-proposal-report \
+  --change-proposal retrieval-context-provider-response-change-proposal.json \
+  --response-fixture retrieval-context-provider-response-fixture.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --output-format json
+~~~
+
+### 65. Provider activation readiness audit
+
+~~~bash
+deonctl worker codex provider-activation-readiness-audit \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --change-proposal retrieval-context-provider-response-change-proposal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --output-format json
+~~~
+
+### 66. Provider activation readiness report
+
+~~~bash
+deonctl worker codex provider-activation-readiness-report \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --change-proposal retrieval-context-provider-response-change-proposal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --release-gate retrieval-context-provider-executor-release-gate.json \
+  --output-format json
+~~~
+
+## CI smoke (Tasks 22.37–22.52)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -745,7 +833,7 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts final simulation report keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, and `received_from_provider` false. It exercises executor sprint (22.41–22.44) and execution simulation layer (22.45–22.48).
+This executes the chain in isolated temp dirs and asserts final activation readiness report keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), and activation readiness layer (22.49–22.52).
 
 See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
@@ -791,7 +879,11 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-adapter-registry validate/plan returns `adapter_registry_validated: true`, `adapter_available_for_future: true`, `adapter_enabled_now: false`, `transport_enabled: false`, all execution flags false
 - optional provider-response-fixture generate/inspect returns `response_fixture_ready: true`, `response_source: fixture`, `received_from_provider: false`, all execution flags false
 - optional provider-execution-simulation-bundle/report returns `simulation_bundle_ready: true`, `simulated_response_ready: true`, `execution_result_available: false`, all execution flags false
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.48)
+- optional provider-credential-policy validate/plan returns `credential_policy_validated: true`, `credential_check_enabled: false`, `secret_values_read: false`, all execution flags false
+- optional provider-real-call-proposal new/inspect returns `real_call_proposal_ready: true`, `would_call_provider_if_enabled: true`, `provider_call_allowed_now: false`, `secret_values_read: false`, all transport flags false
+- optional provider-response-change-proposal/report returns `change_proposal_ready: true`, `response_source: fixture`, `workspace_modified: false`, `diff_applied: false`, `worker_execution: false`
+- optional provider-activation-readiness-audit/report returns `activation_readiness_ready: true`, `activation_allowed_now: false`, `real_provider_call_supported_now: false`, `blocked_reason: implementation_not_enabled`, all execution flags false
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.52)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

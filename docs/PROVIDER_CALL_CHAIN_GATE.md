@@ -1,6 +1,6 @@
-# Provider call chain gate (Tasks 22.37–22.48)
+# Provider call chain gate (Tasks 22.37–22.52)
 
-This document defines the **governance gates before any real provider executor dispatch** (Task 22.48+).
+This document defines the **governance gates before any real provider executor dispatch** (Task 22.52+).
 
 ## Purpose
 
@@ -29,6 +29,14 @@ Task 22.46 adds **adapter registry / capability plan** — schema-only `provider
 Task 22.47 adds **response fixture generate/inspect** — deterministic fake response schema; `response_source: fixture`, no provider receive.
 
 Task 22.48 adds **execution simulation bundle/report** — consolidates envelope + adapter plan + fixture response; `execution_result_available: false`.
+
+Task 22.49 adds **credential policy validate/plan** — declares allowed env var names without reading secret values; `credential_check_enabled: false`.
+
+Task 22.50 adds **real-call proposal new/inspect** — formal future-call proposal; `would_call_provider_if_enabled: true`, `provider_call_allowed_now: false`.
+
+Task 22.51 adds **response change proposal/report** — fixture-only response-to-change contract; no diff, no workspace modification.
+
+Task 22.52 adds **activation readiness audit/report** — final audit before any future controlled activation; `activation_allowed_now: false`.
 
 ## Chain boundary (must stay false)
 
@@ -66,8 +74,12 @@ Before any future real provider dispatch:
 18. **`provider-adapter-registry`** + **`provider-adapter-plan`** — blocked adapter capability plan
 19. **`provider-response-fixture`** — deterministic fake response schema
 20. **`provider-execution-simulation-bundle`** + **`report`** — metadata-only outcome simulation (`execution_result_available: false`)
+21. **`provider-credential-policy`** validate/plan — env var name policy only (`secret_values_read: false`)
+22. **`provider-real-call-proposal`** new/inspect — future real-call proposal (`provider_call_allowed_now: false`)
+23. **`provider-response-change-proposal`** + **report** — fixture response-to-change metadata (`workspace_modified: false`)
+24. **`provider-activation-readiness-audit`** + **report** — final activation readiness gate (`activation_allowed_now: false`)
 
-The full chain through **execution simulation report** is the last gate before any real provider dispatch.
+The full chain through **activation readiness report** is the last gate before any real provider dispatch.
 
 ## Final audit expectations
 
@@ -172,7 +184,65 @@ The full chain through **execution simulation report** is the last gate before a
 }
 ```
 
-Audit, executor, simulation, and fixture JSON/stdout must not contain `text_excerpt` or payload content.
+Audit, executor, simulation, activation, and fixture JSON/stdout must not contain `text_excerpt` or payload content.
+
+## Activation readiness expectations (Tasks 22.49–22.52)
+
+`deonctl worker codex provider-credential-policy validate` must return:
+
+```json
+{
+  "credential_policy_validated": true,
+  "credential_check_enabled": false,
+  "secret_values_read": false,
+  "provider_call": false,
+  "network_call": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-real-call-proposal inspect` must return:
+
+```json
+{
+  "real_call_proposal_ready": true,
+  "would_call_provider_if_enabled": true,
+  "provider_call_allowed_now": false,
+  "transport_called": false,
+  "sent_to_provider": false,
+  "secret_values_read": false
+}
+```
+
+`deonctl worker codex provider-response-change-proposal-report` must return:
+
+```json
+{
+  "change_proposal_ready": true,
+  "response_source": "fixture",
+  "workspace_modified": false,
+  "diff_applied": false,
+  "commit_created": false,
+  "pr_created": false,
+  "worker_execution": false
+}
+```
+
+`deonctl worker codex provider-activation-readiness-report` must return:
+
+```json
+{
+  "activation_readiness_ready": true,
+  "real_provider_call_supported_now": false,
+  "activation_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "secret_values_read": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
 
 ## Executor preflight expectations (Task 22.41)
 

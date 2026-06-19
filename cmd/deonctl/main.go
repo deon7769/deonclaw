@@ -171,6 +171,14 @@ Usage:
   deonctl worker codex provider-response-fixture inspect --fixture <provider-response-fixture.json> [--request-envelope <provider-request-envelope.json>] [--adapter-plan <provider-adapter-plan.json>] [--output-format text|json]
   deonctl worker codex provider-execution-simulation-bundle --request-envelope <provider-request-envelope.json> --adapter-plan <provider-adapter-plan.json> --response-fixture <provider-response-fixture.json> --release-gate <provider-executor-release-gate.json> --executor-config <provider-call-executor.yaml> --output <provider-execution-simulation-bundle.json> [--output-format text|json]
   deonctl worker codex provider-execution-simulation-report --simulation-bundle <provider-execution-simulation-bundle.json> --request-envelope <provider-request-envelope.json> --adapter-plan <provider-adapter-plan.json> --response-fixture <provider-response-fixture.json> --release-gate <provider-executor-release-gate.json> --executor-config <provider-call-executor.yaml> [--output-format text|json]
+  deonctl worker codex provider-credential-policy validate --config <provider-credential-policy.yaml> [--output-format text|json]
+  deonctl worker codex provider-credential-policy plan --config <provider-credential-policy.yaml> --output <provider-credential-policy-plan.json> [--output-format text|json]
+  deonctl worker codex provider-real-call-proposal new --execution-simulation-report <provider-execution-simulation-report.json> --request-envelope <provider-request-envelope.json> --adapter-plan <provider-adapter-plan.json> --credential-policy-plan <provider-credential-policy-plan.json> --release-gate <provider-executor-release-gate.json> --output <provider-real-call-proposal.json>
+  deonctl worker codex provider-real-call-proposal inspect --proposal <provider-real-call-proposal.json> [--execution-simulation-report <...>] [--request-envelope <...>] [--adapter-plan <...>] [--credential-policy-plan <...>] [--release-gate <...>] [--output-format text|json]
+  deonctl worker codex provider-response-change-proposal --response-fixture <provider-response-fixture.json> --execution-simulation-report <provider-execution-simulation-report.json> --real-call-proposal <provider-real-call-proposal.json> --output <provider-response-change-proposal.json> [--output-format text|json]
+  deonctl worker codex provider-response-change-proposal-report --change-proposal <provider-response-change-proposal.json> --response-fixture <provider-response-fixture.json> --execution-simulation-report <provider-execution-simulation-report.json> --real-call-proposal <provider-real-call-proposal.json> [--output-format text|json]
+  deonctl worker codex provider-activation-readiness-audit --credential-policy-plan <provider-credential-policy-plan.json> --real-call-proposal <provider-real-call-proposal.json> --change-proposal <provider-response-change-proposal.json> --execution-simulation-report <provider-execution-simulation-report.json> --release-gate <provider-executor-release-gate.json> [--output-format text|json]
+  deonctl worker codex provider-activation-readiness-report --credential-policy-plan <provider-credential-policy-plan.json> --real-call-proposal <provider-real-call-proposal.json> --change-proposal <provider-response-change-proposal.json> --execution-simulation-report <provider-execution-simulation-report.json> --release-gate <provider-executor-release-gate.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1284,6 +1292,90 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexProviderExecutionSimulationReport(opts, stdout, stderr)
+			case "provider-credential-policy":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "validate":
+					subOpts, err := parseCodexProviderCredentialPolicyValidateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCredentialPolicyValidate(subOpts, stdout, stderr)
+				case "plan":
+					subOpts, err := parseCodexProviderCredentialPolicyPlanOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderCredentialPolicyPlan(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-real-call-proposal":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					subOpts, err := parseCodexProviderRealCallProposalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRealCallProposalNew(subOpts, stdout, stderr)
+				case "inspect":
+					subOpts, err := parseCodexProviderRealCallProposalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRealCallProposalInspect(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-response-change-proposal":
+				opts, err := parseCodexProviderResponseChangeProposalOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderResponseChangeProposal(opts, stdout, stderr)
+			case "provider-response-change-proposal-report":
+				opts, err := parseCodexProviderResponseChangeProposalReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderResponseChangeProposalReport(opts, stdout, stderr)
+			case "provider-activation-readiness-audit":
+				opts, err := parseCodexProviderActivationReadinessAuditOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderActivationReadinessAudit(opts, stdout, stderr)
+			case "provider-activation-readiness-report":
+				opts, err := parseCodexProviderActivationReadinessAuditOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderActivationReadinessReport(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {

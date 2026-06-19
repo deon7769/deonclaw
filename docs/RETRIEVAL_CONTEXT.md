@@ -63,6 +63,10 @@ Implemented now:
 - `deonctl worker codex provider-adapter-registry validate` / `provider-adapter-plan` (Task 22.46, blocked adapter plan only)
 - `deonctl worker codex provider-response-fixture generate` / `inspect` (Task 22.47, fake response fixture only)
 - `deonctl worker codex provider-execution-simulation-bundle` / `report` (Task 22.48, execution simulation only)
+- `deonctl worker codex provider-credential-policy` validate/plan (Task 22.49, credential policy blocked)
+- `deonctl worker codex provider-real-call-proposal` new/inspect (Task 22.50, real-call proposal not executable)
+- `deonctl worker codex provider-response-change-proposal` / `report` (Task 22.51, fixture-only change proposal)
+- `deonctl worker codex provider-activation-readiness-audit` / `report` (Task 22.52, activation readiness audit)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -1337,7 +1341,92 @@ Rules:
 - sets `simulation_bundle_ready: true`, `execution_result_available: false`
 - no workspace changes, no PR creation
 
-Optional fixture steps 51–58 exercise request envelope through execution simulation report.
+Optional fixture steps 51–66 exercise request envelope through activation readiness report.
+
+### Credential policy (Task 22.49)
+
+~~~bash
+deonctl worker codex provider-credential-policy validate \
+  --config configs/examples/provider-credential-policy.yaml \
+  --output-format json
+
+deonctl worker codex provider-credential-policy plan \
+  --config configs/examples/provider-credential-policy.yaml \
+  --output artifacts/<run-id>/provider-credential-policy-plan.json \
+  --output-format json
+~~~
+
+Rules:
+
+- declares allowed env var names (e.g. `CODEX_API_KEY`, `OPENAI_API_KEY`) without reading secret values
+- `credential_check_enabled: false`, `allow_secret_read: false`, `allow_network: false`
+- metadata-only plan; `secret_values_read: false`
+
+### Real-call proposal (Task 22.50)
+
+~~~bash
+deonctl worker codex provider-real-call-proposal new \
+  --execution-simulation-report artifacts/<run-id>/provider-execution-simulation-report.json \
+  --request-envelope artifacts/<run-id>/provider-request-envelope.json \
+  --adapter-plan artifacts/<run-id>/provider-adapter-plan.json \
+  --credential-policy-plan artifacts/<run-id>/provider-credential-policy-plan.json \
+  --release-gate artifacts/<run-id>/provider-executor-release-gate.json \
+  --output artifacts/<run-id>/provider-real-call-proposal.json
+
+deonctl worker codex provider-real-call-proposal inspect \
+  --proposal artifacts/<run-id>/provider-real-call-proposal.json \
+  ...same inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- consolidates simulation + readiness hashes
+- `would_call_provider_if_enabled: true`, `provider_call_allowed_now: false`
+- no transport, no secrets, no execution confirm flag
+
+### Response change proposal (Task 22.51)
+
+~~~bash
+deonctl worker codex provider-response-change-proposal \
+  --response-fixture artifacts/<run-id>/provider-response-fixture.json \
+  --execution-simulation-report artifacts/<run-id>/provider-execution-simulation-report.json \
+  --real-call-proposal artifacts/<run-id>/provider-real-call-proposal.json \
+  --output artifacts/<run-id>/provider-response-change-proposal.json \
+  --output-format json
+
+deonctl worker codex provider-response-change-proposal-report \
+  --change-proposal artifacts/<run-id>/provider-response-change-proposal.json \
+  ...same inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- fixture-only response source; no diff application, no workspace modification
+- metadata-only file intent; `workspace_modified: false`, `diff_applied: false`
+
+### Activation readiness audit (Task 22.52)
+
+~~~bash
+deonctl worker codex provider-activation-readiness-audit \
+  --credential-policy-plan artifacts/<run-id>/provider-credential-policy-plan.json \
+  --real-call-proposal artifacts/<run-id>/provider-real-call-proposal.json \
+  --change-proposal artifacts/<run-id>/provider-response-change-proposal.json \
+  --execution-simulation-report artifacts/<run-id>/provider-execution-simulation-report.json \
+  --release-gate artifacts/<run-id>/provider-executor-release-gate.json \
+  --output-format json
+
+deonctl worker codex provider-activation-readiness-report \
+  ...same inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- revalidates chain 22.29–22.51
+- `activation_readiness_ready: true`, `activation_allowed_now: false`, `blocked_reason: implementation_not_enabled`
+- no provider call, network, transport, secrets, or workspace changes
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 
