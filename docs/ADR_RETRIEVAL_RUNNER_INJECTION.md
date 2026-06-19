@@ -58,6 +58,8 @@ retrieval-context (runner metadata attachment)
 | 22.29 | `worker codex materialized-provider-dispatch validate` (provider dispatch contract schema, no provider call) |
 | 22.30 | `worker codex materialized-provider-payload-dry-run` (provider payload dry-run, no provider call) |
 | 22.31 | `worker codex materialized-provider-payload-report` (provider payload report, no provider call) |
+| 22.32 | `worker codex materialized-provider-call-gate` (provider call gate, no provider call) |
+| 22.33 | `worker codex materialized-provider-call-readiness-report` (provider call readiness report, no provider call) |
 
 ### What already exists
 
@@ -166,7 +168,11 @@ Future injection design and implementation must **not** include:
 
 **Task 22.31 (implemented):** *Provider payload report* — `deonctl worker codex materialized-provider-payload-report` validates payload dry-run JSON and payload-output hash without printing payload content. **Still no provider call**, no network call, no worker execution; normal runner prompt unchanged.
 
-**Task 22.32+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
+**Task 22.32 (implemented):** *Provider call gate* — `deonctl worker codex materialized-provider-call-gate` binds dispatch config and payload report into a call gate JSON with `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `sent_to_provider: false`. **Still no provider call**, no network call, no Codex/OpenCode dispatch.
+
+**Task 22.33 (implemented):** *Provider call readiness report* — `deonctl worker codex materialized-provider-call-readiness-report` consolidates provider call gate and payload report with `provider_call_readiness_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`. **Still no provider call**, no network call, no worker execution; normal runner prompt unchanged.
+
+**Task 22.34+ (proposal):** runner injection execution behind explicit confirm flag at worker dispatch time.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

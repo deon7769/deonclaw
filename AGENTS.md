@@ -119,6 +119,8 @@ Implemented:
 - materialized provider dispatch contract (`worker codex materialized-provider-dispatch validate`), no provider call
 - materialized provider payload dry-run (`worker codex materialized-provider-payload-dry-run`), no provider call
 - materialized provider payload report (`worker codex materialized-provider-payload-report`), no provider call
+- materialized provider call gate (`worker codex materialized-provider-call-gate`), no provider call
+- materialized provider call readiness report (`worker codex materialized-provider-call-readiness-report`), no provider call
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

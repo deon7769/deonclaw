@@ -46,6 +46,8 @@ Implemented now:
 - `deonctl worker codex materialized-provider-dispatch validate` (Task 22.29, provider dispatch contract schema only)
 - `deonctl worker codex materialized-provider-payload-dry-run` (Task 22.30, provider payload dry-run only)
 - `deonctl worker codex materialized-provider-payload-report` (Task 22.31, provider payload report only)
+- `deonctl worker codex materialized-provider-call-gate` (Task 22.32, provider call gate only)
+- `deonctl worker codex materialized-provider-call-readiness-report` (Task 22.33, provider call readiness report only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -896,6 +898,56 @@ Rules:
 - normal runner prompt, worker execution, and provider calls remain unchanged
 
 Optional fixture step 33 exercises this path after provider payload dry-run.
+
+## Materialized provider call gate (Task 22.32)
+
+Final metadata-only gate before any future provider call. Binds dispatch config, payload report, and payload-output hash. Requires `--confirm-inject-materialized-context`. Writes call gate JSON; does not call Codex/OpenCode or any provider API.
+
+~~~bash
+deonctl worker codex materialized-provider-call-gate \
+  --dispatch-config configs/examples/materialized-provider-dispatch.yaml \
+  --payload-report artifacts/<run-id>/materialized-provider-payload-report.json \
+  --payload-output artifacts/<run-id>/materialized-provider-payload.md \
+  --confirm-inject-materialized-context \
+  --output artifacts/<run-id>/materialized-provider-call-gate.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on all input/output paths
+- validates dispatch config via Task 22.29 rules
+- validates payload report `provider_payload_validated: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `prompt_injection_real_runner: false`
+- validates `provider_payload_sha256` match with payload-output (hash only; does not print payload content)
+- on success sets `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `worker_execution_allowed_now: false`, `prompt_injection_allowed_now: false`, `payload_ready_for_future_call: true`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
+- gate text/json output must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 34 exercises this path after provider payload report.
+
+## Materialized provider call readiness report (Task 22.33)
+
+Consolidates provider call gate and payload report into a readiness artifact. Does not call providers or print payload content.
+
+~~~bash
+deonctl worker codex materialized-provider-call-readiness-report \
+  --provider-call-gate artifacts/<run-id>/materialized-provider-call-gate.json \
+  --payload-report artifacts/<run-id>/materialized-provider-payload-report.json \
+  --output-format json
+~~~
+
+Rules:
+
+- path hardening on both input paths
+- rejects gate/report JSON containing `text_excerpt` or alpha text
+- validates gate `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `payload_ready_for_future_call: true`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
+- validates payload report `provider_payload_validated: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`
+- validates `materialized_sha256` and `provider_payload_sha256` coherence between gate and report when present
+- on success sets `provider_call_readiness_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `sent_to_provider: false`, `blocked_reason: implementation_not_enabled`
+- report text/json must not contain `text_excerpt` or payload content; exit code 1 on `status: failed`
+- normal runner prompt, worker execution, and provider calls remain unchanged
+
+Optional fixture step 35 exercises this path after provider call gate.
 
 ### Debugging `status: failed`
 

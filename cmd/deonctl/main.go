@@ -144,6 +144,8 @@ Usage:
   deonctl worker codex materialized-provider-dispatch validate --config <materialized-provider-dispatch.yaml> [--output-format text|json]
   deonctl worker codex materialized-provider-payload-dry-run --dispatch-config <materialized-provider-dispatch.yaml> --provider-run-plan <materialized-injection-provider-run-plan.json> --assembled-output <materialized-prompt-assembly.md> --output <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> --confirm-inject-materialized-context [--output-format text|json]
   deonctl worker codex materialized-provider-payload-report --payload-dry-run <materialized-provider-payload-dry-run.json> --payload-output <materialized-provider-payload.md> [--output-format text|json]
+  deonctl worker codex materialized-provider-call-gate --dispatch-config <materialized-provider-dispatch.yaml> --payload-report <materialized-provider-payload-report.json> --payload-output <materialized-provider-payload.md> --confirm-inject-materialized-context --output <materialized-provider-call-gate.json> [--output-format text|json]
+  deonctl worker codex materialized-provider-call-readiness-report --provider-call-gate <materialized-provider-call-gate.json> --payload-report <materialized-provider-payload-report.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -971,6 +973,22 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexMaterializedProviderPayloadReport(opts, stdout, stderr)
+			case "materialized-provider-call-gate":
+				opts, err := parseCodexMaterializedProviderCallGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderCallGate(opts, stdout, stderr)
+			case "materialized-provider-call-readiness-report":
+				opts, err := parseCodexMaterializedProviderCallReadinessReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexMaterializedProviderCallReadinessReport(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
@@ -7709,6 +7727,176 @@ func runCodexMaterializedProviderPayloadReport(opts codexMaterializedProviderPay
 	}
 	if err != nil {
 		fmt.Fprintf(stderr, "worker codex materialized-provider-payload-report failed: %v\n", err)
+		return 1
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedProviderCallGateOptions struct {
+	dispatchConfigPath               string
+	payloadReportPath                string
+	payloadOutputPath                string
+	outputPath                       string
+	confirmInjectMaterializedContext bool
+	outputFormat                     string
+}
+
+func parseCodexMaterializedProviderCallGateOptions(args []string) (codexMaterializedProviderCallGateOptions, error) {
+	opts := codexMaterializedProviderCallGateOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--dispatch-config":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing value for --dispatch-config")
+			}
+			opts.dispatchConfigPath = args[i+1]
+			i++
+		case "--payload-report":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing value for --payload-report")
+			}
+			opts.payloadReportPath = args[i+1]
+			i++
+		case "--payload-output":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing value for --payload-output")
+			}
+			opts.payloadOutputPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		case "--confirm-inject-materialized-context":
+			opts.confirmInjectMaterializedContext = true
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.dispatchConfigPath == "" {
+		return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing --dispatch-config")
+	}
+	if opts.payloadReportPath == "" {
+		return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing --payload-report")
+	}
+	if opts.payloadOutputPath == "" {
+		return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing --payload-output")
+	}
+	if opts.outputPath == "" {
+		return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing --output")
+	}
+	if !opts.confirmInjectMaterializedContext {
+		return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("missing --confirm-inject-materialized-context")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedProviderCallGateOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedProviderCallGate(opts codexMaterializedProviderCallGateOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedProviderCallGate(retrievalcontext.MaterializedProviderCallGateOptions{
+		DispatchConfigPath:               opts.dispatchConfigPath,
+		PayloadReportPath:                opts.payloadReportPath,
+		PayloadOutputPath:                opts.payloadOutputPath,
+		ConfirmInjectMaterializedContext: opts.confirmInjectMaterializedContext,
+		OutputPath:                       opts.outputPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-call-gate failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedProviderCallGateJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedProviderCallGateText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-call-gate failed: %v\n", err)
+		return 1
+	}
+	if opts.outputFormat != "json" {
+		fmt.Fprintf(stdout, "output: %s\n", opts.outputPath)
+	}
+	if result.Status == lancedbpolicy.StatusFailed {
+		return 1
+	}
+	return 0
+}
+
+type codexMaterializedProviderCallReadinessReportOptions struct {
+	providerCallGatePath string
+	payloadReportPath    string
+	outputFormat         string
+}
+
+func parseCodexMaterializedProviderCallReadinessReportOptions(args []string) (codexMaterializedProviderCallReadinessReportOptions, error) {
+	opts := codexMaterializedProviderCallReadinessReportOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--provider-call-gate":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallReadinessReportOptions{}, fmt.Errorf("missing value for --provider-call-gate")
+			}
+			opts.providerCallGatePath = args[i+1]
+			i++
+		case "--payload-report":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallReadinessReportOptions{}, fmt.Errorf("missing value for --payload-report")
+			}
+			opts.payloadReportPath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return codexMaterializedProviderCallReadinessReportOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return codexMaterializedProviderCallReadinessReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.providerCallGatePath == "" {
+		return codexMaterializedProviderCallReadinessReportOptions{}, fmt.Errorf("missing --provider-call-gate")
+	}
+	if opts.payloadReportPath == "" {
+		return codexMaterializedProviderCallReadinessReportOptions{}, fmt.Errorf("missing --payload-report")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return codexMaterializedProviderCallReadinessReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runCodexMaterializedProviderCallReadinessReport(opts codexMaterializedProviderCallReadinessReportOptions, stdout io.Writer, stderr io.Writer) int {
+	result, err := retrievalcontext.MaterializedProviderCallReadinessReport(retrievalcontext.MaterializedProviderCallReadinessReportOptions{
+		ProviderCallGatePath: opts.providerCallGatePath,
+		PayloadReportPath:    opts.payloadReportPath,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-call-readiness-report failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		err = retrievalcontext.WriteMaterializedProviderCallReadinessReportJSON(result, stdout)
+	default:
+		err = retrievalcontext.WriteMaterializedProviderCallReadinessReportText(result, stdout)
+	}
+	if err != nil {
+		fmt.Fprintf(stderr, "worker codex materialized-provider-call-readiness-report failed: %v\n", err)
 		return 1
 	}
 	if result.Status == lancedbpolicy.StatusFailed {

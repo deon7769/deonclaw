@@ -397,6 +397,27 @@ deonctl worker codex materialized-provider-payload-dry-run \
 deonctl worker codex materialized-provider-payload-report \
   --payload-dry-run retrieval-context-materialized-provider-payload-dry-run.json \
   --payload-output retrieval-context-materialized-provider-payload.md \
+  --output-format json > retrieval-context-materialized-provider-payload-report.json
+~~~
+
+### 34. Provider call gate
+
+~~~bash
+deonctl worker codex materialized-provider-call-gate \
+  --dispatch-config ../materialized-provider-dispatch.yaml \
+  --payload-report retrieval-context-materialized-provider-payload-report.json \
+  --payload-output retrieval-context-materialized-provider-payload.md \
+  --confirm-inject-materialized-context \
+  --output retrieval-context-materialized-provider-call-gate.json \
+  --output-format json
+~~~
+
+### 35. Provider call readiness report
+
+~~~bash
+deonctl worker codex materialized-provider-call-readiness-report \
+  --provider-call-gate retrieval-context-materialized-provider-call-gate.json \
+  --payload-report retrieval-context-materialized-provider-payload-report.json \
   --output-format json
 ~~~
 
@@ -426,6 +447,8 @@ deonctl worker codex materialized-provider-payload-report \
 - optional materialized-provider-dispatch validate returns `status: ok`, `enabled: false`, `allow_provider_call: false`, `allow_network: false`, `allow_worker_execution: false`, `allow_prompt_injection: false`
 - optional materialized-provider-payload-dry-run returns `provider_payload_rendered: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, `worker_execution: false`, `prompt_injection_real_runner: false`; only payload-output may contain `text_excerpt`
 - optional materialized-provider-payload-report returns `provider_payload_validated: true`, `provider_call: false`, `network_call: false`, `sent_to_provider: false`, and does not print payload content in report output
+- optional materialized-provider-call-gate returns `provider_call_gate_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `worker_execution_allowed_now: false`, `prompt_injection_allowed_now: false`, `sent_to_provider: false`, and does not print payload content in gate output
+- optional materialized-provider-call-readiness-report returns `provider_call_readiness_ready: true`, `provider_call_allowed_now: false`, `network_call_allowed_now: false`, `sent_to_provider: false`, and does not print payload content in readiness output
 - only payload-output, assembled-output, prompt-output and prompt-preview/materialized artifacts may contain `text_excerpt`; all metadata reports/stdout/json must not contain `text_excerpt` or alpha text
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan

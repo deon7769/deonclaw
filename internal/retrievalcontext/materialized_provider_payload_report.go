@@ -150,6 +150,28 @@ func MaterializedProviderPayloadReport(opts MaterializedProviderPayloadReportOpt
 	return result, nil
 }
 
+func LoadMaterializedProviderPayloadReport(path string) (MaterializedProviderPayloadReportResult, []byte, error) {
+	if err := validateRelativeSafePath("payload report path", path); err != nil {
+		return MaterializedProviderPayloadReportResult{}, nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return MaterializedProviderPayloadReportResult{}, nil, fmt.Errorf("read materialized provider payload report %q: %w", path, err)
+	}
+	return ParseMaterializedProviderPayloadReportJSON(data)
+}
+
+func ParseMaterializedProviderPayloadReportJSON(data []byte) (MaterializedProviderPayloadReportResult, []byte, error) {
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return MaterializedProviderPayloadReportResult{}, nil, fmt.Errorf("materialized provider payload report must not contain materialized preview text")
+	}
+	var result MaterializedProviderPayloadReportResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return MaterializedProviderPayloadReportResult{}, nil, fmt.Errorf("parse materialized provider payload report json: %w", err)
+	}
+	return result, data, nil
+}
+
 func WriteMaterializedProviderPayloadReportText(result MaterializedProviderPayloadReportResult, out io.Writer) error {
 	if _, err := fmt.Fprintln(out, "worker_codex_materialized_provider_payload_report:"); err != nil {
 		return err
