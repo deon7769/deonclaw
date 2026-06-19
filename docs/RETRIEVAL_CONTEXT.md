@@ -51,6 +51,7 @@ Implemented now:
 - `deonctl worker codex provider-call-approval new/approve/inspect` (Task 22.34, provider call approval only)
 - `deonctl worker codex provider-call-execution-bundle` (Task 22.35, provider call execution bundle only)
 - `deonctl worker codex provider-call-chain-audit` (Task 22.36, provider call chain continuity audit only)
+- `make provider-call-chain-smoke` / `scripts/provider-call-chain-fixture-smoke.sh` (Task 22.37, fixture smoke / CI guard only)
 - `configs/examples/retrieval-injection-policy.yaml` example injection policy
 
 Not implemented yet:
@@ -1044,6 +1045,16 @@ Rules:
 - no provider call, no network, no worker execution
 
 Optional fixture step 38 exercises this path after provider call execution bundle.
+
+## Provider call chain fixture smoke / CI guard (Task 22.37)
+
+End-to-end fixture smoke in isolated temp dirs. Validates hash coherence, anti-leak rules, and final audit flags. Does not call providers or dispatch workers.
+
+~~~bash
+make provider-call-chain-smoke
+~~~
+
+See [PROVIDER_CALL_CHAIN_GATE.md](PROVIDER_CALL_CHAIN_GATE.md) for the last gate before a future provider executor skeleton.
 
 ### Debugging `status: failed`
 

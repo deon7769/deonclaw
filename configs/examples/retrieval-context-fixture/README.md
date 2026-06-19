@@ -471,6 +471,20 @@ deonctl worker codex provider-call-chain-audit \
   --output-format json
 ~~~
 
+## CI smoke (Task 22.37)
+
+Run the provider-call chain fixture smoke from the repository root:
+
+~~~bash
+make provider-call-chain-smoke
+# or
+bash scripts/provider-call-chain-fixture-smoke.sh
+~~~
+
+This executes the chain in isolated temp dirs and asserts `provider-call-chain-audit` returns `chain_continuity_ready: true`, `producer_commands_active: true`, `loaders_reconciled: true`, and keeps `provider_call`, `network_call`, `worker_execution`, and `sent_to_provider` false.
+
+See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before a future provider executor skeleton.
+
 ## Expected outcome
 
 - inspect, materialized-report, bundle, approval inspect, injection-plan, and governance-report return `status: ok`
@@ -502,6 +516,7 @@ deonctl worker codex provider-call-chain-audit \
 - optional provider-call-approval inspect returns `provider_call_authorized_for_future: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, and does not print payload-output content
 - optional provider-call-execution-bundle returns `provider_call_authorized_for_future: true`, `provider_call_allowed_now: false`, `sent_to_provider: false`, `provider_call: false`, `network_call: false`, `worker_execution: false`, `execution_supported_now: false`, and does not print payload-output content
 - optional provider-call-chain-audit returns `chain_continuity_ready: true`, `loaders_reconciled: true`, `producer_commands_active: true`, `provider_call: false`, `network_call: false`, `worker_execution: false`, `sent_to_provider: false`, and does not print payload-output content
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Task 22.37)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

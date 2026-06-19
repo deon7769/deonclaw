@@ -122,6 +122,7 @@ Implemented:
 - provider call approval (`worker codex provider-call-approval new/approve/inspect`), no provider call
 - provider call execution bundle (`worker codex provider-call-execution-bundle`), no provider call
 - provider call chain continuity audit (`worker codex provider-call-chain-audit`), no provider call
+- provider call chain fixture smoke / CI guard (`scripts/provider-call-chain-fixture-smoke.sh`, `make provider-call-chain-smoke`), no provider call
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

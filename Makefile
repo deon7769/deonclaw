@@ -1,4 +1,4 @@
-.PHONY: build test fmt ship
+.PHONY: build test fmt ship provider-call-chain-smoke
 
 build:
 	go build -o bin/deonctl ./cmd/deonctl
@@ -8,6 +8,9 @@ test:
 
 fmt:
 	gofmt -w .
+
+provider-call-chain-smoke:
+	bash scripts/provider-call-chain-fixture-smoke.sh
 
 ship:
 	@if [ -n "$(MSG)" ]; then \
