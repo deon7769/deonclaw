@@ -820,10 +820,129 @@ deonctl worker codex provider-activation-readiness-report \
   --change-proposal retrieval-context-provider-response-change-proposal.json \
   --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
   --release-gate retrieval-context-provider-executor-release-gate.json \
+  --output-format json > retrieval-context-provider-activation-readiness-audit.json
+~~~
+
+### 67. Provider activation policy validate
+
+~~~bash
+deonctl worker codex provider-activation-policy validate \
+  --config configs/examples/provider-activation-policy.yaml \
   --output-format json
 ~~~
 
-## CI smoke (Tasks 22.37–22.52)
+### 68. Provider activation policy plan
+
+~~~bash
+deonctl worker codex provider-activation-policy plan \
+  --config configs/examples/provider-activation-policy.yaml \
+  --output retrieval-context-provider-activation-policy-plan.json \
+  --output-format json
+~~~
+
+### 69. Provider activation approval request
+
+~~~bash
+deonctl worker codex provider-activation-approval new \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --output retrieval-context-provider-activation-approval-request.json
+~~~
+
+### 70. Provider activation approval approve
+
+Use SHA256 values from the approval request JSON:
+
+~~~bash
+deonctl worker codex provider-activation-approval approve \
+  --request retrieval-context-provider-activation-approval-request.json \
+  --output retrieval-context-provider-activation-approval.json \
+  --confirm-activation-policy-sha256 <activation_policy_plan_sha256> \
+  --confirm-readiness-audit-sha256 <readiness_audit_sha256> \
+  --confirm-real-call-proposal-sha256 <real_call_proposal_sha256> \
+  --confirm-provider-payload-sha256 <provider_payload_sha256>
+~~~
+
+### 71. Provider activation approval inspect
+
+~~~bash
+deonctl worker codex provider-activation-approval inspect \
+  --approval retrieval-context-provider-activation-approval.json \
+  --request retrieval-context-provider-activation-approval-request.json \
+  --output-format json
+~~~
+
+### 72. Provider activation rehearsal
+
+~~~bash
+deonctl worker codex provider-activation-rehearsal \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --output retrieval-context-provider-activation-rehearsal.json \
+  --output-format json
+~~~
+
+### 73. Provider activation rehearsal report
+
+~~~bash
+deonctl worker codex provider-activation-rehearsal-report \
+  --rehearsal retrieval-context-provider-activation-rehearsal.json \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --output-format json
+~~~
+
+### 74. Provider activation release package
+
+~~~bash
+deonctl worker codex provider-response-change-proposal-report \
+  --change-proposal retrieval-context-provider-response-change-proposal.json \
+  --response-fixture retrieval-context-provider-response-fixture.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --output-format json > retrieval-context-provider-response-change-proposal-report.json
+
+deonctl worker codex provider-activation-release-package \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-rehearsal retrieval-context-provider-activation-rehearsal.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --response-change-proposal-report retrieval-context-provider-response-change-proposal-report.json \
+  --output retrieval-context-provider-activation-release-package.json \
+  --output-format json
+~~~
+
+### 75. Provider activation release gate
+
+~~~bash
+deonctl worker codex provider-activation-release-gate \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-rehearsal retrieval-context-provider-activation-rehearsal.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --response-change-proposal-report retrieval-context-provider-response-change-proposal-report.json \
+  --activation-release-package retrieval-context-provider-activation-release-package.json \
+  --output-format json
+~~~
+
+## CI smoke (Tasks 22.37–22.56)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -833,7 +952,7 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts final activation readiness report keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), and activation readiness layer (22.49–22.52).
+This executes the chain in isolated temp dirs and asserts final activation release gate keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), activation readiness layer (22.49–22.52), and activation control plane (22.53–22.56).
 
 See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
@@ -883,6 +1002,10 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-real-call-proposal new/inspect returns `real_call_proposal_ready: true`, `would_call_provider_if_enabled: true`, `provider_call_allowed_now: false`, `secret_values_read: false`, all transport flags false
 - optional provider-response-change-proposal/report returns `change_proposal_ready: true`, `response_source: fixture`, `workspace_modified: false`, `diff_applied: false`, `worker_execution: false`
 - optional provider-activation-readiness-audit/report returns `activation_readiness_ready: true`, `activation_allowed_now: false`, `real_provider_call_supported_now: false`, `blocked_reason: implementation_not_enabled`, all execution flags false
+- optional provider-activation-policy validate/plan returns `activation_policy_validated: true`, `activation_allowed_now: false`, all execution flags false
+- optional provider-activation-approval inspect returns `activation_authorized_for_future: true`, `activation_allowed_now: false`, `allowed_use: provider_activation_policy_only`, all execution flags false
+- optional provider-activation-rehearsal/report returns `activation_rehearsal_ready: true`, `activation_sequence_validated: true`, `future_steps` populated, all execution flags false
+- optional provider-activation-release-package/gate returns `activation_release_package_ready: true`, `activation_gate_ready: true`, `real_activation_supported_now: false`, `activation_allowed_now: false`, all execution flags false
 - `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.52)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan

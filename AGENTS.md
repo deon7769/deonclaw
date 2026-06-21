@@ -129,6 +129,8 @@ Implemented:
 - provider executor release bundle / gate (`worker codex provider-executor-release-bundle`, `release-gate`), no provider call
 - provider execution simulation layer (`provider-request-envelope`, `provider-adapter-registry`, `provider-adapter-plan`, `provider-response-fixture`, `provider-execution-simulation-bundle`, `provider-execution-simulation-report`), no provider call
 - provider activation readiness layer (`provider-credential-policy`, `provider-real-call-proposal`, `provider-response-change-proposal`, `provider-activation-readiness-audit`), no provider call
+- provider activation control plane (`provider-activation-policy`, `provider-activation-approval`, `provider-activation-rehearsal`, `provider-activation-release-package`, `provider-activation-release-gate`), no provider call
+- provider activation policy config (`configs/examples/provider-activation-policy.yaml`), no provider call
 - provider credential policy config (`configs/examples/provider-credential-policy.yaml`), no provider call
 - provider adapters config (`configs/examples/provider-adapters.yaml`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call

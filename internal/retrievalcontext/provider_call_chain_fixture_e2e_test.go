@@ -266,7 +266,7 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
 	}
 
-	runProviderActivationReadinessChain(t, chain)
+	runProviderActivationControlPlaneChain(t, chain)
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -796,6 +796,146 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 	}
 	assertProviderActivationReadinessBlocked(t, activationReport)
 
+	if err := os.WriteFile("provider-activation-readiness-audit.json", activationAuditStdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(activation readiness audit) error = %v", err)
+	}
+	if err := os.WriteFile("provider-response-change-proposal-report.json", changeReportStdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(change proposal report) error = %v", err)
+	}
+
+	if err := os.WriteFile("provider-activation-policy.yaml", []byte(validProviderActivationPolicyYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile(activation policy) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-policy", "validate",
+		"--config", "provider-activation-policy.yaml",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-policy", "plan",
+		"--config", "provider-activation-policy.yaml",
+		"--output", "provider-activation-policy-plan.json",
+		"--output-format", "json",
+	})
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-approval", "new",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--output", "provider-activation-approval-request.json",
+	})
+
+	requestData, err := os.ReadFile("provider-activation-approval-request.json")
+	if err != nil {
+		t.Fatalf("ReadFile(activation approval request) error = %v", err)
+	}
+	var activationRequest struct {
+		ActivationPolicyPlanSHA256 string `json:"activation_policy_plan_sha256"`
+		ReadinessAuditSHA256       string `json:"readiness_audit_sha256"`
+		RealCallProposalSHA256     string `json:"real_call_proposal_sha256"`
+		ProviderPayloadSHA256      string `json:"provider_payload_sha256"`
+	}
+	if err := json.Unmarshal(requestData, &activationRequest); err != nil {
+		t.Fatalf("Unmarshal(activation approval request) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-approval", "approve",
+		"--request", "provider-activation-approval-request.json",
+		"--output", "provider-activation-approval.json",
+		"--confirm-activation-policy-sha256", activationRequest.ActivationPolicyPlanSHA256,
+		"--confirm-readiness-audit-sha256", activationRequest.ReadinessAuditSHA256,
+		"--confirm-real-call-proposal-sha256", activationRequest.RealCallProposalSHA256,
+		"--confirm-provider-payload-sha256", activationRequest.ProviderPayloadSHA256,
+	})
+
+	var activationApprovalInspectStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-approval", "inspect",
+		"--approval", "provider-activation-approval.json",
+		"--request", "provider-activation-approval-request.json",
+		"--output-format", "json",
+	}, &activationApprovalInspectStdout)
+
+	var activationApprovalInspect retrievalcontext.InspectProviderActivationApprovalResult
+	if err := json.Unmarshal(activationApprovalInspectStdout.Bytes(), &activationApprovalInspect); err != nil {
+		t.Fatalf("Unmarshal(activation approval inspect) error = %v", err)
+	}
+	if activationApprovalInspect.Status != lancedbpolicy.StatusOK {
+		t.Fatalf("activation approval inspect = %#v, want ok", activationApprovalInspect)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-rehearsal",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--output", "provider-activation-rehearsal.json",
+		"--output-format", "json",
+	})
+
+	var rehearsalReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-rehearsal-report",
+		"--rehearsal", "provider-activation-rehearsal.json",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--output-format", "json",
+	}, &rehearsalReportStdout)
+
+	var rehearsalReport retrievalcontext.ProviderActivationRehearsalResult
+	if err := json.Unmarshal(rehearsalReportStdout.Bytes(), &rehearsalReport); err != nil {
+		t.Fatalf("Unmarshal(rehearsal report) error = %v", err)
+	}
+	assertProviderActivationRehearsalBlocked(t, rehearsalReport)
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-release-package",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-rehearsal", "provider-activation-rehearsal.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--response-change-proposal-report", "provider-response-change-proposal-report.json",
+		"--output", "provider-activation-release-package.json",
+		"--output-format", "json",
+	})
+
+	var activationReleaseGateStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-release-gate",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-rehearsal", "provider-activation-rehearsal.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--response-change-proposal-report", "provider-response-change-proposal-report.json",
+		"--activation-release-package", "provider-activation-release-package.json",
+		"--output-format", "json",
+	}, &activationReleaseGateStdout)
+
+	var activationReleaseGate retrievalcontext.ProviderActivationReleaseGateResult
+	if err := json.Unmarshal(activationReleaseGateStdout.Bytes(), &activationReleaseGate); err != nil {
+		t.Fatalf("Unmarshal(activation release gate) error = %v", err)
+	}
+	assertProviderActivationReleaseGateBlocked(t, activationReleaseGate)
+
 	sprintPaths := []string{
 		"provider-call-executor-dry-run-report.json",
 		"provider-call-executor-preflight.json",
@@ -812,9 +952,19 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		"provider-credential-policy-plan.json",
 		"provider-real-call-proposal.json",
 		"provider-response-change-proposal.json",
+		"provider-activation-readiness-audit.json",
+		"provider-response-change-proposal-report.json",
+		"provider-activation-policy-plan.json",
+		"provider-activation-approval-request.json",
+		"provider-activation-approval.json",
+		"provider-activation-rehearsal.json",
+		"provider-activation-release-package.json",
 	}
 	for _, path := range sprintPaths {
 		assertNoTextExcerpt(t, path)
+	}
+	if strings.Contains(activationReleaseGateStdout.String(), "text_excerpt") || strings.Contains(rehearsalReportStdout.String(), "alpha text") {
+		t.Fatal("activation release gate/rehearsal stdout must not contain materialized preview text")
 	}
 	if strings.Contains(releaseGateStdout.String(), "text_excerpt") || strings.Contains(releaseBundleStdout.String(), "alpha text") {
 		t.Fatal("release gate/bundle stdout must not contain materialized preview text")

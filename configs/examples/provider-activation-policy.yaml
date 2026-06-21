@@ -1,0 +1,20 @@
+provider_activation_policy:
+  enabled: false
+  provider: codex
+  require_activation_readiness_audit: true
+  require_real_call_proposal: true
+  require_credential_policy: true
+  require_execution_simulation_report: true
+  require_release_gate: true
+  require_manual_operator_approval: true
+  allow_provider_call: false
+  allow_network: false
+  allow_secret_read: false
+  allow_transport: false
+  allow_workspace_write: false
+  allow_diff_apply: false
+  allow_worker_execution: false
+  allow_prompt_injection: false
+  blocked_reason: implementation_not_enabled
+  max_total_chars: 6000
+  max_payload_bytes: 120000

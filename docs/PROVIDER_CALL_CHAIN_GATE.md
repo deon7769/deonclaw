@@ -1,6 +1,6 @@
-# Provider call chain gate (Tasks 22.37–22.52)
+# Provider call chain gate (Tasks 22.37–22.56)
 
-This document defines the **governance gates before any real provider executor dispatch** (Task 22.52+).
+This document defines the **governance gates before any real provider executor dispatch** (Task 22.56+).
 
 ## Purpose
 
@@ -37,6 +37,14 @@ Task 22.50 adds **real-call proposal new/inspect** — formal future-call propos
 Task 22.51 adds **response change proposal/report** — fixture-only response-to-change contract; no diff, no workspace modification.
 
 Task 22.52 adds **activation readiness audit/report** — final audit before any future controlled activation; `activation_allowed_now: false`.
+
+Task 22.53 adds **activation policy validate/plan** — schema-only `provider-activation-policy.yaml`; all execution flags blocked.
+
+Task 22.54 adds **activation approval** new/approve/inspect — manual operator authorization for future activation only (`activation_authorized_for_future: true`, `activation_allowed_now: false`).
+
+Task 22.55 adds **activation rehearsal** / **rehearsal-report** — metadata-only sequence validation with `future_steps`; no dispatch.
+
+Task 22.56 adds **activation release package** / **release-gate** — last gate before any real provider dispatch; `activation_gate_ready: true`, `real_activation_supported_now: false`.
 
 ## Chain boundary (must stay false)
 
@@ -77,9 +85,13 @@ Before any future real provider dispatch:
 21. **`provider-credential-policy`** validate/plan — env var name policy only (`secret_values_read: false`)
 22. **`provider-real-call-proposal`** new/inspect — future real-call proposal (`provider_call_allowed_now: false`)
 23. **`provider-response-change-proposal`** + **report** — fixture response-to-change metadata (`workspace_modified: false`)
-24. **`provider-activation-readiness-audit`** + **report** — final activation readiness gate (`activation_allowed_now: false`)
+24. **`provider-activation-readiness-audit`** + **report** — activation readiness gate (`activation_allowed_now: false`)
+25. **`provider-activation-policy`** validate/plan — activation policy schema (`enabled: false`, all `allow_*: false`)
+26. **`provider-activation-approval`** new/approve/inspect — future activation authorization with explicit confirm hashes
+27. **`provider-activation-rehearsal`** + **rehearsal-report** — metadata-only activation sequence rehearsal (`future_steps` only)
+28. **`provider-activation-release-package`** + **release-gate** — final activation release gate (`activation_allowed_now: false`)
 
-The full chain through **activation readiness report** is the last gate before any real provider dispatch.
+The full chain through **activation release gate** is the last gate before any real provider dispatch.
 
 ## Final audit expectations
 
@@ -239,6 +251,75 @@ Audit, executor, simulation, activation, and fixture JSON/stdout must not contai
   "network_call": false,
   "transport_called": false,
   "secret_values_read": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+## Activation control plane expectations (Tasks 22.53–22.56)
+
+`deonctl worker codex provider-activation-policy validate` must return:
+
+```json
+{
+  "activation_policy_validated": true,
+  "activation_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "secret_values_read": false,
+  "transport_called": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-activation-approval inspect` must return:
+
+```json
+{
+  "approved": true,
+  "activation_authorized_for_future": true,
+  "activation_allowed_now": false,
+  "provider_call_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "sent_to_provider": false,
+  "secret_values_read": false,
+  "workspace_modified": false,
+  "allowed_use": "provider_activation_policy_only"
+}
+```
+
+`deonctl worker codex provider-activation-rehearsal-report` must return:
+
+```json
+{
+  "activation_rehearsal_ready": true,
+  "activation_sequence_validated": true,
+  "activation_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "secret_values_read": false,
+  "transport_called": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-activation-release-gate` must return:
+
+```json
+{
+  "activation_gate_ready": true,
+  "activation_release_package_ready": true,
+  "real_activation_supported_now": false,
+  "activation_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "secret_values_read": false,
+  "transport_called": false,
+  "sent_to_provider": false,
   "workspace_modified": false,
   "blocked_reason": "implementation_not_enabled"
 }

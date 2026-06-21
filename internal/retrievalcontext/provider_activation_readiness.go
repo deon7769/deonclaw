@@ -72,6 +72,21 @@ func ProviderActivationReadinessAudit(opts ProviderActivationReadinessAuditOptio
 	return result, nil
 }
 
+func LoadProviderActivationReadinessAudit(path string) (ProviderActivationReadinessAuditResult, []byte, error) {
+	if err := validateRelativeSafePath("provider activation readiness audit path", path); err != nil {
+		return ProviderActivationReadinessAuditResult{}, nil, err
+	}
+	data, err := readArtifactBytesNoTextExcerpt("provider activation readiness audit", path)
+	if err != nil {
+		return ProviderActivationReadinessAuditResult{}, nil, err
+	}
+	var result ProviderActivationReadinessAuditResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ProviderActivationReadinessAuditResult{}, nil, fmt.Errorf("parse provider activation readiness audit json: %w", err)
+	}
+	return result, data, nil
+}
+
 func ProviderActivationReadinessReport(opts ProviderActivationReadinessAuditOptions) (ProviderActivationReadinessAuditResult, error) {
 	return ProviderActivationReadinessAudit(opts)
 }

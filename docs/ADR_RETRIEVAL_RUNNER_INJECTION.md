@@ -80,6 +80,10 @@ retrieval-context (runner metadata attachment)
 | 22.50 | `worker codex provider-real-call-proposal` new/inspect (future call proposal, not executable) |
 | 22.51 | `worker codex provider-response-change-proposal` / `report` (fixture-only change proposal) |
 | 22.52 | `worker codex provider-activation-readiness-audit` / `report` (activation readiness, no provider call) |
+| 22.53 | `worker codex provider-activation-policy` validate/plan (activation policy blocked, no provider call) |
+| 22.54 | `worker codex provider-activation-approval` new/approve/inspect (future activation approval, no provider call) |
+| 22.55 | `worker codex provider-activation-rehearsal` / `rehearsal-report` (activation sequence rehearsal, no provider call) |
+| 22.56 | `worker codex provider-activation-release-package` / `release-gate` (activation release gate, no provider call) |
 
 ### What already exists
 
@@ -229,6 +233,14 @@ Future injection design and implementation must **not** include:
 **Task 22.51 (implemented):** *Response change proposal/report* — fixture-only response-to-change contract; `workspace_modified: false`, `diff_applied: false`. **Still no worker execution**, no commits/PRs.
 
 **Task 22.52 (implemented):** *Activation readiness audit/report* — final audit revalidating chain 22.29–22.51; `activation_allowed_now: false`, `blocked_reason: implementation_not_enabled`. **Still no real provider call**.
+
+**Task 22.53 (implemented):** *Activation policy validate/plan* — schema-only `provider-activation-policy.yaml`; all execution flags blocked. **Still no provider call**, no activation now.
+
+**Task 22.54 (implemented):** *Activation approval new/approve/inspect* — manual operator authorization for future activation; four explicit confirm hashes required. **Still no provider call**, `activation_allowed_now: false`.
+
+**Task 22.55 (implemented):** *Activation rehearsal/report* — metadata-only sequence validation with `future_steps`. **Still no transport**, no dispatch.
+
+**Task 22.56 (implemented):** *Activation release package/release-gate* — last gate before any real provider dispatch; `activation_gate_ready: true`, `real_activation_supported_now: false`. **Still no real provider call**.
 
 **Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
 

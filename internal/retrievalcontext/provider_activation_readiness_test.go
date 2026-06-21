@@ -30,6 +30,133 @@ type providerActivationReadinessArtifacts struct {
 	simulationReportPath     string
 }
 
+type providerActivationControlArtifacts struct {
+	providerActivationControlPrerequisites
+	activationApprovalRequestPath string
+	activationApprovalPath        string
+	activationRehearsalPath       string
+	activationReleasePackagePath  string
+}
+
+func runProviderActivationControlPlaneChain(t *testing.T, chain providerCallChainFixture) providerActivationControlArtifacts {
+	t.Helper()
+	prereqs := runProviderActivationControlPlanePrerequisites(t, chain)
+
+	const approvalRequestPath = "provider-activation-approval-request.json"
+	request, err := retrievalcontext.NewProviderActivationApprovalRequest(retrievalcontext.NewProviderActivationApprovalRequestOptions{
+		ActivationPolicyPlanPath:      prereqs.activationPolicyPlanPath,
+		ActivationReadinessAuditPath:  prereqs.activationReadinessAuditPath,
+		RealCallProposalPath:          prereqs.realCallProposalPath,
+		CredentialPolicyPlanPath:      prereqs.credentialPolicyPlanPath,
+		ExecutionSimulationReportPath: prereqs.simulationReportPath,
+		OutputPath:                    approvalRequestPath,
+	})
+	if err != nil {
+		t.Fatalf("NewProviderActivationApprovalRequest() error = %v", err)
+	}
+	if request.Status == lancedbpolicy.StatusFailed || !request.RequestedActivationAuthorized {
+		t.Fatalf("NewProviderActivationApprovalRequest() invalid request: %#v", request)
+	}
+	assertNoTextExcerpt(t, approvalRequestPath)
+
+	const approvalPath = "provider-activation-approval.json"
+	approval, err := retrievalcontext.ApproveProviderActivation(retrievalcontext.ApproveProviderActivationOptions{
+		RequestPath:                   approvalRequestPath,
+		OutputPath:                    approvalPath,
+		ConfirmActivationPolicySHA256: request.ActivationPolicyPlanSHA256,
+		ConfirmReadinessAuditSHA256:   request.ReadinessAuditSHA256,
+		ConfirmRealCallProposalSHA256: request.RealCallProposalSHA256,
+		ConfirmProviderPayloadSHA256:  request.ProviderPayloadSHA256,
+	})
+	if err != nil {
+		t.Fatalf("ApproveProviderActivation() error = %v", err)
+	}
+	assertProviderActivationApprovalBlocked(t, approval)
+	assertNoTextExcerpt(t, approvalPath)
+
+	inspect, err := retrievalcontext.InspectProviderActivationApproval(approvalPath, retrievalcontext.InspectProviderActivationApprovalOptions{
+		RequestPath: approvalRequestPath,
+	})
+	if err != nil {
+		t.Fatalf("InspectProviderActivationApproval() error = %v", err)
+	}
+	if inspect.Status != lancedbpolicy.StatusOK {
+		t.Fatalf("inspect status = %q, failures=%#v", inspect.Status, inspect.Failures)
+	}
+
+	const rehearsalPath = "provider-activation-rehearsal.json"
+	rehearsal, err := retrievalcontext.ProviderActivationRehearsal(retrievalcontext.ProviderActivationRehearsalOptions{
+		ActivationPolicyPlanPath:      prereqs.activationPolicyPlanPath,
+		ActivationApprovalPath:        approvalPath,
+		ActivationReadinessAuditPath:  prereqs.activationReadinessAuditPath,
+		RealCallProposalPath:          prereqs.realCallProposalPath,
+		CredentialPolicyPlanPath:      prereqs.credentialPolicyPlanPath,
+		ExecutionSimulationReportPath: prereqs.simulationReportPath,
+		OutputPath:                    rehearsalPath,
+	})
+	if err != nil {
+		t.Fatalf("ProviderActivationRehearsal() error = %v", err)
+	}
+	assertProviderActivationRehearsalBlocked(t, rehearsal)
+	assertNoTextExcerpt(t, rehearsalPath)
+
+	rehearsalReport, err := retrievalcontext.ProviderActivationRehearsalReport(retrievalcontext.ProviderActivationRehearsalReportOptions{
+		RehearsalPath:                 rehearsalPath,
+		ActivationPolicyPlanPath:      prereqs.activationPolicyPlanPath,
+		ActivationApprovalPath:        approvalPath,
+		ActivationReadinessAuditPath:  prereqs.activationReadinessAuditPath,
+		RealCallProposalPath:          prereqs.realCallProposalPath,
+		CredentialPolicyPlanPath:      prereqs.credentialPolicyPlanPath,
+		ExecutionSimulationReportPath: prereqs.simulationReportPath,
+	})
+	if err != nil {
+		t.Fatalf("ProviderActivationRehearsalReport() error = %v", err)
+	}
+	assertProviderActivationRehearsalBlocked(t, rehearsalReport)
+
+	const releasePackagePath = "provider-activation-release-package.json"
+	pkg, err := retrievalcontext.ProviderActivationReleasePackage(retrievalcontext.ProviderActivationReleasePackageOptions{
+		ActivationPolicyPlanPath:         prereqs.activationPolicyPlanPath,
+		ActivationApprovalPath:           approvalPath,
+		ActivationRehearsalPath:          rehearsalPath,
+		ActivationReadinessAuditPath:     prereqs.activationReadinessAuditPath,
+		RealCallProposalPath:             prereqs.realCallProposalPath,
+		ExecutionSimulationReportPath:    prereqs.simulationReportPath,
+		CredentialPolicyPlanPath:         prereqs.credentialPolicyPlanPath,
+		ResponseChangeProposalReportPath: prereqs.changeProposalReportPath,
+		OutputPath:                       releasePackagePath,
+	})
+	if err != nil {
+		t.Fatalf("ProviderActivationReleasePackage() error = %v", err)
+	}
+	assertProviderActivationReleasePackageBlocked(t, pkg)
+	assertNoTextExcerpt(t, releasePackagePath)
+
+	gate, err := retrievalcontext.ProviderActivationReleaseGate(retrievalcontext.ProviderActivationReleaseGateOptions{
+		ActivationPolicyPlanPath:         prereqs.activationPolicyPlanPath,
+		ActivationApprovalPath:           approvalPath,
+		ActivationRehearsalPath:          rehearsalPath,
+		ActivationReadinessAuditPath:     prereqs.activationReadinessAuditPath,
+		RealCallProposalPath:             prereqs.realCallProposalPath,
+		ExecutionSimulationReportPath:    prereqs.simulationReportPath,
+		CredentialPolicyPlanPath:         prereqs.credentialPolicyPlanPath,
+		ResponseChangeProposalReportPath: prereqs.changeProposalReportPath,
+		ActivationReleasePackagePath:     releasePackagePath,
+	})
+	if err != nil {
+		t.Fatalf("ProviderActivationReleaseGate() error = %v", err)
+	}
+	assertProviderActivationReleaseGateBlocked(t, gate)
+
+	return providerActivationControlArtifacts{
+		providerActivationControlPrerequisites: prereqs,
+		activationApprovalRequestPath:          approvalRequestPath,
+		activationApprovalPath:                 approvalPath,
+		activationRehearsalPath:                rehearsalPath,
+		activationReleasePackagePath:           releasePackagePath,
+	}
+}
+
 func runProviderActivationReadinessChain(t *testing.T, chain providerCallChainFixture) providerActivationReadinessArtifacts {
 	t.Helper()
 	simulation := runProviderExecutionSimulationChain(t, chain)

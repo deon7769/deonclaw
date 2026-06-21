@@ -179,6 +179,15 @@ Usage:
   deonctl worker codex provider-response-change-proposal-report --change-proposal <provider-response-change-proposal.json> --response-fixture <provider-response-fixture.json> --execution-simulation-report <provider-execution-simulation-report.json> --real-call-proposal <provider-real-call-proposal.json> [--output-format text|json]
   deonctl worker codex provider-activation-readiness-audit --credential-policy-plan <provider-credential-policy-plan.json> --real-call-proposal <provider-real-call-proposal.json> --change-proposal <provider-response-change-proposal.json> --execution-simulation-report <provider-execution-simulation-report.json> --release-gate <provider-executor-release-gate.json> [--output-format text|json]
   deonctl worker codex provider-activation-readiness-report --credential-policy-plan <provider-credential-policy-plan.json> --real-call-proposal <provider-real-call-proposal.json> --change-proposal <provider-response-change-proposal.json> --execution-simulation-report <provider-execution-simulation-report.json> --release-gate <provider-executor-release-gate.json> [--output-format text|json]
+  deonctl worker codex provider-activation-policy validate --config <provider-activation-policy.yaml> [--output-format text|json]
+  deonctl worker codex provider-activation-policy plan --config <provider-activation-policy.yaml> --output <provider-activation-policy-plan.json> [--output-format text|json]
+  deonctl worker codex provider-activation-approval new --activation-policy-plan <provider-activation-policy-plan.json> --activation-readiness-audit <provider-activation-readiness-audit.json> --real-call-proposal <provider-real-call-proposal.json> --credential-policy-plan <provider-credential-policy-plan.json> --execution-simulation-report <provider-execution-simulation-report.json> --output <provider-activation-approval-request.json>
+  deonctl worker codex provider-activation-approval approve --request <provider-activation-approval-request.json> --output <provider-activation-approval.json> --confirm-activation-policy-sha256 <sha256> --confirm-readiness-audit-sha256 <sha256> --confirm-real-call-proposal-sha256 <sha256> --confirm-provider-payload-sha256 <sha256>
+  deonctl worker codex provider-activation-approval inspect --approval <provider-activation-approval.json> [--request <provider-activation-approval-request.json>] [--output-format text|json]
+  deonctl worker codex provider-activation-rehearsal --activation-policy-plan <provider-activation-policy-plan.json> --activation-approval <provider-activation-approval.json> --activation-readiness-audit <provider-activation-readiness-audit.json> --real-call-proposal <provider-real-call-proposal.json> --credential-policy-plan <provider-credential-policy-plan.json> --execution-simulation-report <provider-execution-simulation-report.json> --output <provider-activation-rehearsal.json> [--output-format text|json]
+  deonctl worker codex provider-activation-rehearsal-report --rehearsal <provider-activation-rehearsal.json> --activation-policy-plan <provider-activation-policy-plan.json> --activation-approval <provider-activation-approval.json> --activation-readiness-audit <provider-activation-readiness-audit.json> --real-call-proposal <provider-real-call-proposal.json> --credential-policy-plan <provider-credential-policy-plan.json> --execution-simulation-report <provider-execution-simulation-report.json> [--output-format text|json]
+  deonctl worker codex provider-activation-release-package --activation-policy-plan <provider-activation-policy-plan.json> --activation-approval <provider-activation-approval.json> --activation-rehearsal <provider-activation-rehearsal.json> --activation-readiness-audit <provider-activation-readiness-audit.json> --real-call-proposal <provider-real-call-proposal.json> --execution-simulation-report <provider-execution-simulation-report.json> --credential-policy-plan <provider-credential-policy-plan.json> --response-change-proposal-report <provider-response-change-proposal-report.json> --output <provider-activation-release-package.json> [--output-format text|json]
+  deonctl worker codex provider-activation-release-gate --activation-policy-plan <provider-activation-policy-plan.json> --activation-approval <provider-activation-approval.json> --activation-rehearsal <provider-activation-rehearsal.json> --activation-readiness-audit <provider-activation-readiness-audit.json> --real-call-proposal <provider-real-call-proposal.json> --execution-simulation-report <provider-execution-simulation-report.json> --credential-policy-plan <provider-credential-policy-plan.json> --response-change-proposal-report <provider-response-change-proposal-report.json> --activation-release-package <provider-activation-release-package.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1376,6 +1385,98 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexProviderActivationReadinessReport(opts, stdout, stderr)
+			case "provider-activation-policy":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "validate":
+					subOpts, err := parseCodexProviderActivationPolicyValidateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderActivationPolicyValidate(subOpts, stdout, stderr)
+				case "plan":
+					subOpts, err := parseCodexProviderActivationPolicyPlanOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderActivationPolicyPlan(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-activation-approval":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					subOpts, err := parseCodexProviderActivationApprovalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderActivationApprovalNew(subOpts, stdout, stderr)
+				case "approve":
+					subOpts, err := parseCodexProviderActivationApprovalApproveOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderActivationApprovalApprove(subOpts, stdout, stderr)
+				case "inspect":
+					subOpts, err := parseCodexProviderActivationApprovalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderActivationApprovalInspect(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-activation-rehearsal":
+				opts, err := parseCodexProviderActivationRehearsalOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderActivationRehearsal(opts, stdout, stderr)
+			case "provider-activation-rehearsal-report":
+				opts, err := parseCodexProviderActivationRehearsalReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderActivationRehearsalReport(opts, stdout, stderr)
+			case "provider-activation-release-package":
+				opts, err := parseCodexProviderActivationReleasePackageOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderActivationReleasePackage(opts, stdout, stderr)
+			case "provider-activation-release-gate":
+				opts, err := parseCodexProviderActivationReleaseGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderActivationReleaseGate(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {

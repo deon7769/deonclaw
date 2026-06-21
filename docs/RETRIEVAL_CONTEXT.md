@@ -67,7 +67,11 @@ Implemented now:
 - `deonctl worker codex provider-real-call-proposal` new/inspect (Task 22.50, real-call proposal not executable)
 - `deonctl worker codex provider-response-change-proposal` / `report` (Task 22.51, fixture-only change proposal)
 - `deonctl worker codex provider-activation-readiness-audit` / `report` (Task 22.52, activation readiness audit)
-- `configs/examples/retrieval-injection-policy.yaml` example injection policy
+- `deonctl worker codex provider-activation-policy` validate/plan (Task 22.53, activation policy blocked)
+- `deonctl worker codex provider-activation-approval` new/approve/inspect (Task 22.54, future activation approval)
+- `deonctl worker codex provider-activation-rehearsal` / `rehearsal-report` (Task 22.55, activation sequence rehearsal)
+- `deonctl worker codex provider-activation-release-package` / `release-gate` (Task 22.56, activation release gate)
+- `configs/examples/provider-activation-policy.yaml` example activation policy
 
 Not implemented yet:
 
@@ -1427,6 +1431,107 @@ Rules:
 - revalidates chain 22.29–22.51
 - `activation_readiness_ready: true`, `activation_allowed_now: false`, `blocked_reason: implementation_not_enabled`
 - no provider call, network, transport, secrets, or workspace changes
+
+### Activation policy (Task 22.53)
+
+~~~bash
+deonctl worker codex provider-activation-policy validate \
+  --config configs/examples/provider-activation-policy.yaml \
+  --output-format json
+
+deonctl worker codex provider-activation-policy plan \
+  --config configs/examples/provider-activation-policy.yaml \
+  --output artifacts/<run-id>/provider-activation-policy-plan.json \
+  --output-format json
+~~~
+
+Rules:
+
+- `enabled: false`; all `allow_*: false`
+- requires readiness audit, real-call proposal, credential policy, simulation report, release gate, and manual approval flags true in schema
+- metadata-only plan; `activation_allowed_now: false`
+
+### Activation approval (Task 22.54)
+
+~~~bash
+deonctl worker codex provider-activation-approval new \
+  --activation-policy-plan artifacts/<run-id>/provider-activation-policy-plan.json \
+  --activation-readiness-audit artifacts/<run-id>/provider-activation-readiness-audit.json \
+  --real-call-proposal artifacts/<run-id>/provider-real-call-proposal.json \
+  --credential-policy-plan artifacts/<run-id>/provider-credential-policy-plan.json \
+  --execution-simulation-report artifacts/<run-id>/provider-execution-simulation-report.json \
+  --output artifacts/<run-id>/provider-activation-approval-request.json
+
+deonctl worker codex provider-activation-approval approve \
+  --request artifacts/<run-id>/provider-activation-approval-request.json \
+  --output artifacts/<run-id>/provider-activation-approval.json \
+  --confirm-activation-policy-sha256 <sha256> \
+  --confirm-readiness-audit-sha256 <sha256> \
+  --confirm-real-call-proposal-sha256 <sha256> \
+  --confirm-provider-payload-sha256 <sha256>
+
+deonctl worker codex provider-activation-approval inspect \
+  --approval artifacts/<run-id>/provider-activation-approval.json \
+  --request artifacts/<run-id>/provider-activation-approval-request.json \
+  --output-format json
+~~~
+
+Rules:
+
+- binds policy plan, readiness audit, real-call proposal, credential plan, and simulation report hashes
+- approve requires four explicit confirm hashes; `activation_authorized_for_future: true`, `activation_allowed_now: false`
+- `allowed_use: provider_activation_policy_only`
+
+### Activation rehearsal (Task 22.55)
+
+~~~bash
+deonctl worker codex provider-activation-rehearsal \
+  --activation-policy-plan artifacts/<run-id>/provider-activation-policy-plan.json \
+  --activation-approval artifacts/<run-id>/provider-activation-approval.json \
+  --activation-readiness-audit artifacts/<run-id>/provider-activation-readiness-audit.json \
+  --real-call-proposal artifacts/<run-id>/provider-real-call-proposal.json \
+  --credential-policy-plan artifacts/<run-id>/provider-credential-policy-plan.json \
+  --execution-simulation-report artifacts/<run-id>/provider-execution-simulation-report.json \
+  --output artifacts/<run-id>/provider-activation-rehearsal.json \
+  --output-format json
+
+deonctl worker codex provider-activation-rehearsal-report \
+  --rehearsal artifacts/<run-id>/provider-activation-rehearsal.json \
+  ...same inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- metadata-only sequence validation with `future_steps`; no provider call or transport
+- `activation_rehearsal_ready: true`, `activation_allowed_now: false`
+
+### Activation release package / gate (Task 22.56)
+
+~~~bash
+deonctl worker codex provider-activation-release-package \
+  --activation-policy-plan artifacts/<run-id>/provider-activation-policy-plan.json \
+  --activation-approval artifacts/<run-id>/provider-activation-approval.json \
+  --activation-rehearsal artifacts/<run-id>/provider-activation-rehearsal.json \
+  --activation-readiness-audit artifacts/<run-id>/provider-activation-readiness-audit.json \
+  --real-call-proposal artifacts/<run-id>/provider-real-call-proposal.json \
+  --execution-simulation-report artifacts/<run-id>/provider-execution-simulation-report.json \
+  --credential-policy-plan artifacts/<run-id>/provider-credential-policy-plan.json \
+  --response-change-proposal-report artifacts/<run-id>/provider-response-change-proposal-report.json \
+  --output artifacts/<run-id>/provider-activation-release-package.json \
+  --output-format json
+
+deonctl worker codex provider-activation-release-gate \
+  ...same inputs... \
+  --activation-release-package artifacts/<run-id>/provider-activation-release-package.json \
+  --output-format json
+~~~
+
+Rules:
+
+- last gate before any real provider dispatch
+- `activation_gate_ready: true`, `real_activation_supported_now: false`, `activation_allowed_now: false`
+- consolidates activation policy, approval, rehearsal, readiness audit, simulation, credential, and change-proposal report hashes
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 
