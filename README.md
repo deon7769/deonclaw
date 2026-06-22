@@ -36,6 +36,23 @@ The first MVP focuses on:
 - memory proposal/apply/restore workflow
 - run observability through execution traces and reports
 
+## Epic 23 direction
+
+Tasks 22.0–22.68 established the contract, governance, approval, hash, anti-leak, fixture and provider-dispatch design foundation.
+
+Epic 23 shifts DeonClaw from manual contract-heavy execution toward a stable personal multi-agent runtime:
+
+- [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md) — full implementation map and dependency graph
+- [Insight and Learning Loop](docs/INSIGHT_LEARNING_LOOP.md) — Cursor/Hermes-inspired self-evaluation after runs, commits and corrections
+- [Universal Skill Registry](docs/UNIVERSAL_SKILLS.md) — AgentSkills-compatible `SKILL.md` installation, provenance, permissions and session snapshots
+- [Persistent Agents and Sessions](docs/PERSISTENT_AGENTS.md) — agent identities, roles, lifecycle, sessions, inbox and delegation
+- [Proactive Runtime](docs/PROACTIVE_RUNTIME.md) — `deond`, cron, heartbeat, hooks, wakeup queue and recovery
+- [Budgets, Costs and Leases](docs/BUDGETS_AND_COSTS.md) — work queue, execution leases, usage events, reservations and hard stops
+- [OpenClaw Migration Plan](docs/OPENCLAW_MIGRATION.md) — inspect, plan, passive import, shadow mode, cutover and rollback
+- [Rich Runtime Actions](docs/RICH_RUNTIME_ACTIONS.md) — stable Git, browser, review and worker-session actions independent of any one agent UI
+
+The implementation priority is to prove vertical slices, not to add more metadata-only gates.
+
 ## Memory direction
 
 `mysecondbrain` is the general memory base.
@@ -153,6 +170,13 @@ Implemented:
 
 Not implemented yet:
 
+- Insight and learning loop over runs, commits, corrections, and skills
+- Universal skill registry and portable session skill snapshots
+- Persistent agents, sessions, inbox, assignment, and delegation
+- `deond` daemon, cron, heartbeat, hooks, and wakeup queue
+- Work queue, execution leases, budgets, usage events, and hard stops
+- OpenClaw migration inspect/plan/apply/shadow/cutover/rollback
+- Rich Git/browser/action contracts and future UI/API surfaces
 - real fallback execution
 - Codex Docker worker runtime
 - MCP execution/manager for automatic real external MCP tool orchestration
