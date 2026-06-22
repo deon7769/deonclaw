@@ -112,6 +112,9 @@ Usage:
   deonctl insights policy validate --config <insight-policy.yaml>
   deonctl insights evidence build --store <path> --run <run-id> --output <evidence-bundle.json> [--trigger <trigger>] [--policy-ref <path>]
   deonctl insights trigger evaluate --config <insight-policy.yaml> --evidence <evidence-bundle.json> [--output-format text|json]
+  deonctl insights evaluate dry-run --evidence <evidence-bundle.json> --reviewer codex|opencode --prompt-output <prompt.txt> --plan-output <evaluation-plan.json>
+  deonctl insights evaluate --evidence <evidence-bundle.json> --reviewer codex|opencode --response <reviewer-response.json> --output <insight-report.json>
+  deonctl insights report --insight <insight-report.json> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
@@ -1807,6 +1810,38 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runInsightsTriggerEvaluate(opts, stdout, stderr)
+		case "evaluate":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "dry-run":
+				opts, err := parseInsightsEvaluateDryRunOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsEvaluateDryRun(opts, stdout, stderr)
+			default:
+				evalArgs := args[2:]
+				opts, err := parseInsightsEvaluateOptions(evalArgs)
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsEvaluate(opts, stdout, stderr)
+			}
+		case "report":
+			opts, err := parseInsightsReportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runInsightsReport(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2

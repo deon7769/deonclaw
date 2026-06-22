@@ -138,7 +138,8 @@ Implemented:
 - provider credential policy config (`configs/examples/provider-credential-policy.yaml`), no provider call
 - provider adapters config (`configs/examples/provider-adapters.yaml`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
-- insight trigger policy validate, evidence bundle build from runs, and trigger evaluate (`insights policy validate`, `insights evidence build`, `insights trigger evaluate`), no evaluator or learning proposals yet
+- insight trigger policy validate, evidence bundle build from runs, and trigger evaluate (`insights policy validate`, `insights evidence build`, `insights trigger evaluate`), no worker execution for review yet
+- insight reviewer dry-run/evaluate and insight report materialization (`insights evaluate dry-run`, `insights evaluate`, `insights report`), no live Codex/OpenCode reviewer execution or learning proposals yet
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -146,7 +147,7 @@ Implemented:
 
 Not implemented yet:
 
-- Insight evaluator, learning proposals, approval/apply, and effectiveness measurement (Epic 23.1+)
+- Learning proposals, approval/apply, and effectiveness measurement (Epic 23.2+)
 - Universal skill registry and portable session skill snapshots (Epic 23B)
 - Persistent agents, sessions, inbox, assignment, and delegation (Epic 23C)
 - `deond` daemon, cron, heartbeat, hooks, and wakeup queue (Epic 23D)
@@ -375,7 +376,7 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence (Epic 23 — see [docs/EPIC_23_ROADMAP.md](docs/EPIC_23_ROADMAP.md)):
 
-1. Insight evaluator and learning-proposal lifecycle (`23.1–23.3`)
+1. Learning-proposal lifecycle, approval, apply, and effectiveness measurement (`23.2–23.3`)
 2. Universal skill registry (`23.4–23.7`)
 3. Persistent agents and sessions (`23.8–23.11`)
 4. Proactive runtime (`deond`, cron, heartbeat) (`23.12–23.15`)

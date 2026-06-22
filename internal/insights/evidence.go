@@ -384,14 +384,18 @@ func bundleHash(bundle EvidenceBundle) (string, error) {
 }
 
 func scanBundleForSecrets(bundle EvidenceBundle) error {
-	data, err := json.Marshal(bundle)
+	return scanJSONForSecrets(bundle)
+}
+
+func scanJSONForSecrets(value any) error {
+	data, err := json.Marshal(value)
 	if err != nil {
 		return err
 	}
 	text := string(data)
 	for _, pattern := range secretPatterns {
 		if pattern.MatchString(text) {
-			return fmt.Errorf("evidence bundle contains secret-like value matching %q", pattern.String())
+			return fmt.Errorf("payload contains secret-like value matching %q", pattern.String())
 		}
 	}
 	return nil
