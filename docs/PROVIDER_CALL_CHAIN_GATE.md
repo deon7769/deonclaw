@@ -1,6 +1,6 @@
-# Provider call chain gate (Tasks 22.37–22.60)
+# Provider call chain gate (Tasks 22.37–22.64)
 
-This document defines the **governance gates before any real provider executor dispatch** (Task 22.60+).
+This document defines the **governance gates before any real provider executor dispatch** (Task 22.64+).
 
 ## Purpose
 
@@ -52,7 +52,15 @@ Task 22.58 adds **operator review bundle/report** — metadata-only human review
 
 Task 22.59 adds **activation kill-switch validate/plan** — `provider-activation-kill-switch.yaml` with `global_disabled: true` and all `block_*: true`.
 
-Task 22.60 adds **activation final audit / CI report** — last gate before any real provider dispatch; `final_audit_ready: true`, `kill_switch_active: true`, `operator_review_required: true`.
+Task 22.60 adds **activation final audit / CI report** — last activation gate before real dispatch design; `final_audit_ready: true`, `kill_switch_active: true`, `operator_review_required: true`.
+
+Task 22.61 adds **provider secret-read proposal** new/inspect — declares future allowed env var names only; `secret_read_allowed_now: false`, `secret_values_read: false`.
+
+Task 22.62 adds **real transport implementation plan/report** — future transport contract metadata; `BlockedProviderTransport` remains active; no SDK, no network, no `Deliver`.
+
+Task 22.63 adds **real dispatch command design/report** — future `provider-real-dispatch execute` command metadata; `execute_subcommand_registered: false`.
+
+Task 22.64 adds **real activation design review package/gate** — consolidates 22.61–22.63; `real_activation_design_gate_ready: true`, `real_dispatch_supported_now: false`.
 
 ## Chain boundary (must stay false)
 
@@ -101,8 +109,12 @@ Before any future real provider dispatch:
 29. **`provider-activation-operator-review-bundle`** + **report** — human operator review metadata (`operator_approved_now: false`)
 30. **`provider-activation-kill-switch`** validate/plan — global kill-switch manifest (`global_disabled: true`, all `block_*: true`)
 31. **`provider-activation-final-audit`** + **ci-report** — final activation audit (`kill_switch_active: true`, `ci_observability_ready: true`)
+32. **`provider-secret-read-proposal`** new/inspect — future secret-read env var names only (`secret_values_read: false`)
+33. **`provider-real-transport-implementation-plan`** + **report** — future transport contract (`transport_enabled: false`, `BlockedProviderTransport` active)
+34. **`provider-real-dispatch-design`** + **report** — future dispatch command design (`execute_subcommand_registered: false`)
+35. **`provider-real-activation-design-review-package`** + **gate** — real dispatch design review (`real_dispatch_supported_now: false`)
 
-The full chain through **activation final audit / CI report** is the last gate before any real provider dispatch. Kill-switch must remain active before any future real dispatch design.
+The full chain through **real activation design review gate** is the last gate before any real provider dispatch execution. Kill-switch must remain active; operator review remains required; no secret reads, no provider call, no transport, no network.
 
 ## Final audit expectations
 
@@ -403,6 +415,73 @@ Audit, executor, simulation, activation, and fixture JSON/stdout must not contai
   "network_call": false,
   "secret_values_read": false,
   "transport_called": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+## Real dispatch design expectations (Tasks 22.61–22.64)
+
+`deonctl worker codex provider-secret-read-proposal new` must return:
+
+```json
+{
+  "secret_read_proposal_ready": true,
+  "secret_read_allowed_now": false,
+  "secret_values_read": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "activation_allowed_now": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-real-transport-implementation-plan` must return:
+
+```json
+{
+  "real_transport_implementation_plan_ready": true,
+  "real_transport_available_now": false,
+  "transport_enabled": false,
+  "transport_called": false,
+  "provider_call": false,
+  "network_call": false,
+  "secret_values_read": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-real-dispatch-design` must return:
+
+```json
+{
+  "real_dispatch_design_ready": true,
+  "real_dispatch_command_available": false,
+  "execute_subcommand_registered": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "secret_values_read": false,
+  "sent_to_provider": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-real-activation-design-review-gate` must return:
+
+```json
+{
+  "real_activation_design_review_ready": true,
+  "real_activation_design_gate_ready": true,
+  "real_dispatch_supported_now": false,
+  "activation_allowed_now": false,
+  "secret_values_read": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "sent_to_provider": false,
+  "received_from_provider": false,
   "workspace_modified": false,
   "blocked_reason": "implementation_not_enabled"
 }

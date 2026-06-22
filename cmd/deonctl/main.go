@@ -194,6 +194,14 @@ Usage:
   deonctl worker codex provider-activation-kill-switch plan --config <provider-activation-kill-switch.yaml> --output <provider-activation-kill-switch-plan.json> [--output-format text|json]
   deonctl worker codex provider-activation-final-audit --activation-release-package <provider-activation-release-package.json> --activation-release-gate <provider-activation-release-gate.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> [--activation-policy-plan <provider-activation-policy-plan.json>] [--activation-readiness-audit <provider-activation-readiness-audit.json>] [--real-call-proposal <provider-real-call-proposal.json>] [--credential-policy-plan <provider-credential-policy-plan.json>] [--response-change-proposal-report <provider-response-change-proposal-report.json>] [--activation-approval <provider-activation-approval.json>] [--activation-rehearsal <provider-activation-rehearsal.json>] [--execution-simulation-report <provider-execution-simulation-report.json>] [--output-format text|json]
   deonctl worker codex provider-activation-ci-report --activation-release-package <provider-activation-release-package.json> --activation-release-gate <provider-activation-release-gate.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> [--activation-policy-plan <provider-activation-policy-plan.json>] [--activation-readiness-audit <provider-activation-readiness-audit.json>] [--real-call-proposal <provider-real-call-proposal.json>] [--credential-policy-plan <provider-credential-policy-plan.json>] [--response-change-proposal-report <provider-response-change-proposal-report.json>] [--activation-approval <provider-activation-approval.json>] [--activation-rehearsal <provider-activation-rehearsal.json>] [--execution-simulation-report <provider-execution-simulation-report.json>] [--output-format text|json]
+  deonctl worker codex provider-secret-read-proposal new --credential-policy-plan <provider-credential-policy-plan.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --activation-release-gate <provider-activation-release-gate.json> --output <provider-secret-read-proposal.json> [--output-format text|json]
+  deonctl worker codex provider-secret-read-proposal inspect --proposal <provider-secret-read-proposal.json> --credential-policy-plan <provider-credential-policy-plan.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --activation-release-gate <provider-activation-release-gate.json> [--output-format text|json]
+  deonctl worker codex provider-real-transport-implementation-plan --secret-read-proposal <provider-secret-read-proposal.json> --provider-adapter-plan <provider-adapter-plan.json> --activation-final-audit <provider-activation-final-audit.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --output <provider-real-transport-implementation-plan.json> [--output-format text|json]
+  deonctl worker codex provider-real-transport-implementation-report --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --secret-read-proposal <provider-secret-read-proposal.json> --provider-adapter-plan <provider-adapter-plan.json> --activation-final-audit <provider-activation-final-audit.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> [--output-format text|json]
+  deonctl worker codex provider-real-dispatch-design --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --secret-read-proposal <provider-secret-read-proposal.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --provider-request-envelope <provider-request-envelope.json> --provider-real-call-proposal <provider-real-call-proposal.json> --output <provider-real-dispatch-design.json> [--output-format text|json]
+  deonctl worker codex provider-real-dispatch-design-report --real-dispatch-design <provider-real-dispatch-design.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --secret-read-proposal <provider-secret-read-proposal.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --provider-request-envelope <provider-request-envelope.json> --provider-real-call-proposal <provider-real-call-proposal.json> [--output-format text|json]
+  deonctl worker codex provider-real-activation-design-review-package --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> --output <provider-real-activation-design-review-package.json> [--output-format text|json]
+  deonctl worker codex provider-real-activation-design-review-gate --design-review-package <provider-real-activation-design-review-package.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1541,6 +1549,80 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexProviderActivationCIReport(opts, stdout, stderr)
+			case "provider-secret-read-proposal":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					subOpts, err := parseCodexProviderSecretReadProposalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderSecretReadProposalNew(subOpts, stdout, stderr)
+				case "inspect":
+					subOpts, err := parseCodexProviderSecretReadProposalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderSecretReadProposalInspect(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-real-transport-implementation-plan":
+				opts, err := parseCodexProviderRealTransportImplementationPlanOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealTransportImplementationPlan(opts, stdout, stderr)
+			case "provider-real-transport-implementation-report":
+				opts, err := parseCodexProviderRealTransportImplementationReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealTransportImplementationReport(opts, stdout, stderr)
+			case "provider-real-dispatch-design":
+				opts, err := parseCodexProviderRealDispatchDesignOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealDispatchDesign(opts, stdout, stderr)
+			case "provider-real-dispatch-design-report":
+				opts, err := parseCodexProviderRealDispatchDesignReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealDispatchDesignReport(opts, stdout, stderr)
+			case "provider-real-activation-design-review-package":
+				opts, err := parseCodexProviderRealActivationDesignReviewPackageOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealActivationDesignReviewPackage(opts, stdout, stderr)
+			case "provider-real-activation-design-review-gate":
+				opts, err := parseCodexProviderRealActivationDesignReviewGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealActivationDesignReviewGate(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {

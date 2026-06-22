@@ -88,6 +88,10 @@ retrieval-context (runner metadata attachment)
 | 22.58 | `worker codex provider-activation-operator-review-bundle` / `report` (operator review metadata, no provider call) |
 | 22.59 | `worker codex provider-activation-kill-switch` validate/plan (kill-switch manifest, no provider call) |
 | 22.60 | `worker codex provider-activation-final-audit` / `ci-report` (final audit gate, no provider call) |
+| 22.61 | `worker codex provider-secret-read-proposal` new/inspect (future env var names only, no secret read) |
+| 22.62 | `worker codex provider-real-transport-implementation-plan` / `report` (future transport contract, no implementation) |
+| 22.63 | `worker codex provider-real-dispatch-design` / `report` (future dispatch command design, no execute route) |
+| 22.64 | `worker codex provider-real-activation-design-review-package` / `gate` (real dispatch design review gate, no execution) |
 
 ### What already exists
 
@@ -252,7 +256,9 @@ Future injection design and implementation must **not** include:
 
 **Task 22.59 (implemented):** *Activation kill-switch validate/plan* — `provider-activation-kill-switch.yaml` with `global_disabled: true` and all `block_*: true`. **Still no activation path**.
 
-**Task 22.60 (implemented):** *Activation final audit/CI report* — last gate before any real provider dispatch design; `final_audit_ready: true`, `kill_switch_active: true`. **Still no real provider call**.
+**Task 22.60 (implemented):** *Activation final audit/CI report* — last activation gate before real dispatch design; `final_audit_ready: true`, `kill_switch_active: true`. **Still no real provider call**.
+
+**Task 22.61–22.64 (implemented):** *Real dispatch design package* — secret-read proposal, transport implementation plan, dispatch command design, and design review gate. `real_activation_design_gate_ready: true`, `real_dispatch_supported_now: false`, `execute_subcommand_registered: false`. **Still no secret read, no provider call, no transport, no network**.
 
 **Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag, enabled policy, and inactive kill-switch removal.
 

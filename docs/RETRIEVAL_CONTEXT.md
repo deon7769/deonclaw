@@ -74,6 +74,10 @@ Implemented now:
 - `deonctl worker codex provider-activation-operator-review-bundle` / `report` (Task 22.58, operator review metadata)
 - `deonctl worker codex provider-activation-kill-switch` validate/plan (Task 22.59, kill-switch manifest)
 - `deonctl worker codex provider-activation-final-audit` / `ci-report` (Task 22.60, final audit / CI observability)
+- `deonctl worker codex provider-secret-read-proposal` new/inspect (Task 22.61, future secret-read env var names only)
+- `deonctl worker codex provider-real-transport-implementation-plan` / `report` (Task 22.62, future transport contract)
+- `deonctl worker codex provider-real-dispatch-design` / `report` (Task 22.63, future dispatch command design)
+- `deonctl worker codex provider-real-activation-design-review-package` / `gate` (Task 22.64, real dispatch design review gate)
 - `configs/examples/provider-activation-policy.yaml` example activation policy
 - `configs/examples/provider-activation-kill-switch.yaml` example activation kill-switch
 
@@ -1597,6 +1601,49 @@ Rules:
 - last gate before any real provider dispatch design
 - `final_audit_ready: true`, `ci_observability_ready: true`, `kill_switch_active: true`
 - CI report lists expected local commands and PR checklist (no GitHub Actions API dependency)
+
+### Real dispatch design package (Tasks 22.61–22.64)
+
+~~~bash
+deonctl worker codex provider-secret-read-proposal new \
+  --credential-policy-plan artifacts/<run-id>/provider-credential-policy-plan.json \
+  --activation-final-audit artifacts/<run-id>/provider-activation-final-audit.json \
+  --activation-ci-report artifacts/<run-id>/provider-activation-ci-report.json \
+  --activation-release-gate artifacts/<run-id>/provider-activation-release-gate.json \
+  --output artifacts/<run-id>/provider-secret-read-proposal.json
+
+deonctl worker codex provider-real-transport-implementation-plan \
+  --secret-read-proposal artifacts/<run-id>/provider-secret-read-proposal.json \
+  --provider-adapter-plan artifacts/<run-id>/provider-adapter-plan.json \
+  --activation-final-audit artifacts/<run-id>/provider-activation-final-audit.json \
+  --operator-review-bundle artifacts/<run-id>/provider-activation-operator-review-bundle.json \
+  --kill-switch-plan artifacts/<run-id>/provider-activation-kill-switch-plan.json \
+  --output artifacts/<run-id>/provider-real-transport-implementation-plan.json
+
+deonctl worker codex provider-real-dispatch-design \
+  --real-transport-implementation-plan artifacts/<run-id>/provider-real-transport-implementation-plan.json \
+  --secret-read-proposal artifacts/<run-id>/provider-secret-read-proposal.json \
+  --activation-final-audit artifacts/<run-id>/provider-activation-final-audit.json \
+  --activation-ci-report artifacts/<run-id>/provider-activation-ci-report.json \
+  --provider-request-envelope artifacts/<run-id>/provider-request-envelope.json \
+  --provider-real-call-proposal artifacts/<run-id>/provider-real-call-proposal.json \
+  --output artifacts/<run-id>/provider-real-dispatch-design.json
+
+deonctl worker codex provider-real-activation-design-review-package \
+  ...design artifacts... \
+  --output artifacts/<run-id>/provider-real-activation-design-review-package.json
+
+deonctl worker codex provider-real-activation-design-review-gate \
+  --design-review-package artifacts/<run-id>/provider-real-activation-design-review-package.json \
+  ...revalidation inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- metadata-only design package; no secret reads, no provider call, no transport, no network
+- `execute_subcommand_registered: false` — future `provider-real-dispatch execute` is design-only
+- `real_activation_design_gate_ready: true` with `real_dispatch_supported_now: false`
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 

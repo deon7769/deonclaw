@@ -379,6 +379,18 @@ func WriteProviderActivationReleasePackageJSON(result ProviderActivationReleaseP
 	return writeProviderActivationReleasePackageOutJSON(result, out)
 }
 
+func LoadProviderActivationReleaseGate(path string) (ProviderActivationReleaseGateResult, []byte, error) {
+	data, err := readArtifactBytesNoTextExcerpt("provider activation release gate", path)
+	if err != nil {
+		return ProviderActivationReleaseGateResult{}, nil, err
+	}
+	var result ProviderActivationReleaseGateResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ProviderActivationReleaseGateResult{}, nil, fmt.Errorf("parse provider activation release gate json: %w", err)
+	}
+	return result, data, nil
+}
+
 func WriteProviderActivationReleaseGateJSON(result ProviderActivationReleaseGateResult, out io.Writer) error {
 	data, err := json.MarshalIndent(result, "", "  ")
 	if err != nil {
