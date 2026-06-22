@@ -92,28 +92,42 @@ func PathsSubset(child []string, parent []string) bool {
 	return true
 }
 
+func normalizePathPattern(path string) string {
+	return strings.Trim(strings.TrimSpace(path), "/")
+}
+
 func pathAllowedByParent(childPath string, parent []string) bool {
-	childPath = strings.TrimSpace(childPath)
+	childPath = normalizePathPattern(childPath)
 	for _, parentPath := range parent {
-		parentPath = strings.TrimSpace(parentPath)
+		parentPath = normalizePathPattern(parentPath)
 		if parentPath == "" {
 			continue
 		}
-		if parentPath == childPath {
+		if pathPatternCovers(parentPath, childPath) {
 			return true
 		}
-		if strings.HasSuffix(parentPath, "/**") {
-			prefix := strings.TrimSuffix(parentPath, "/**")
-			if strings.HasPrefix(childPath, prefix) {
-				return true
-			}
+	}
+	return false
+}
+
+func pathPatternCovers(parentPath string, childPath string) bool {
+	if parentPath == childPath {
+		return true
+	}
+	if strings.HasSuffix(parentPath, "/**") {
+		prefix := strings.TrimSuffix(parentPath, "/**")
+		return childPath == prefix || strings.HasPrefix(childPath, prefix+"/")
+	}
+	if strings.HasSuffix(parentPath, "/*") {
+		prefix := strings.TrimSuffix(parentPath, "/*")
+		if childPath == prefix {
+			return true
 		}
-		if strings.HasSuffix(parentPath, "/*") {
-			prefix := strings.TrimSuffix(parentPath, "/*")
-			if strings.HasPrefix(childPath, prefix+"/") || childPath == prefix {
-				return true
-			}
+		if !strings.HasPrefix(childPath, prefix+"/") {
+			return false
 		}
+		rest := strings.TrimPrefix(childPath, prefix+"/")
+		return !strings.Contains(rest, "/")
 	}
 	return false
 }

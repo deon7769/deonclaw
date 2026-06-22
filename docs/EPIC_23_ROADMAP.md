@@ -120,6 +120,17 @@ Introduce `deond`, durable schedules, wakeups, cron, heartbeats, active hours, e
 
 Detailed design: [PROACTIVE_RUNTIME.md](PROACTIVE_RUNTIME.md).
 
+**Status:** foundation shipped on `main` (`5224005`). Hardening slice `23.15.1–23.15.4` on branch `cursor/proactive-runtime-hardening-23-15`:
+
+| Slice | Scope |
+|-------|--------|
+| 23.15.1 | Persisted `NextDueAt`, materialize only `due_at <= now`, catch-up/max lateness |
+| 23.15.2 | Atomic SQLite wakeup claims (`UPDATE … WHERE status='queued'`) |
+| 23.15.3 | Skill approval before active, snapshot hash/revision validation, path containment, delegation path subset + privilege guard |
+| 23.15.4 | `make proactive-runtime-smoke` in CI, docs/AGENTS reconciliation |
+
+**Next:** 23E work queue, leases, budgets.
+
 ### 23E — Work Queue, Costs, and Budgets (`23.16–23.19`)
 
 Add atomic checkout, leases, usage normalization, cost events, budget reservations, warning thresholds, hard stops, and budget-aware routing.

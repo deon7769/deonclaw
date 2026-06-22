@@ -27,5 +27,8 @@ jobs:
       - name: Provider call chain fixture smoke
         run: make provider-call-chain-smoke
 
+      - name: Proactive runtime fixture smoke
+        run: make proactive-runtime-smoke
+
       - name: Test
         run: go test ./...

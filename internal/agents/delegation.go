@@ -60,7 +60,7 @@ func BuildDelegationProposal(opts BuildDelegationProposalOptions) (DelegationPro
 		return DelegationProposal{}, fmt.Errorf("delegation depth %d exceeds max %d", depth, maxDepth)
 	}
 	if opts.ChildAgent.Role == "manager" && opts.ParentAgent.Role != "manager" {
-		// privilege escalation guard: child with manager role from non-manager parent needs review
+		return DelegationProposal{}, fmt.Errorf("delegating to manager role child from non-manager parent requires explicit review")
 	}
 	if !PathsSubset(opts.Task.AllowedPaths, opts.ParentWorkItem.AllowedPaths) {
 		return DelegationProposal{}, errors.New("child task paths must be a subset of parent work item paths")

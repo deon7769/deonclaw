@@ -165,6 +165,58 @@ func (s *SQLiteStore) SaveWakeup(ctx context.Context, w wakeup.Wakeup) error {
 	return nil
 }
 
+// ClaimNextDueWakeup atomically claims the earliest queued wakeup with due_at <= now.
+func (s *SQLiteStore) ClaimNextDueWakeup(ctx context.Context, now time.Time) (wakeup.Wakeup, bool, error) {
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return wakeup.Wakeup{}, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	dueCutoff := now.UTC().Format(time.RFC3339Nano)
+	row := tx.QueryRowContext(ctx, `SELECT id, schedule_id, agent_id, due_at, status, idempotency_key, attempt, run_id, config_json, created_at, claimed_at, finished_at
+		FROM wakeups
+		WHERE status = ? AND due_at <= ?
+		ORDER BY due_at ASC, id ASC
+		LIMIT 1`,
+		wakeup.StatusQueued, dueCutoff,
+	)
+	candidate, err := scanWakeup(row)
+	if errors.Is(err, sql.ErrNoRows) {
+		return wakeup.Wakeup{}, false, nil
+	}
+	if err != nil {
+		return wakeup.Wakeup{}, false, err
+	}
+
+	claimedAt := now.UTC().Format(time.RFC3339Nano)
+	result, err := tx.ExecContext(ctx, `UPDATE wakeups
+		SET status = ?, claimed_at = ?, attempt = attempt + 1
+		WHERE id = ? AND status = ?`,
+		wakeup.StatusClaimed, claimedAt, candidate.ID, wakeup.StatusQueued,
+	)
+	if err != nil {
+		return wakeup.Wakeup{}, false, err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return wakeup.Wakeup{}, false, err
+	}
+	if affected == 0 {
+		return wakeup.Wakeup{}, false, nil
+	}
+	if err := tx.Commit(); err != nil {
+		return wakeup.Wakeup{}, false, err
+	}
+	candidate.Status = wakeup.StatusClaimed
+	candidate.ClaimedAt = claimedAt
+	candidate.Attempt++
+	return candidate, true, nil
+}
+
 func (s *SQLiteStore) ListWakeups(ctx context.Context) ([]wakeup.Wakeup, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT id, schedule_id, agent_id, due_at, status, idempotency_key, attempt, run_id, config_json, created_at, claimed_at, finished_at FROM wakeups ORDER BY due_at, id`)
 	if err != nil {
@@ -280,6 +332,10 @@ func (r ProactiveRepo) ListWakeups() ([]wakeup.Wakeup, error) {
 
 func (r ProactiveRepo) SaveWakeup(w wakeup.Wakeup) error {
 	return r.Store.SaveWakeup(r.Ctx, w)
+}
+
+func (r ProactiveRepo) ClaimNextDueWakeup(now time.Time) (wakeup.Wakeup, bool, error) {
+	return r.Store.ClaimNextDueWakeup(r.Ctx, now)
 }
 
 func (r ProactiveRepo) GetAgent(id string) (agents.Agent, error) {

@@ -77,8 +77,23 @@ func ValidateConfig(cfg Config) error {
 		if err := validateConcurrencyPolicy(s.ConcurrencyPolicy); err != nil {
 			errs = append(errs, fmt.Errorf("schedule %q: %w", s.ID, err))
 		}
+		if err := validateCatchUpPolicy(s.CatchUpPolicy); err != nil {
+			errs = append(errs, fmt.Errorf("schedule %q: %w", s.ID, err))
+		}
+		if s.MaxLatenessSeconds < 0 {
+			errs = append(errs, fmt.Errorf("schedule %q max_lateness_seconds must be >= 0", s.ID))
+		}
 	}
 	return errors.Join(errs...)
+}
+
+func validateCatchUpPolicy(policy string) error {
+	switch policy {
+	case "", CatchUpNextOnly, CatchUpAll:
+		return nil
+	default:
+		return fmt.Errorf("catch_up_policy %q is not supported", policy)
+	}
 }
 
 func validateKindFields(s Schedule) error {
@@ -137,7 +152,7 @@ func SyncFromConfig(cfg Config, now time.Time) []Schedule {
 		}
 		s.UpdatedAt = stamp
 		if s.NextDueAt == "" {
-			if next, err := NextDue(s, now); err == nil {
+			if next, err := ComputeNextDueAt(s, now); err == nil && !next.IsZero() {
 				s.NextDueAt = next.Format(time.RFC3339Nano)
 			}
 		}

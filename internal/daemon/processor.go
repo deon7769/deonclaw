@@ -32,6 +32,7 @@ type Repository interface {
 	SaveSchedule(schedule.Schedule) error
 	ListWakeups() ([]wakeup.Wakeup, error)
 	SaveWakeup(wakeup.Wakeup) error
+	ClaimNextDueWakeup(now time.Time) (wakeup.Wakeup, bool, error)
 	GetAgent(id string) (agents.Agent, error)
 	GetHeartbeatState(agentID string) (heartbeat.State, error)
 	SaveHeartbeatState(state heartbeat.State) error
@@ -168,15 +169,12 @@ func RunOnce(repo Repository, opts RunOnceOptions) (RunOnceResult, error) {
 		}
 	}
 	var candidate *wakeup.Wakeup
-	for i := range existing {
-		w := existing[i]
-		if w.Status != wakeup.StatusQueued {
-			continue
-		}
-		if candidate == nil || w.DueAt < candidate.DueAt {
-			copy := w
-			candidate = &copy
-		}
+	claimed, ok, err := repo.ClaimNextDueWakeup(now)
+	if err != nil {
+		return RunOnceResult{}, err
+	}
+	if ok {
+		candidate = &claimed
 	}
 	if candidate == nil {
 		return result, nil
@@ -214,14 +212,7 @@ func RunOnce(repo Repository, opts RunOnceOptions) (RunOnceResult, error) {
 		result.Skipped++
 		return result, nil
 	}
-	claimed, err := wakeup.Claim(*candidate, now)
-	if err != nil {
-		return RunOnceResult{}, err
-	}
-	if !claimed.Claimed {
-		return result, nil
-	}
-	running := wakeup.MarkRunning(claimed.Wakeup, now)
+	running := wakeup.MarkRunning(*candidate, now)
 	if err := repo.SaveWakeup(running); err != nil {
 		return RunOnceResult{}, err
 	}

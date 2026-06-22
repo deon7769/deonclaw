@@ -295,3 +295,51 @@ skill_policy:
     - draft
     - active
 `
+
+func TestEnableRequiresApprovalBeforeActive(t *testing.T) {
+	registry := NewRegistry(t.TempDir())
+	registry.Skills["pending-skill"] = RegistrySkill{
+		Name: "pending-skill", CurrentRevision: "rev1", State: LifecyclePendingApproval,
+	}
+	_, err := EnableSkillForAgent(registry, "legacy-manual", "pending-skill")
+	if err == nil || !strings.Contains(err.Error(), "approval") {
+		t.Fatalf("EnableSkillForAgent() error = %v, want approval required", err)
+	}
+	registry, err = ApproveSkillInstallation(registry, "pending-skill")
+	if err != nil {
+		t.Fatalf("ApproveSkillInstallation() error = %v", err)
+	}
+	registry, err = EnableSkillForAgent(registry, "legacy-manual", "pending-skill")
+	if err != nil {
+		t.Fatalf("EnableSkillForAgent() after approve error = %v", err)
+	}
+	if registry.Skills["pending-skill"].State != LifecycleActive {
+		t.Fatalf("state = %q, want active", registry.Skills["pending-skill"].State)
+	}
+}
+
+func TestValidateSnapshotAgainstRegistryRejectsHashMismatch(t *testing.T) {
+	dir := t.TempDir()
+	skillDir := writeExampleSkill(t, dir, nil)
+	registryRoot := filepath.Join(dir, "registry")
+	policy := Policy{DefaultVisibility: "allow", AllowSources: []string{"local"}}
+	if _, registry, err := InstallLocal(InstallOptions{SourcePath: skillDir, RegistryRoot: registryRoot, Policy: policy}); err != nil {
+		t.Fatalf("InstallLocal() error = %v", err)
+	} else {
+		registry, err = EnableSkillForAgent(registry, "legacy-manual", "test-skill")
+		if err != nil {
+			t.Fatalf("EnableSkillForAgent() error = %v", err)
+		}
+		_ = SaveRegistry(registry)
+	}
+	snapshot, err := BuildSnapshot(SnapshotOptions{
+		AgentID: "legacy-manual", SessionID: "ses_test", RegistryRoot: registryRoot, Policy: policy,
+	})
+	if err != nil {
+		t.Fatalf("BuildSnapshot() error = %v", err)
+	}
+	snapshot.Skills[0].SHA256 = "deadbeef"
+	if err := ValidateSnapshotAgainstRegistry(snapshot, registryRoot); err == nil {
+		t.Fatal("ValidateSnapshotAgainstRegistry() expected hash mismatch error")
+	}
+}

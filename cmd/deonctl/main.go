@@ -128,6 +128,7 @@ Usage:
   deonctl skills inspect <path|git:owner/repo@ref> [--output-format text|json]
   deonctl skills import <path|git:owner/repo@ref> --output <skill-import-plan.json> [--policy <skill-policy.yaml>]
   deonctl skills install <path> --registry-root <dir> [--as <name>] [--policy <skill-policy.yaml>] [--output <install-result.json>]
+  deonctl skills approve <name> --registry-root <dir>
   deonctl skills verify <name> --registry-root <dir> [--output-format text|json]
   deonctl skills list --registry-root <dir> [--output-format text|json]
   deonctl skills show <name> --registry-root <dir> [--output-format text|json]
@@ -2035,6 +2036,14 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runSkillsInstall(opts, stdout, stderr)
+		case "approve":
+			opts, err := parseSkillsShowOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsApprove(opts, stdout, stderr)
 		case "verify":
 			opts, err := parseSkillsVerifyOptions(args[2:])
 			if err != nil {
