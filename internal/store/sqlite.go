@@ -19,7 +19,7 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-const currentSchemaVersion = 1
+const currentSchemaVersion = 2
 
 func OpenSQLite(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
@@ -113,6 +113,9 @@ func (s *SQLiteStore) bootstrap(ctx context.Context) error {
 		return err
 	}
 	if err := s.ensureColumn(ctx, "artifacts", "keep", "INTEGER NOT NULL DEFAULT 0"); err != nil {
+		return err
+	}
+	if err := s.bootstrapAgents(ctx); err != nil {
 		return err
 	}
 	if err := s.recordSchemaMigration(ctx, currentSchemaVersion); err != nil {
@@ -274,13 +277,16 @@ func (s *SQLiteStore) Task(ctx context.Context, id string) (*tasks.Task, error) 
 
 func (s *SQLiteStore) SaveRun(ctx context.Context, run *runs.Run) error {
 	_, err := s.db.ExecContext(ctx, `INSERT INTO runs (
-		id, task_id, status, worker, workspace_path, created_at, updated_at, finished_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, created_at, updated_at, finished_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		task_id = excluded.task_id,
 		status = excluded.status,
 		worker = excluded.worker,
 		workspace_path = excluded.workspace_path,
+		agent_id = excluded.agent_id,
+		session_id = excluded.session_id,
+		work_item_id = excluded.work_item_id,
 		created_at = excluded.created_at,
 		updated_at = excluded.updated_at,
 		finished_at = excluded.finished_at`,
@@ -289,6 +295,9 @@ func (s *SQLiteStore) SaveRun(ctx context.Context, run *runs.Run) error {
 		string(run.Status),
 		run.Worker,
 		run.WorkspacePath,
+		run.AgentID,
+		run.SessionID,
+		run.WorkItemID,
 		formatTime(run.CreatedAt),
 		formatTime(run.UpdatedAt),
 		formatOptionalTime(run.FinishedAt),
@@ -301,19 +310,23 @@ func (s *SQLiteStore) SaveRun(ctx context.Context, run *runs.Run) error {
 
 func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT
-		id, task_id, status, worker, workspace_path, created_at, updated_at, finished_at
+		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, created_at, updated_at, finished_at
 		FROM runs WHERE id = ?`, id)
 
 	var run runs.Run
 	var status string
 	var createdAt, updatedAt string
 	var finishedAt sql.NullString
+	var agentID, sessionID, workItemID sql.NullString
 	err := row.Scan(
 		&run.ID,
 		&run.TaskID,
 		&status,
 		&run.Worker,
 		&run.WorkspacePath,
+		&agentID,
+		&sessionID,
+		&workItemID,
 		&createdAt,
 		&updatedAt,
 		&finishedAt,
@@ -326,6 +339,9 @@ func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 	}
 
 	run.Status = runs.RunStatus(status)
+	run.AgentID = agentID.String
+	run.SessionID = sessionID.String
+	run.WorkItemID = workItemID.String
 	if run.CreatedAt, err = parseTime(createdAt); err != nil {
 		return nil, err
 	}
@@ -340,7 +356,7 @@ func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 
 func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT
-		id, task_id, status, worker, workspace_path, created_at, updated_at, finished_at
+		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, created_at, updated_at, finished_at
 		FROM runs ORDER BY created_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
@@ -353,12 +369,16 @@ func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
 		var status string
 		var createdAt, updatedAt string
 		var finishedAt sql.NullString
+		var agentID, sessionID, workItemID sql.NullString
 		if err := rows.Scan(
 			&run.ID,
 			&run.TaskID,
 			&status,
 			&run.Worker,
 			&run.WorkspacePath,
+			&agentID,
+			&sessionID,
+			&workItemID,
 			&createdAt,
 			&updatedAt,
 			&finishedAt,
@@ -366,6 +386,9 @@ func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
 			return nil, fmt.Errorf("scan run: %w", err)
 		}
 		run.Status = runs.RunStatus(status)
+		run.AgentID = agentID.String
+		run.SessionID = sessionID.String
+		run.WorkItemID = workItemID.String
 		if run.CreatedAt, err = parseTime(createdAt); err != nil {
 			return nil, err
 		}

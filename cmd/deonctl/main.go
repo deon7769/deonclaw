@@ -135,6 +135,21 @@ Usage:
   deonctl skills disable <name> --agent <agent-id> --registry-root <dir>
   deonctl skills snapshot --agent <agent-id> --session <session-id> --registry-root <dir> --output <snapshot.json> [--policy <skill-policy.yaml>]
   deonctl skills materialize --snapshot <snapshot.json> --workspace <path> --registry-root <dir> [--output <materialize-result.json>]
+  deonctl agents validate --config <agents.yaml> [--workers-config <workers.yaml>]
+  deonctl agents sync --config <agents.yaml> --store <deonclaw.db> [--workers-config <workers.yaml>]
+  deonctl agents list --store <deonclaw.db>
+  deonctl agents show <agent-id> --store <deonclaw.db>
+  deonctl agents pause <agent-id> --store <deonclaw.db> [--actor <name>]
+  deonctl agents resume <agent-id> --store <deonclaw.db> [--actor <name>]
+  deonctl agents terminate <agent-id> --store <deonclaw.db> --approval <termination-approval.json>
+  deonctl agents sessions create --agent <agent-id> --store <deonclaw.db> [--kind main|heartbeat|scratch] [--session <session-id>] [--workspace <path>] [--skill-snapshot <snapshot.json>]
+  deonctl agents sessions list --agent <agent-id> --store <deonclaw.db>
+  deonctl agents sessions show <session-id> --store <deonclaw.db> [--output-format text|json]
+  deonctl agents assign --agent <agent-id> --task <task.yaml> --store <deonclaw.db> [--created-by <name>]
+  deonctl agents inbox list --agent <agent-id> --store <deonclaw.db>
+  deonctl agents inbox accept <item-id> --store <deonclaw.db>
+  deonctl agents inbox defer <item-id> --store <deonclaw.db>
+  deonctl agents delegate propose --parent-agent <agent-id> --child-agent <agent-id> --parent-work-item <work-item-id> --task <task.yaml> --reason <text> --output <delegation-proposal.json> --store <deonclaw.db>
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
@@ -2063,6 +2078,189 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runSkillsMaterialize(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "agents":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			opts, err := parseAgentsValidateOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsValidate(opts, stdout, stderr)
+		case "sync":
+			opts, err := parseAgentsSyncOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsSync(opts, stdout, stderr)
+		case "list":
+			opts, err := parseAgentsStoreOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsList(opts, stdout, stderr)
+		case "show":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseAgentsStoreOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsShow(args[2], opts, stdout, stderr)
+		case "pause":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseAgentsLifecycleOptions(args[2], args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsPause(args[2], opts, stdout, stderr)
+		case "resume":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseAgentsLifecycleOptions(args[2], args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsResume(args[2], opts, stdout, stderr)
+		case "terminate":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseAgentsLifecycleOptions(args[2], args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsTerminate(args[2], opts, stdout, stderr)
+		case "sessions":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "create":
+				opts, err := parseAgentsSessionCreateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runAgentsSessionCreate(opts, stdout, stderr)
+			case "list":
+				opts, err := parseAgentsInboxListOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				storeOpts := agentsStoreOptions{storePath: opts.storePath}
+				return runAgentsSessionsList(opts.agentID, storeOpts, stdout, stderr)
+			case "show":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				opts, err := parseAgentsSessionShowOptions(args[3], args[4:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runAgentsSessionShow(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "assign":
+			opts, err := parseAgentsAssignOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsAssign(opts, stdout, stderr)
+		case "inbox":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "list":
+				opts, err := parseAgentsInboxListOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runAgentsInboxList(opts, stdout, stderr)
+			case "accept":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				opts, err := parseAgentsInboxItemOptions(args[3], args[4:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runAgentsInboxAccept(args[3], opts, stdout, stderr)
+			case "defer":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				opts, err := parseAgentsInboxItemOptions(args[3], args[4:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runAgentsInboxDefer(args[3], opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "delegate":
+			if len(args) < 3 || args[2] != "propose" {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseAgentsDelegateProposeOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runAgentsDelegatePropose(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2

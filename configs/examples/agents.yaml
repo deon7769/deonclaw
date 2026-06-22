@@ -1,0 +1,31 @@
+agents:
+  defaults:
+    workspace_strategy: worktree-per-run
+    memory_scope: mysecondbrain
+    skill_policy: default
+    heartbeat_policy: disabled
+  list:
+    - id: legacy-manual
+      display_name: Legacy Manual Operator
+      role: operator
+      description: Pre-persistent-agents manual runs and insight evidence scope.
+      default_worker: codex
+      model_profile: opencode-zai-glm-5-1
+      skills: []
+    - id: engineering-manager
+      display_name: Engineering Manager
+      role: manager
+      default_worker: codex
+      model_profile: opencode-zai-glm-5-1
+      skills:
+        - github-review
+    - id: backend-engineer
+      display_name: Backend Engineer
+      role: engineer
+      supervisor_id: engineering-manager
+      default_worker: opencode
+      fallback_workers:
+        - codex
+      model_profile: opencode-zai-glm-5-1
+      skills:
+        - github-review

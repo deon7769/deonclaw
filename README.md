@@ -172,10 +172,10 @@ Implemented:
 - learning proposal materialize/list/show from insight reports and reviewer responses (`insights proposals materialize`, `insights proposals list`, `insights proposals show`)
 - learning proposal approval, apply dry-run/preview execute, effectiveness record/report, and timeline (`insights proposals approve`, `insights proposals apply dry-run`, `insights proposals apply`, `insights effectiveness record`, `insights effectiveness report`, `insights timeline`), documentation-like types only for preview apply; skill/memory/policy types blocked
 - universal skill registry foundation (`skills policy validate`, `skills inspect`, `skills import`, `skills install`, `skills verify`, `skills list`, `skills show`, `skills enable`, `skills disable`, `skills snapshot`, `skills materialize`), local install only; git import plan-only; no worker auto-loading yet
+- persistent agents and sessions foundation (`agents validate`, `agents sync`, `agents list`, `agents show`, `agents pause`, `agents resume`, `agents terminate`, `agents sessions create/list/show`, `agents assign`, `agents inbox list/accept/defer`, `agents delegate propose`), SQLite-backed; no automatic run dispatch yet
 
 Not implemented yet:
 
-- Persistent agents, sessions, inbox, assignment, and delegation
 - `deond` daemon, cron, heartbeat, hooks, and wakeup queue
 - Work queue, execution leases, budgets, usage events, and hard stops
 - OpenClaw migration inspect/plan/apply/shadow/cutover/rollback
