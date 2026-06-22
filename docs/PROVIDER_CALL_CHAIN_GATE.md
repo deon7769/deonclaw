@@ -1,6 +1,6 @@
-# Provider call chain gate (Tasks 22.37–22.56)
+# Provider call chain gate (Tasks 22.37–22.60)
 
-This document defines the **governance gates before any real provider executor dispatch** (Task 22.56+).
+This document defines the **governance gates before any real provider executor dispatch** (Task 22.60+).
 
 ## Purpose
 
@@ -44,7 +44,15 @@ Task 22.54 adds **activation approval** new/approve/inspect — manual operator 
 
 Task 22.55 adds **activation rehearsal** / **rehearsal-report** — metadata-only sequence validation with `future_steps`; no dispatch.
 
-Task 22.56 adds **activation release package** / **release-gate** — last gate before any real provider dispatch; `activation_gate_ready: true`, `real_activation_supported_now: false`.
+Task 22.56 adds **activation release package** / **release-gate** — consolidates activation control plane; `activation_gate_ready: true`, `real_activation_supported_now: false`.
+
+Task 22.57 adds **activation chain hardening** — unified anti-leak helpers for metadata JSON/stdout; fixture README path fixes for policy config when run inside the fixture directory.
+
+Task 22.58 adds **operator review bundle/report** — metadata-only human review package with critical hashes and blocked execution checklist.
+
+Task 22.59 adds **activation kill-switch validate/plan** — `provider-activation-kill-switch.yaml` with `global_disabled: true` and all `block_*: true`.
+
+Task 22.60 adds **activation final audit / CI report** — last gate before any real provider dispatch; `final_audit_ready: true`, `kill_switch_active: true`, `operator_review_required: true`.
 
 ## Chain boundary (must stay false)
 
@@ -89,9 +97,12 @@ Before any future real provider dispatch:
 25. **`provider-activation-policy`** validate/plan — activation policy schema (`enabled: false`, all `allow_*: false`)
 26. **`provider-activation-approval`** new/approve/inspect — future activation authorization with explicit confirm hashes
 27. **`provider-activation-rehearsal`** + **rehearsal-report** — metadata-only activation sequence rehearsal (`future_steps` only)
-28. **`provider-activation-release-package`** + **release-gate** — final activation release gate (`activation_allowed_now: false`)
+28. **`provider-activation-release-package`** + **release-gate** — activation release consolidation (`activation_allowed_now: false`)
+29. **`provider-activation-operator-review-bundle`** + **report** — human operator review metadata (`operator_approved_now: false`)
+30. **`provider-activation-kill-switch`** validate/plan — global kill-switch manifest (`global_disabled: true`, all `block_*: true`)
+31. **`provider-activation-final-audit`** + **ci-report** — final activation audit (`kill_switch_active: true`, `ci_observability_ready: true`)
 
-The full chain through **activation release gate** is the last gate before any real provider dispatch.
+The full chain through **activation final audit / CI report** is the last gate before any real provider dispatch. Kill-switch must remain active before any future real dispatch design.
 
 ## Final audit expectations
 
@@ -320,6 +331,78 @@ Audit, executor, simulation, activation, and fixture JSON/stdout must not contai
   "secret_values_read": false,
   "transport_called": false,
   "sent_to_provider": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+## Activation hardening expectations (Tasks 22.57–22.60)
+
+`deonctl worker codex provider-activation-operator-review-bundle` must return:
+
+```json
+{
+  "operator_review_bundle_ready": true,
+  "operator_review_required": true,
+  "operator_approved_now": false,
+  "activation_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "secret_values_read": false,
+  "transport_called": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-activation-kill-switch validate` must return:
+
+```json
+{
+  "kill_switch_validated": true,
+  "global_disabled": true,
+  "provider_call_blocked": true,
+  "network_blocked": true,
+  "secret_read_blocked": true,
+  "transport_blocked": true,
+  "workspace_write_blocked": true,
+  "activation_allowed_now": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-activation-final-audit` must return:
+
+```json
+{
+  "final_audit_ready": true,
+  "kill_switch_active": true,
+  "operator_review_required": true,
+  "real_activation_supported_now": false,
+  "activation_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "secret_values_read": false,
+  "transport_called": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-activation-ci-report` must return:
+
+```json
+{
+  "final_audit_ready": true,
+  "ci_observability_ready": true,
+  "kill_switch_active": true,
+  "operator_review_required": true,
+  "real_activation_supported_now": false,
+  "activation_allowed_now": false,
+  "provider_call": false,
+  "network_call": false,
+  "secret_values_read": false,
+  "transport_called": false,
   "workspace_modified": false,
   "blocked_reason": "implementation_not_enabled"
 }

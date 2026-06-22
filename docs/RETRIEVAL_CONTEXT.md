@@ -71,7 +71,11 @@ Implemented now:
 - `deonctl worker codex provider-activation-approval` new/approve/inspect (Task 22.54, future activation approval)
 - `deonctl worker codex provider-activation-rehearsal` / `rehearsal-report` (Task 22.55, activation sequence rehearsal)
 - `deonctl worker codex provider-activation-release-package` / `release-gate` (Task 22.56, activation release gate)
+- `deonctl worker codex provider-activation-operator-review-bundle` / `report` (Task 22.58, operator review metadata)
+- `deonctl worker codex provider-activation-kill-switch` validate/plan (Task 22.59, kill-switch manifest)
+- `deonctl worker codex provider-activation-final-audit` / `ci-report` (Task 22.60, final audit / CI observability)
 - `configs/examples/provider-activation-policy.yaml` example activation policy
+- `configs/examples/provider-activation-kill-switch.yaml` example activation kill-switch
 
 Not implemented yet:
 
@@ -1532,6 +1536,67 @@ Rules:
 - last gate before any real provider dispatch
 - `activation_gate_ready: true`, `real_activation_supported_now: false`, `activation_allowed_now: false`
 - consolidates activation policy, approval, rehearsal, readiness audit, simulation, credential, and change-proposal report hashes
+
+### Operator review bundle / report (Task 22.58)
+
+~~~bash
+deonctl worker codex provider-activation-operator-review-bundle \
+  --activation-release-package artifacts/<run-id>/provider-activation-release-package.json \
+  --activation-release-gate artifacts/<run-id>/provider-activation-release-gate.json \
+  ...release gate inputs... \
+  --output artifacts/<run-id>/provider-activation-operator-review-bundle.json \
+  --output-format json
+
+deonctl worker codex provider-activation-operator-review-report \
+  --operator-review-bundle artifacts/<run-id>/provider-activation-operator-review-bundle.json \
+  ...same inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- metadata-only human review bundle; no payload text or secrets
+- `operator_review_required: true`, `operator_approved_now: false`
+
+### Kill-switch validate / plan (Task 22.59)
+
+~~~bash
+deonctl worker codex provider-activation-kill-switch validate \
+  --config configs/examples/provider-activation-kill-switch.yaml \
+  --output-format json
+
+deonctl worker codex provider-activation-kill-switch plan \
+  --config configs/examples/provider-activation-kill-switch.yaml \
+  --output artifacts/<run-id>/provider-activation-kill-switch-plan.json \
+  --output-format json
+~~~
+
+Rules:
+
+- `global_disabled: true` and all `block_*: true` required
+- kill-switch must remain active before any future real dispatch
+
+### Final audit / CI report (Task 22.60)
+
+~~~bash
+deonctl worker codex provider-activation-final-audit \
+  --activation-release-package artifacts/<run-id>/provider-activation-release-package.json \
+  --activation-release-gate artifacts/<run-id>/provider-activation-release-gate.json \
+  --operator-review-bundle artifacts/<run-id>/provider-activation-operator-review-bundle.json \
+  --kill-switch-plan artifacts/<run-id>/provider-activation-kill-switch-plan.json \
+  ...supporting artifacts... \
+  --output-format json
+
+deonctl worker codex provider-activation-ci-report \
+  ...same inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- last gate before any real provider dispatch design
+- `final_audit_ready: true`, `ci_observability_ready: true`, `kill_switch_active: true`
+- CI report lists expected local commands and PR checklist (no GitHub Actions API dependency)
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 

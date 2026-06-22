@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -159,6 +160,7 @@ func assertProviderCallChainMetadataNoTextLeak(t *testing.T, chain providerCallC
 	if strings.Contains(string(auditJSON), "text_excerpt") || strings.Contains(string(auditJSON), "alpha text") {
 		t.Fatal("chain audit json must not contain materialized preview text")
 	}
+	assertNoPreviewLeakInString(t, "chain audit json", string(auditJSON))
 	payloadData, err := os.ReadFile(chain.payloadOutputPath)
 	if err != nil {
 		t.Fatalf("ReadFile(payload output) error = %v", err)
@@ -266,7 +268,7 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
 	}
 
-	runProviderActivationControlPlaneChain(t, chain)
+	runProviderActivationHardeningChain(t, chain)
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -929,12 +931,108 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		"--activation-release-package", "provider-activation-release-package.json",
 		"--output-format", "json",
 	}, &activationReleaseGateStdout)
+	if err := os.WriteFile("provider-activation-release-gate.json", activationReleaseGateStdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(activation release gate) error = %v", err)
+	}
 
 	var activationReleaseGate retrievalcontext.ProviderActivationReleaseGateResult
 	if err := json.Unmarshal(activationReleaseGateStdout.Bytes(), &activationReleaseGate); err != nil {
 		t.Fatalf("Unmarshal(activation release gate) error = %v", err)
 	}
 	assertProviderActivationReleaseGateBlocked(t, activationReleaseGate)
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-operator-review-bundle",
+		"--activation-release-package", "provider-activation-release-package.json",
+		"--activation-release-gate", "provider-activation-release-gate.json",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-rehearsal", "provider-activation-rehearsal.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--response-change-proposal-report", "provider-response-change-proposal-report.json",
+		"--output", "provider-activation-operator-review-bundle.json",
+		"--output-format", "json",
+	})
+
+	var operatorReviewReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-operator-review-report",
+		"--operator-review-bundle", "provider-activation-operator-review-bundle.json",
+		"--activation-release-package", "provider-activation-release-package.json",
+		"--activation-release-gate", "provider-activation-release-gate.json",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-rehearsal", "provider-activation-rehearsal.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--response-change-proposal-report", "provider-response-change-proposal-report.json",
+		"--output-format", "json",
+	}, &operatorReviewReportStdout)
+
+	if err := os.WriteFile("provider-activation-kill-switch.yaml", []byte(validProviderActivationKillSwitchYAML), 0o644); err != nil {
+		t.Fatalf("WriteFile(kill switch config) error = %v", err)
+	}
+
+	var killSwitchValidateStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-kill-switch", "validate",
+		"--config", "provider-activation-kill-switch.yaml",
+		"--output-format", "json",
+	}, &killSwitchValidateStdout)
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-kill-switch", "plan",
+		"--config", "provider-activation-kill-switch.yaml",
+		"--output", "provider-activation-kill-switch-plan.json",
+		"--output-format", "json",
+	})
+
+	var finalAuditStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-final-audit",
+		"--activation-release-package", "provider-activation-release-package.json",
+		"--activation-release-gate", "provider-activation-release-gate.json",
+		"--operator-review-bundle", "provider-activation-operator-review-bundle.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--response-change-proposal-report", "provider-response-change-proposal-report.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-rehearsal", "provider-activation-rehearsal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--output-format", "json",
+	}, &finalAuditStdout)
+
+	var ciReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-activation-ci-report",
+		"--activation-release-package", "provider-activation-release-package.json",
+		"--activation-release-gate", "provider-activation-release-gate.json",
+		"--operator-review-bundle", "provider-activation-operator-review-bundle.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--activation-policy-plan", "provider-activation-policy-plan.json",
+		"--activation-readiness-audit", "provider-activation-readiness-audit.json",
+		"--real-call-proposal", "provider-real-call-proposal.json",
+		"--credential-policy-plan", "provider-credential-policy-plan.json",
+		"--response-change-proposal-report", "provider-response-change-proposal-report.json",
+		"--activation-approval", "provider-activation-approval.json",
+		"--activation-rehearsal", "provider-activation-rehearsal.json",
+		"--execution-simulation-report", "provider-execution-simulation-report.json",
+		"--output-format", "json",
+	}, &ciReportStdout)
+
+	var ciReport retrievalcontext.ProviderActivationCIReportResult
+	if err := json.Unmarshal(ciReportStdout.Bytes(), &ciReport); err != nil {
+		t.Fatalf("Unmarshal(ci report) error = %v", err)
+	}
+	assertProviderActivationCIReportBlocked(t, ciReport)
 
 	sprintPaths := []string{
 		"provider-call-executor-dry-run-report.json",
@@ -959,18 +1057,28 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		"provider-activation-approval.json",
 		"provider-activation-rehearsal.json",
 		"provider-activation-release-package.json",
+		"provider-activation-release-gate.json",
+		"provider-activation-operator-review-bundle.json",
+		"provider-activation-kill-switch-plan.json",
 	}
 	for _, path := range sprintPaths {
-		assertNoTextExcerpt(t, path)
+		assertNoPreviewLeakInFile(t, path)
 	}
-	if strings.Contains(activationReleaseGateStdout.String(), "text_excerpt") || strings.Contains(rehearsalReportStdout.String(), "alpha text") {
-		t.Fatal("activation release gate/rehearsal stdout must not contain materialized preview text")
+	sprintStdout := []*bytes.Buffer{
+		&releaseBundleStdout,
+		&releaseGateStdout,
+		&simulationBundleStdout,
+		&simulationReportStdout,
+		&credentialValidateStdout,
+		&activationReleaseGateStdout,
+		&rehearsalReportStdout,
+		&operatorReviewReportStdout,
+		&killSwitchValidateStdout,
+		&finalAuditStdout,
+		&ciReportStdout,
 	}
-	if strings.Contains(releaseGateStdout.String(), "text_excerpt") || strings.Contains(releaseBundleStdout.String(), "alpha text") {
-		t.Fatal("release gate/bundle stdout must not contain materialized preview text")
-	}
-	if strings.Contains(simulationBundleStdout.String(), "text_excerpt") || strings.Contains(simulationReportStdout.String(), "alpha text") {
-		t.Fatal("simulation stdout must not contain materialized preview text")
+	for i, buf := range sprintStdout {
+		assertNoPreviewLeakInString(t, fmt.Sprintf("sprint stdout[%d]", i), buf.String())
 	}
 }
 

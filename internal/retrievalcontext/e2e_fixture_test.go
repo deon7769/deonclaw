@@ -471,13 +471,32 @@ func copyFixtureFile(t *testing.T, src, dst string) {
 	}
 }
 
-func assertNoTextExcerpt(t *testing.T, path string) {
+var metadataPreviewLeakMarkers = []string{
+	"text_excerpt",
+	"alpha text",
+	"## Assembled prompt",
+	"- text_excerpt:",
+}
+
+func assertNoPreviewLeakInString(t *testing.T, label string, value string) {
+	t.Helper()
+	for _, marker := range metadataPreviewLeakMarkers {
+		if strings.Contains(value, marker) {
+			t.Fatalf("%s must not contain preview leak marker %q", label, marker)
+		}
+	}
+}
+
+func assertNoPreviewLeakInFile(t *testing.T, path string) {
 	t.Helper()
 	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("ReadFile(%q) error = %v", path, err)
 	}
-	if strings.Contains(string(data), "text_excerpt") {
-		t.Fatalf("%q must not contain text_excerpt", path)
-	}
+	assertNoPreviewLeakInString(t, path, string(data))
+}
+
+func assertNoTextExcerpt(t *testing.T, path string) {
+	t.Helper()
+	assertNoPreviewLeakInFile(t, path)
 }
