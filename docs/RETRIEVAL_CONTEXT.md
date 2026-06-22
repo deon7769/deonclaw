@@ -78,6 +78,10 @@ Implemented now:
 - `deonctl worker codex provider-real-transport-implementation-plan` / `report` (Task 22.62, future transport contract)
 - `deonctl worker codex provider-real-dispatch-design` / `report` (Task 22.63, future dispatch command design)
 - `deonctl worker codex provider-real-activation-design-review-package` / `gate` (Task 22.64, real dispatch design review gate)
+- `deonctl worker codex provider-real-dispatch-external-approval` new/approve/inspect (Task 22.65, external approval blocked)
+- `deonctl worker codex provider-real-dispatch-runbook` generate/report (Task 22.66, metadata-only runbook)
+- `deonctl worker codex provider-real-dispatch-risk-register` / `report` (Task 22.67, risk register)
+- `deonctl worker codex provider-real-dispatch-preimplementation-gate` / `report` (Task 22.68, preimplementation gate)
 - `configs/examples/provider-activation-policy.yaml` example activation policy
 - `configs/examples/provider-activation-kill-switch.yaml` example activation kill-switch
 
@@ -1644,6 +1648,41 @@ Rules:
 - metadata-only design package; no secret reads, no provider call, no transport, no network
 - `execute_subcommand_registered: false` — future `provider-real-dispatch execute` is design-only
 - `real_activation_design_gate_ready: true` with `real_dispatch_supported_now: false`
+
+### External approval package (Tasks 22.65–22.68)
+
+~~~bash
+deonctl worker codex provider-real-dispatch-external-approval new \
+  --design-review-package artifacts/<run-id>/provider-real-activation-design-review-package.json \
+  --design-review-gate artifacts/<run-id>/provider-real-activation-design-review-gate.json \
+  ...chain inputs... \
+  --output artifacts/<run-id>/provider-real-dispatch-external-approval-request.json
+
+deonctl worker codex provider-real-dispatch-external-approval approve \
+  --request artifacts/<run-id>/provider-real-dispatch-external-approval-request.json \
+  --output artifacts/<run-id>/provider-real-dispatch-external-approval.json \
+  --confirm-design-review-package-sha256 <sha256> \
+  --confirm-design-review-gate-sha256 <sha256> \
+  --confirm-secret-read-proposal-sha256 <sha256> \
+  --confirm-real-dispatch-design-sha256 <sha256> \
+  --confirm-provider-payload-sha256 <sha256>
+
+deonctl worker codex provider-real-dispatch-preimplementation-gate \
+  --external-approval artifacts/<run-id>/provider-real-dispatch-external-approval.json \
+  --runbook artifacts/<run-id>/provider-real-dispatch-runbook.json \
+  --risk-register artifacts/<run-id>/provider-real-dispatch-risk-register.json \
+  ...revalidation inputs... \
+  --output-format json
+~~~
+
+Rules:
+
+- external manual authorization for future real dispatch only
+- metadata-only runbook and risk register; no scripts, no execute commands
+- `preimplementation_gate_ready: true`, `real_dispatch_supported_now: false`, `execute_subcommand_registered: false`
+- no secret reads, no provider/network/transport, no workspace changes
+
+Optional fixture steps 92–99 exercise external approval through preimplementation report.
 
 ## Provider call chain fixture smoke / CI guard (Task 22.37)
 

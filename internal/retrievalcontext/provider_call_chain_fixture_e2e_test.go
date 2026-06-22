@@ -268,7 +268,7 @@ func TestProviderCallChainFixtureSmokeE2E(t *testing.T) {
 		t.Fatalf("executor_dry_run_validated = false, failures=%#v", dryRunReport.Failures)
 	}
 
-	runProviderRealDispatchDesignChain(t, chain)
+	runProviderRealDispatchExternalApprovalChain(t, chain)
 }
 
 func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
@@ -1141,6 +1141,150 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		t.Fatalf("Unmarshal(design review gate) error = %v", err)
 	}
 	assertProviderRealActivationDesignReviewGateBlocked(t, designReviewGate)
+	if err := os.WriteFile("provider-real-activation-design-review-gate.json", designReviewGateStdout.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(design review gate) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-external-approval", "new",
+		"--design-review-package", "provider-real-activation-design-review-package.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--secret-read-proposal", "provider-secret-read-proposal.json",
+		"--real-dispatch-design", "provider-real-dispatch-design.json",
+		"--real-transport-implementation-plan", "provider-real-transport-implementation-plan.json",
+		"--activation-final-audit", "provider-activation-final-audit.json",
+		"--activation-ci-report", "provider-activation-ci-report.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--operator-review-bundle", "provider-activation-operator-review-bundle.json",
+		"--output", "provider-real-dispatch-external-approval-request.json",
+	})
+
+	var externalApprovalRequest retrievalcontext.ProviderRealDispatchExternalApprovalRequest
+	requestData, readErr := os.ReadFile("provider-real-dispatch-external-approval-request.json")
+	if readErr != nil {
+		t.Fatalf("ReadFile(external approval request) error = %v", readErr)
+	}
+	if err := json.Unmarshal(requestData, &externalApprovalRequest); err != nil {
+		t.Fatalf("Unmarshal(external approval request) error = %v", err)
+	}
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-external-approval", "approve",
+		"--request", "provider-real-dispatch-external-approval-request.json",
+		"--output", "provider-real-dispatch-external-approval.json",
+		"--confirm-design-review-package-sha256", externalApprovalRequest.DesignReviewPackageSHA256,
+		"--confirm-design-review-gate-sha256", externalApprovalRequest.DesignReviewGateSHA256,
+		"--confirm-secret-read-proposal-sha256", externalApprovalRequest.SecretReadProposalSHA256,
+		"--confirm-real-dispatch-design-sha256", externalApprovalRequest.RealDispatchDesignSHA256,
+		"--confirm-provider-payload-sha256", externalApprovalRequest.ProviderPayloadSHA256,
+	})
+
+	var externalApprovalInspectStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-external-approval", "inspect",
+		"--approval", "provider-real-dispatch-external-approval.json",
+		"--request", "provider-real-dispatch-external-approval-request.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--output-format", "json",
+	}, &externalApprovalInspectStdout)
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-runbook", "generate",
+		"--external-approval", "provider-real-dispatch-external-approval.json",
+		"--external-approval-request", "provider-real-dispatch-external-approval-request.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--real-dispatch-design", "provider-real-dispatch-design.json",
+		"--secret-read-proposal", "provider-secret-read-proposal.json",
+		"--real-transport-implementation-plan", "provider-real-transport-implementation-plan.json",
+		"--activation-final-audit", "provider-activation-final-audit.json",
+		"--activation-ci-report", "provider-activation-ci-report.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--output", "provider-real-dispatch-runbook.json",
+	})
+
+	var runbookReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-runbook", "report",
+		"--runbook", "provider-real-dispatch-runbook.json",
+		"--external-approval", "provider-real-dispatch-external-approval.json",
+		"--external-approval-request", "provider-real-dispatch-external-approval-request.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--real-dispatch-design", "provider-real-dispatch-design.json",
+		"--secret-read-proposal", "provider-secret-read-proposal.json",
+		"--real-transport-implementation-plan", "provider-real-transport-implementation-plan.json",
+		"--activation-final-audit", "provider-activation-final-audit.json",
+		"--activation-ci-report", "provider-activation-ci-report.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--output-format", "json",
+	}, &runbookReportStdout)
+
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-risk-register",
+		"--runbook", "provider-real-dispatch-runbook.json",
+		"--external-approval", "provider-real-dispatch-external-approval.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--secret-read-proposal", "provider-secret-read-proposal.json",
+		"--real-transport-implementation-plan", "provider-real-transport-implementation-plan.json",
+		"--real-dispatch-design", "provider-real-dispatch-design.json",
+		"--activation-final-audit", "provider-activation-final-audit.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--output", "provider-real-dispatch-risk-register.json",
+	})
+
+	var riskReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-risk-report",
+		"--risk-register", "provider-real-dispatch-risk-register.json",
+		"--runbook", "provider-real-dispatch-runbook.json",
+		"--external-approval", "provider-real-dispatch-external-approval.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--secret-read-proposal", "provider-secret-read-proposal.json",
+		"--real-transport-implementation-plan", "provider-real-transport-implementation-plan.json",
+		"--real-dispatch-design", "provider-real-dispatch-design.json",
+		"--activation-final-audit", "provider-activation-final-audit.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--output-format", "json",
+	}, &riskReportStdout)
+
+	var preimplementationGateStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-preimplementation-gate",
+		"--external-approval", "provider-real-dispatch-external-approval.json",
+		"--runbook", "provider-real-dispatch-runbook.json",
+		"--risk-register", "provider-real-dispatch-risk-register.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--secret-read-proposal", "provider-secret-read-proposal.json",
+		"--real-transport-implementation-plan", "provider-real-transport-implementation-plan.json",
+		"--real-dispatch-design", "provider-real-dispatch-design.json",
+		"--activation-final-audit", "provider-activation-final-audit.json",
+		"--activation-ci-report", "provider-activation-ci-report.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--operator-review-bundle", "provider-activation-operator-review-bundle.json",
+		"--output-format", "json",
+	}, &preimplementationGateStdout)
+
+	var preimplementationReport retrievalcontext.ProviderRealDispatchPreimplementationGateResult
+	if err := json.Unmarshal(preimplementationGateStdout.Bytes(), &preimplementationReport); err != nil {
+		t.Fatalf("Unmarshal(preimplementation gate) error = %v", err)
+	}
+	assertProviderRealDispatchPreimplementationGateBlocked(t, preimplementationReport)
+
+	var preimplementationReportStdout bytes.Buffer
+	mustDeonctlOK(t, deonctl, []string{
+		"worker", "codex", "provider-real-dispatch-preimplementation-report",
+		"--external-approval", "provider-real-dispatch-external-approval.json",
+		"--runbook", "provider-real-dispatch-runbook.json",
+		"--risk-register", "provider-real-dispatch-risk-register.json",
+		"--design-review-gate", "provider-real-activation-design-review-gate.json",
+		"--secret-read-proposal", "provider-secret-read-proposal.json",
+		"--real-transport-implementation-plan", "provider-real-transport-implementation-plan.json",
+		"--real-dispatch-design", "provider-real-dispatch-design.json",
+		"--activation-final-audit", "provider-activation-final-audit.json",
+		"--activation-ci-report", "provider-activation-ci-report.json",
+		"--kill-switch-plan", "provider-activation-kill-switch-plan.json",
+		"--operator-review-bundle", "provider-activation-operator-review-bundle.json",
+		"--output-format", "json",
+	}, &preimplementationReportStdout)
 
 	sprintPaths := []string{
 		"provider-call-executor-dry-run-report.json",
@@ -1174,6 +1318,11 @@ func TestProviderCallChainFixtureCLISmokeE2E(t *testing.T) {
 		"provider-real-transport-implementation-plan.json",
 		"provider-real-dispatch-design.json",
 		"provider-real-activation-design-review-package.json",
+		"provider-real-activation-design-review-gate.json",
+		"provider-real-dispatch-external-approval-request.json",
+		"provider-real-dispatch-external-approval.json",
+		"provider-real-dispatch-runbook.json",
+		"provider-real-dispatch-risk-register.json",
 	}
 	for _, path := range sprintPaths {
 		assertNoPreviewLeakInFile(t, path)

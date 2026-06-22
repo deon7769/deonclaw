@@ -92,6 +92,10 @@ retrieval-context (runner metadata attachment)
 | 22.62 | `worker codex provider-real-transport-implementation-plan` / `report` (future transport contract, no implementation) |
 | 22.63 | `worker codex provider-real-dispatch-design` / `report` (future dispatch command design, no execute route) |
 | 22.64 | `worker codex provider-real-activation-design-review-package` / `gate` (real dispatch design review gate, no execution) |
+| 22.65 | `worker codex provider-real-dispatch-external-approval` new/approve/inspect (external approval, no execution) |
+| 22.66 | `worker codex provider-real-dispatch-runbook` generate/report (metadata-only runbook) |
+| 22.67 | `worker codex provider-real-dispatch-risk-register` / `report` (risk register, all risks blocked) |
+| 22.68 | `worker codex provider-real-dispatch-preimplementation-gate` / `report` (preimplementation gate, no execution) |
 
 ### What already exists
 
@@ -259,6 +263,8 @@ Future injection design and implementation must **not** include:
 **Task 22.60 (implemented):** *Activation final audit/CI report* — last activation gate before real dispatch design; `final_audit_ready: true`, `kill_switch_active: true`. **Still no real provider call**.
 
 **Task 22.61–22.64 (implemented):** *Real dispatch design package* — secret-read proposal, transport implementation plan, dispatch command design, and design review gate. `real_activation_design_gate_ready: true`, `real_dispatch_supported_now: false`, `execute_subcommand_registered: false`. **Still no secret read, no provider call, no transport, no network**.
+
+**Task 22.65–22.68 (implemented):** *External approval package* — external dispatch approval, metadata-only runbook, risk register, and preimplementation gate. `preimplementation_gate_ready: true`, `external_approval_allowed_now: false`, `real_dispatch_supported_now: false`. **Still no execute subcommand, no secret reads, no provider/network/transport, no workspace changes**.
 
 **Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag, enabled policy, and inactive kill-switch removal.
 

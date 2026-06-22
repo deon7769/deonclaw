@@ -1165,10 +1165,111 @@ deonctl worker codex provider-real-activation-design-review-gate \
   --activation-ci-report retrieval-context-provider-activation-ci-report.json \
   --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
   --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --output-format json > retrieval-context-provider-real-activation-design-review-gate.json
+~~~
+
+### 92. Provider real dispatch external approval request
+
+~~~bash
+deonctl worker codex provider-real-dispatch-external-approval new \
+  --design-review-package retrieval-context-provider-real-activation-design-review-package.json \
+  --design-review-gate retrieval-context-provider-real-activation-design-review-gate.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --real-dispatch-design retrieval-context-provider-real-dispatch-design.json \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --output retrieval-context-provider-real-dispatch-external-approval-request.json
+~~~
+
+### 93. Provider real dispatch external approval approve
+
+Use confirm hashes from step 92 request JSON.
+
+### 94. Provider real dispatch external approval inspect
+
+~~~bash
+deonctl worker codex provider-real-dispatch-external-approval inspect \
+  --approval retrieval-context-provider-real-dispatch-external-approval.json \
+  --request retrieval-context-provider-real-dispatch-external-approval-request.json \
+  --design-review-gate retrieval-context-provider-real-activation-design-review-gate.json \
   --output-format json
 ~~~
 
-## CI smoke (Tasks 22.37–22.64)
+### 95. Provider real dispatch runbook generate
+
+~~~bash
+deonctl worker codex provider-real-dispatch-runbook generate \
+  --external-approval retrieval-context-provider-real-dispatch-external-approval.json \
+  --external-approval-request retrieval-context-provider-real-dispatch-external-approval-request.json \
+  --design-review-gate retrieval-context-provider-real-activation-design-review-gate.json \
+  --real-dispatch-design retrieval-context-provider-real-dispatch-design.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --output retrieval-context-provider-real-dispatch-runbook.json
+~~~
+
+### 96. Provider real dispatch runbook report
+
+~~~bash
+deonctl worker codex provider-real-dispatch-runbook report \
+  --runbook retrieval-context-provider-real-dispatch-runbook.json \
+  ...same runbook inputs... \
+  --output-format json
+~~~
+
+### 97. Provider real dispatch risk register
+
+~~~bash
+deonctl worker codex provider-real-dispatch-risk-register \
+  --runbook retrieval-context-provider-real-dispatch-runbook.json \
+  --external-approval retrieval-context-provider-real-dispatch-external-approval.json \
+  --design-review-gate retrieval-context-provider-real-activation-design-review-gate.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --real-dispatch-design retrieval-context-provider-real-dispatch-design.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --output retrieval-context-provider-real-dispatch-risk-register.json
+~~~
+
+### 98. Provider real dispatch risk report
+
+~~~bash
+deonctl worker codex provider-real-dispatch-risk-report \
+  --risk-register retrieval-context-provider-real-dispatch-risk-register.json \
+  ...same risk inputs... \
+  --output-format json
+~~~
+
+### 99. Provider real dispatch preimplementation gate/report
+
+~~~bash
+deonctl worker codex provider-real-dispatch-preimplementation-gate \
+  --external-approval retrieval-context-provider-real-dispatch-external-approval.json \
+  --runbook retrieval-context-provider-real-dispatch-runbook.json \
+  --risk-register retrieval-context-provider-real-dispatch-risk-register.json \
+  --design-review-gate retrieval-context-provider-real-activation-design-review-gate.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --real-dispatch-design retrieval-context-provider-real-dispatch-design.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --output-format json
+
+deonctl worker codex provider-real-dispatch-preimplementation-report \
+  ...same inputs... \
+  --output-format json
+~~~
+
+## CI smoke (Tasks 22.37–22.68)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -1178,9 +1279,9 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts real activation design review gate keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), activation readiness layer (22.49–22.52), activation control plane (22.53–22.56), activation hardening (22.57–22.60), and real dispatch design package (22.61–22.64).
+This executes the chain in isolated temp dirs and asserts preimplementation gate keeps all execution flags false including `real_dispatch_supported_now`, `execute_subcommand_registered`, `secret_values_read`, and `workspace_modified`. It exercises the full chain through external approval package (22.65–22.68).
 
-See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
+See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch implementation.
 
 ## Expected outcome
 
@@ -1235,7 +1336,11 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-activation-operator-review-bundle/report returns `operator_review_bundle_ready: true`, `operator_review_required: true`, `operator_approved_now: false`, all execution flags false
 - optional provider-activation-kill-switch validate/plan returns `kill_switch_validated: true`, `global_disabled: true`, all block flags true, `activation_allowed_now: false`
 - optional provider-activation-final-audit/ci-report returns `final_audit_ready: true`, `ci_observability_ready: true`, `kill_switch_active: true`, `operator_review_required: true`, all execution flags false
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.64)
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.68)
+- optional provider-real-dispatch-external-approval inspect returns `external_approval_authorized_for_future: true`, `external_approval_allowed_now: false`, `real_dispatch_allowed_now: false`, all execution flags false
+- optional provider-real-dispatch-runbook generate/report returns `runbook_ready: true`, `runbook_metadata_only: true`, `script_generated: false`, `execute_command_generated: false`, all execution flags false
+- optional provider-real-dispatch-risk-register/report returns `risk_register_ready: true`, `risks_blocked: true`, no risk with `current_status: active_execution`, all execution flags false
+- optional provider-real-dispatch-preimplementation-gate/report returns `preimplementation_gate_ready: true`, `real_dispatch_supported_now: false`, `execute_subcommand_registered: false`, `kill_switch_active: true`, `operator_review_required: true`, all execution flags false
 - optional provider-real-activation-design-review-gate returns `real_activation_design_gate_ready: true`, `real_dispatch_supported_now: false`, `kill_switch_active: true`, `operator_review_required: true`, all execution flags false
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
