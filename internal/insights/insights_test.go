@@ -340,6 +340,111 @@ func TestReadReportRejectsChainOfThoughtField(t *testing.T) {
 	}
 }
 
+func TestMaterializeProposalsFromInsight(t *testing.T) {
+	now := time.Date(2026, 6, 22, 14, 0, 0, 0, time.UTC)
+	report := InsightReport{
+		InsightID:              "ins_test",
+		Status:                 ReportStatusOK,
+		CreatedAt:              now.Format(time.RFC3339Nano),
+		Trigger:                TriggerValidationFailed,
+		Scope:                  EvidenceScope{Repository: "deonclaw", AgentID: LegacyManualAgentID},
+		EvidenceBundleSHA256:   "evidence-sha",
+		Reviewer:               ReviewerCodex,
+		Observations:           []string{},
+		WhatWorked:             []string{},
+		WhatFailed:             []string{},
+		ReusableLessons:        []string{},
+		Uncertainties:          []string{},
+		RiskNotes:              []string{},
+		ProposalCount:          1,
+		ActionRequired:         true,
+		ContainsChainOfThought: false,
+	}
+	hash, err := ReportHash(report)
+	if err != nil {
+		t.Fatalf("ReportHash() error = %v", err)
+	}
+	report.SHA256 = hash
+
+	var response ReviewerResponse
+	if err := json.Unmarshal([]byte(exampleReviewerResponseJSON), &response); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+
+	bundle, err := MaterializeProposals(MaterializeProposalsOptions{
+		Report:   report,
+		Response: response,
+		Policy:   Policy{AutoPropose: true, AutoApply: false},
+		Now:      now,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeProposals() error = %v", err)
+	}
+	if len(bundle.Proposals) != 1 {
+		t.Fatalf("proposal_count = %d, want 1", len(bundle.Proposals))
+	}
+	if bundle.Proposals[0].EvidenceBundleSHA256 != "evidence-sha" {
+		t.Fatalf("evidence_bundle_sha256 = %q", bundle.Proposals[0].EvidenceBundleSHA256)
+	}
+	if bundle.Proposals[0].ApprovalRequired != true {
+		t.Fatal("approval_required should be true")
+	}
+}
+
+func TestAutoApplyNotAllowedForHighRiskProposalTypes(t *testing.T) {
+	policy := Policy{AutoPropose: true, AutoApply: true}
+	for _, proposalType := range highRiskProposalTypesList() {
+		if autoApplyAllowed(policy, proposalType) {
+			t.Fatalf("autoApplyAllowed() = true for high-risk type %q", proposalType)
+		}
+	}
+	if err := ValidateProposalPolicy(policy); err != nil {
+		t.Fatalf("ValidateProposalPolicy() error = %v", err)
+	}
+}
+
+func TestMaterializeProposalsRejectsUnknownType(t *testing.T) {
+	now := time.Now().UTC()
+	report := InsightReport{
+		InsightID:              "ins_bad",
+		Status:                 ReportStatusOK,
+		CreatedAt:              now.Format(time.RFC3339Nano),
+		Trigger:                TriggerRunCompleted,
+		Scope:                  EvidenceScope{Repository: "deonclaw", AgentID: LegacyManualAgentID},
+		EvidenceBundleSHA256:   "evidence-sha",
+		Reviewer:               ReviewerCodex,
+		Observations:           []string{},
+		WhatWorked:             []string{},
+		WhatFailed:             []string{},
+		ReusableLessons:        []string{},
+		Uncertainties:          []string{},
+		RiskNotes:              []string{},
+		ContainsChainOfThought: false,
+	}
+	hash, err := ReportHash(report)
+	if err != nil {
+		t.Fatalf("ReportHash() error = %v", err)
+	}
+	report.SHA256 = hash
+
+	_, err = MaterializeProposals(MaterializeProposalsOptions{
+		Report: report,
+		Response: ReviewerResponse{
+			Proposals: []ReviewerProposalDraft{{
+				Type:                  "not_allowed",
+				Target:                "x",
+				Reason:                "y",
+				ProposedChangeSummary: "z",
+			}},
+		},
+		Policy: Policy{AutoPropose: true},
+		Now:    now,
+	})
+	if err == nil {
+		t.Fatal("MaterializeProposals() expected error for unknown proposal type")
+	}
+}
+
 const exampleInsightPolicyYAML = `
 insight_policy:
   enabled: true

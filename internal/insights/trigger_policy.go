@@ -146,6 +146,9 @@ func validatePolicy(cfg Config) error {
 	if p.AutoApply && !p.AutoPropose {
 		errs = append(errs, errors.New("insight_policy.auto_apply requires auto_propose=true"))
 	}
+	if err := ValidateProposalPolicy(p); err != nil {
+		errs = append(errs, err)
+	}
 
 	return errors.Join(errs...)
 }

@@ -114,6 +114,9 @@ Usage:
   deonctl insights trigger evaluate --config <insight-policy.yaml> --evidence <evidence-bundle.json> [--output-format text|json]
   deonctl insights evaluate dry-run --evidence <evidence-bundle.json> --reviewer codex|opencode --prompt-output <prompt.txt> --plan-output <evaluation-plan.json>
   deonctl insights evaluate --evidence <evidence-bundle.json> --reviewer codex|opencode --response <reviewer-response.json> --output <insight-report.json>
+  deonctl insights proposals materialize --insight <insight-report.json> --response <reviewer-response.json> --output <learning-proposals.json> [--config <insight-policy.yaml>]
+  deonctl insights proposals list --bundle <learning-proposals.json> [--output-format text|json]
+  deonctl insights proposals show --bundle <learning-proposals.json> --proposal <proposal-id> [--output-format text|json]
   deonctl insights report --insight <insight-report.json> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
@@ -1833,6 +1836,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runInsightsEvaluate(opts, stdout, stderr)
+			}
+		case "proposals":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "materialize":
+				opts, err := parseInsightsProposalsMaterializeOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsProposalsMaterialize(opts, stdout, stderr)
+			case "list":
+				opts, err := parseInsightsProposalsListOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsProposalsList(opts, stdout, stderr)
+			case "show":
+				opts, err := parseInsightsProposalsShowOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsProposalsShow(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
 			}
 		case "report":
 			opts, err := parseInsightsReportOptions(args[2:])

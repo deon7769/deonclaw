@@ -168,11 +168,12 @@ Implemented:
 - provider adapters config (`configs/examples/provider-adapters.yaml`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
 - insight trigger policy validate, evidence bundle build from runs, and trigger evaluate (`insights policy validate`, `insights evidence build`, `insights trigger evaluate`), no evaluator or learning proposals yet
-- insight reviewer dry-run/evaluate and insight report materialization (`insights evaluate dry-run`, `insights evaluate`, `insights report`), no worker execution or learning proposals yet
+- insight reviewer dry-run/evaluate and insight report materialization (`insights evaluate dry-run`, `insights evaluate`, `insights report`), no live Codex/OpenCode reviewer execution or learning proposals yet
+- learning proposal materialize/list/show from insight reports and reviewer responses (`insights proposals materialize`, `insights proposals list`, `insights proposals show`), no approval/apply yet
 
 Not implemented yet:
 
-- Learning proposals, approval/apply, and effectiveness measurement (Epic 23.2+)
+- Learning proposal approval/apply and effectiveness measurement (Epic 23.3+)
 - Universal skill registry and portable session skill snapshots
 - Persistent agents, sessions, inbox, assignment, and delegation
 - `deond` daemon, cron, heartbeat, hooks, and wakeup queue

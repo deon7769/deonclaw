@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
+	"text/tabwriter"
 
 	"github.com/deon7769/deonclaw/internal/insights"
 	storepkg "github.com/deon7769/deonclaw/internal/store"
@@ -430,6 +432,233 @@ func runInsightsReport(opts insightsReportOptions, stdout io.Writer, stderr io.W
 	default:
 		if err := insights.WriteReportText(report, stdout); err != nil {
 			fmt.Fprintf(stderr, "insights report failed: %v\n", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+type insightsProposalsMaterializeOptions struct {
+	insightPath  string
+	responsePath string
+	configPath   string
+	outputPath   string
+}
+
+type insightsProposalsListOptions struct {
+	bundlePath   string
+	outputFormat string
+}
+
+type insightsProposalsShowOptions struct {
+	bundlePath   string
+	proposalID   string
+	outputFormat string
+}
+
+func parseInsightsProposalsMaterializeOptions(args []string) (insightsProposalsMaterializeOptions, error) {
+	var opts insightsProposalsMaterializeOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--insight":
+			if i+1 >= len(args) {
+				return insightsProposalsMaterializeOptions{}, fmt.Errorf("missing value for --insight")
+			}
+			opts.insightPath = args[i+1]
+			i++
+		case "--response":
+			if i+1 >= len(args) {
+				return insightsProposalsMaterializeOptions{}, fmt.Errorf("missing value for --response")
+			}
+			opts.responsePath = args[i+1]
+			i++
+		case "--config":
+			if i+1 >= len(args) {
+				return insightsProposalsMaterializeOptions{}, fmt.Errorf("missing value for --config")
+			}
+			opts.configPath = args[i+1]
+			i++
+		case "--output":
+			if i+1 >= len(args) {
+				return insightsProposalsMaterializeOptions{}, fmt.Errorf("missing value for --output")
+			}
+			opts.outputPath = args[i+1]
+			i++
+		default:
+			return insightsProposalsMaterializeOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.insightPath == "" {
+		return insightsProposalsMaterializeOptions{}, fmt.Errorf("missing --insight")
+	}
+	if opts.responsePath == "" {
+		return insightsProposalsMaterializeOptions{}, fmt.Errorf("missing --response")
+	}
+	if opts.outputPath == "" {
+		return insightsProposalsMaterializeOptions{}, fmt.Errorf("missing --output")
+	}
+	return opts, nil
+}
+
+func parseInsightsProposalsListOptions(args []string) (insightsProposalsListOptions, error) {
+	opts := insightsProposalsListOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--bundle":
+			if i+1 >= len(args) {
+				return insightsProposalsListOptions{}, fmt.Errorf("missing value for --bundle")
+			}
+			opts.bundlePath = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return insightsProposalsListOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return insightsProposalsListOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.bundlePath == "" {
+		return insightsProposalsListOptions{}, fmt.Errorf("missing --bundle")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return insightsProposalsListOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func parseInsightsProposalsShowOptions(args []string) (insightsProposalsShowOptions, error) {
+	opts := insightsProposalsShowOptions{outputFormat: "text"}
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--bundle":
+			if i+1 >= len(args) {
+				return insightsProposalsShowOptions{}, fmt.Errorf("missing value for --bundle")
+			}
+			opts.bundlePath = args[i+1]
+			i++
+		case "--proposal":
+			if i+1 >= len(args) {
+				return insightsProposalsShowOptions{}, fmt.Errorf("missing value for --proposal")
+			}
+			opts.proposalID = args[i+1]
+			i++
+		case "--output-format":
+			if i+1 >= len(args) {
+				return insightsProposalsShowOptions{}, fmt.Errorf("missing value for --output-format")
+			}
+			opts.outputFormat = args[i+1]
+			i++
+		default:
+			return insightsProposalsShowOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.bundlePath == "" {
+		return insightsProposalsShowOptions{}, fmt.Errorf("missing --bundle")
+	}
+	if opts.proposalID == "" {
+		return insightsProposalsShowOptions{}, fmt.Errorf("missing --proposal")
+	}
+	if opts.outputFormat != "text" && opts.outputFormat != "json" {
+		return insightsProposalsShowOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
+	}
+	return opts, nil
+}
+
+func runInsightsProposalsMaterialize(opts insightsProposalsMaterializeOptions, stdout io.Writer, stderr io.Writer) int {
+	report, err := insights.ReadReportJSON(opts.insightPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "insights proposals materialize failed: %v\n", err)
+		return 1
+	}
+	response, err := insights.ReadReviewerResponse(opts.responsePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "insights proposals materialize failed: %v\n", err)
+		return 1
+	}
+
+	policy := insights.Policy{AutoPropose: true, AutoApply: false}
+	if strings.TrimSpace(opts.configPath) != "" {
+		cfg, err := insights.LoadPolicy(opts.configPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "insights proposals materialize failed: %v\n", err)
+			return 1
+		}
+		if err := insights.ValidatePolicy(cfg); err != nil {
+			fmt.Fprintf(stderr, "insights proposals materialize failed: %v\n", err)
+			return 1
+		}
+		policy = cfg.InsightPolicy
+	}
+
+	bundle, err := insights.MaterializeProposals(insights.MaterializeProposalsOptions{
+		Report:   report,
+		Response: response,
+		Policy:   policy,
+	})
+	if err != nil {
+		fmt.Fprintf(stderr, "insights proposals materialize failed: %v\n", err)
+		return 1
+	}
+	if err := insights.WriteProposalBundleJSON(bundle, opts.outputPath); err != nil {
+		fmt.Fprintf(stderr, "insights proposals materialize failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "insights proposals materialize: ok proposal_count=%d sha256=%s\n", len(bundle.Proposals), bundle.SHA256)
+	return 0
+}
+
+func runInsightsProposalsList(opts insightsProposalsListOptions, stdout io.Writer, stderr io.Writer) int {
+	bundle, err := insights.ReadProposalBundleJSON(opts.bundlePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "insights proposals list failed: %v\n", err)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		encoder := json.NewEncoder(stdout)
+		encoder.SetEscapeHTML(false)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(bundle); err != nil {
+			fmt.Fprintf(stderr, "insights proposals list failed: %v\n", err)
+			return 1
+		}
+	default:
+		writer := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+		if err := insights.WriteProposalListText(bundle, writer); err != nil {
+			fmt.Fprintf(stderr, "insights proposals list failed: %v\n", err)
+			return 1
+		}
+	}
+	return 0
+}
+
+func runInsightsProposalsShow(opts insightsProposalsShowOptions, stdout io.Writer, stderr io.Writer) int {
+	bundle, err := insights.ReadProposalBundleJSON(opts.bundlePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "insights proposals show failed: %v\n", err)
+		return 1
+	}
+	proposal, ok := insights.FindProposal(bundle, opts.proposalID)
+	if !ok {
+		fmt.Fprintf(stderr, "insights proposals show failed: proposal %q not found\n", opts.proposalID)
+		return 1
+	}
+	switch opts.outputFormat {
+	case "json":
+		encoder := json.NewEncoder(stdout)
+		encoder.SetEscapeHTML(false)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(proposal); err != nil {
+			fmt.Fprintf(stderr, "insights proposals show failed: %v\n", err)
+			return 1
+		}
+	default:
+		writer := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
+		if err := insights.WriteProposalShowText(proposal, writer); err != nil {
+			fmt.Fprintf(stderr, "insights proposals show failed: %v\n", err)
 			return 1
 		}
 	}
