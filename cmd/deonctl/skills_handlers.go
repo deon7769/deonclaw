@@ -482,6 +482,25 @@ func parseSkillsEnableOptions(args []string) (skillsEnableOptions, error) {
 	return opts, nil
 }
 
+func runSkillsApprove(opts skillsShowOptions, stdout io.Writer, stderr io.Writer) int {
+	registry, err := skills.LoadRegistry(opts.registryRoot)
+	if err != nil {
+		fmt.Fprintf(stderr, "skills approve failed: %v\n", err)
+		return 1
+	}
+	registry, err = skills.ApproveSkillInstallation(registry, opts.skillName)
+	if err != nil {
+		fmt.Fprintf(stderr, "skills approve failed: %v\n", err)
+		return 1
+	}
+	if err := skills.SaveRegistry(registry); err != nil {
+		fmt.Fprintf(stderr, "skills approve failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "skills approve: ok skill=%s state=%s\n", opts.skillName, skills.LifecycleVerified)
+	return 0
+}
+
 func runSkillsEnable(opts skillsEnableOptions, stdout io.Writer, stderr io.Writer) int {
 	registry, err := skills.LoadRegistry(opts.registryRoot)
 	if err != nil {

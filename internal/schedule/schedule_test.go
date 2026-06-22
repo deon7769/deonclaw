@@ -29,12 +29,12 @@ func TestCronParseWithTimezone(t *testing.T) {
 }
 
 func TestMaterializeOneShotCreatesOneWakeup(t *testing.T) {
-	now := time.Date(2026, 6, 22, 8, 0, 0, 0, time.UTC)
+	due := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
 	s := Schedule{
 		ID: "one-shot", Kind: KindAt, Status: StatusActive, AgentID: "legacy-manual",
-		At: "2026-06-22T10:00:00Z",
+		At: due.Format(time.RFC3339), NextDueAt: due.Format(time.RFC3339Nano),
 	}
-	wakeups, err := MaterializeWakeups(MaterializeOptions{Schedule: s, Now: now})
+	wakeups, err := MaterializeWakeups(MaterializeOptions{Schedule: s, Now: due})
 	if err != nil {
 		t.Fatalf("MaterializeWakeups() error = %v", err)
 	}
@@ -47,6 +47,7 @@ func TestIdempotencyPreventsDuplicateWakeup(t *testing.T) {
 	now := time.Date(2026, 6, 22, 8, 0, 0, 0, time.UTC)
 	s := Schedule{
 		ID: "every-task", Kind: KindEvery, Status: StatusActive, AgentID: "backend-engineer", Every: "30m",
+		NextDueAt: now.Format(time.RFC3339Nano),
 	}
 	first, err := MaterializeWakeups(MaterializeOptions{Schedule: s, Now: now})
 	if err != nil || len(first) != 1 {

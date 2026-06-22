@@ -112,6 +112,31 @@ func TestChildPathsMustBeSubset(t *testing.T) {
 	}
 }
 
+func TestPathSubsetRejectsPrefixEscape(t *testing.T) {
+	parent := []string{"internal/skills/**"}
+	if PathsSubset([]string{"internal/skills-evil/**"}, parent) {
+		t.Fatal("prefix escape path should not be allowed")
+	}
+	if !PathsSubset([]string{"internal/skills/github-review/**"}, parent) {
+		t.Fatal("valid nested path should be allowed")
+	}
+}
+
+func TestDelegationBlocksManagerPrivilegeEscalation(t *testing.T) {
+	parent := Agent{ID: "parent", Status: StatusActive, Role: "engineer", DefaultWorker: "codex"}
+	child := Agent{ID: "child", Status: StatusActive, Role: "manager", DefaultWorker: "codex"}
+	parentWork := WorkItem{ID: "work_parent", AllowedPaths: []string{"internal/**"}}
+	task := tasks.Task{
+		ID: "task-1", Title: "Delegate", AllowedPaths: []string{"internal/agents/**"},
+	}
+	_, err := BuildDelegationProposal(BuildDelegationProposalOptions{
+		ParentAgent: parent, ChildAgent: child, ParentWorkItem: parentWork, Task: task, Reason: "test",
+	})
+	if err == nil {
+		t.Fatal("BuildDelegationProposal() expected manager privilege escalation error")
+	}
+}
+
 func TestWorkItemFromTask(t *testing.T) {
 	item, err := WorkItemFromTask(WorkItemFromTaskOptions{
 		Task: tasks.Task{

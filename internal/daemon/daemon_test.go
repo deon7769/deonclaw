@@ -82,6 +82,7 @@ func TestRunOnceSkipsPausedAgent(t *testing.T) {
 		ID: "task", Kind: schedule.KindEvery, Name: "task", Status: schedule.StatusActive,
 		AgentID: agent.ID, Every: "30m",
 		CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
+		NextDueAt: now.Add(-time.Minute).Format(time.RFC3339Nano),
 	}
 	_ = sqlite.SaveSchedule(ctx, sched)
 

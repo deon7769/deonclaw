@@ -17,50 +17,39 @@ type MaterializeOptions struct {
 }
 
 func MaterializeWakeups(opts MaterializeOptions) ([]wakeup.Wakeup, error) {
-	if opts.Schedule.Status != StatusActive {
-		return nil, nil
-	}
 	now := opts.Now
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
-	if !WithinActiveHours(opts.Schedule, now) {
-		return nil, nil
-	}
-	due, err := NextDue(opts.Schedule, now)
+	dueTimes, err := DueTimesForMaterialize(opts.Schedule, now)
 	if err != nil {
 		return nil, err
 	}
-	if opts.Schedule.Kind == KindHeartbeat {
-		if d, err := ParseEveryDuration(defaultEvery(opts.Schedule.Every, "30m")); err == nil {
-			due = now.Truncate(d)
-		} else {
-			due = now.Truncate(time.Minute)
+	out := make([]wakeup.Wakeup, 0, len(dueTimes))
+	for _, due := range dueTimes {
+		key := IdempotencyKey(opts.Schedule.ID, due)
+		duplicate := false
+		for _, existing := range opts.Existing {
+			if existing.IdempotencyKey == key {
+				duplicate = true
+				break
+			}
 		}
-	}
-	if due.IsZero() {
-		return nil, nil
-	}
-	if opts.Schedule.Kind == KindAt && due.Before(now) {
-		return nil, nil
-	}
-	key := IdempotencyKey(opts.Schedule.ID, due)
-	for _, existing := range opts.Existing {
-		if existing.IdempotencyKey == key {
-			return nil, nil
+		if duplicate {
+			continue
 		}
+		out = append(out, wakeup.Wakeup{
+			ID:             newWakeupID(opts.Schedule.ID, due),
+			ScheduleID:     opts.Schedule.ID,
+			AgentID:        opts.Schedule.AgentID,
+			DueAt:          due.Format(time.RFC3339Nano),
+			Status:         wakeup.StatusQueued,
+			IdempotencyKey: key,
+			Attempt:        0,
+			CreatedAt:      now.Format(time.RFC3339Nano),
+		})
 	}
-	w := wakeup.Wakeup{
-		ID:             newWakeupID(opts.Schedule.ID, due),
-		ScheduleID:     opts.Schedule.ID,
-		AgentID:        opts.Schedule.AgentID,
-		DueAt:          due.Format(time.RFC3339Nano),
-		Status:         wakeup.StatusQueued,
-		IdempotencyKey: key,
-		Attempt:        0,
-		CreatedAt:      now.Format(time.RFC3339Nano),
-	}
-	return []wakeup.Wakeup{w}, nil
+	return out, nil
 }
 
 func defaultEvery(value string, fallback string) string {
@@ -85,7 +74,7 @@ func AdvanceScheduleAfterRun(s Schedule, ranAt time.Time) (Schedule, error) {
 	case KindAt:
 		s.Status = StatusCancelled
 	case KindEvery, KindCron, KindHeartbeat:
-		next, err := NextDue(s, ranAt)
+		next, err := ComputeNextDueAfterRun(s, ranAt)
 		if err != nil {
 			return Schedule{}, err
 		}
@@ -141,12 +130,16 @@ func FormatDueReport(schedules []Schedule, now time.Time) string {
 		if s.Status != StatusActive {
 			continue
 		}
-		due, err := NextDue(s, now)
+		due, err := ResolveNextDueAt(s, now)
 		if err != nil {
 			fmt.Fprintf(&b, "  - id: %s\n    error: %s\n", s.ID, err.Error())
 			continue
 		}
-		fmt.Fprintf(&b, "  - id: %s\n    kind: %s\n    next_due_at: %s\n", s.ID, s.Kind, due.Format(time.RFC3339Nano))
+		dueLabel := "none"
+		if !due.IsZero() {
+			dueLabel = due.Format(time.RFC3339Nano)
+		}
+		fmt.Fprintf(&b, "  - id: %s\n    kind: %s\n    next_due_at: %s\n    due_now: %t\n", s.ID, s.Kind, dueLabel, !due.IsZero() && !due.After(now))
 	}
 	return b.String()
 }

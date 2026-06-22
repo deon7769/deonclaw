@@ -186,7 +186,25 @@ func SetSkillState(registry Registry, skillName string, state string) (Registry,
 	if !allowedRegistryState(state) {
 		return Registry{}, fmt.Errorf("state %q is not allowed", state)
 	}
+	if entry.State == LifecyclePendingApproval && state == LifecycleActive {
+		return Registry{}, fmt.Errorf("skill %q requires approval before becoming active", skillName)
+	}
 	entry.State = state
+	registry.Skills[skillName] = entry
+	return registry, nil
+}
+
+// ApproveSkillInstallation moves a pending skill to verified after operator review.
+func ApproveSkillInstallation(registry Registry, skillName string) (Registry, error) {
+	skillName = strings.TrimSpace(skillName)
+	entry, ok := registry.Skills[skillName]
+	if !ok {
+		return Registry{}, fmt.Errorf("skill %q not found in registry", skillName)
+	}
+	if entry.State != LifecyclePendingApproval {
+		return Registry{}, fmt.Errorf("skill %q is not pending approval (state=%q)", skillName, entry.State)
+	}
+	entry.State = LifecycleVerified
 	registry.Skills[skillName] = entry
 	return registry, nil
 }
@@ -197,8 +215,16 @@ func EnableSkillForAgent(registry Registry, agentID string, skillName string) (R
 	if agentID == "" {
 		return Registry{}, fmt.Errorf("agent id is required")
 	}
-	if _, ok := registry.Skills[skillName]; !ok {
+	entry, ok := registry.Skills[skillName]
+	if !ok {
 		return Registry{}, fmt.Errorf("skill %q not found in registry", skillName)
+	}
+	switch entry.State {
+	case LifecyclePendingApproval:
+		return Registry{}, fmt.Errorf("skill %q requires approval before enable", skillName)
+	case LifecycleVerified, LifecycleActive:
+	default:
+		return Registry{}, fmt.Errorf("skill %q state %q cannot be enabled", skillName, entry.State)
 	}
 	registry, err := SetSkillState(registry, skillName, LifecycleActive)
 	if err != nil {

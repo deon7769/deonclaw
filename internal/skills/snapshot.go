@@ -38,7 +38,7 @@ func BuildSnapshot(opts SnapshotOptions) (SessionSnapshot, error) {
 
 	skills := make([]SnapshotSkill, 0)
 	for name, entry := range registry.Skills {
-		if entry.State != LifecycleActive && entry.State != LifecycleVerified {
+		if entry.State != LifecycleActive {
 			continue
 		}
 		if !opts.Policy.AgentMayUse(agentID, name) && !registryAgentMayUse(registry, agentID, name) {
