@@ -138,6 +138,7 @@ Implemented:
 - provider credential policy config (`configs/examples/provider-credential-policy.yaml`), no provider call
 - provider adapters config (`configs/examples/provider-adapters.yaml`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
+- insight trigger policy validate, evidence bundle build from runs, and trigger evaluate (`insights policy validate`, `insights evidence build`, `insights trigger evaluate`), no evaluator or learning proposals yet
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -145,6 +146,13 @@ Implemented:
 
 Not implemented yet:
 
+- Insight evaluator, learning proposals, approval/apply, and effectiveness measurement (Epic 23.1+)
+- Universal skill registry and portable session skill snapshots (Epic 23B)
+- Persistent agents, sessions, inbox, assignment, and delegation (Epic 23C)
+- `deond` daemon, cron, heartbeat, hooks, and wakeup queue (Epic 23D)
+- Work queue, execution leases, budgets, usage events, and hard stops (Epic 23E)
+- OpenClaw migration inspect/plan/apply/shadow/cutover/rollback (Epic 23F)
+- Rich Git/browser/action contracts and future UI/API surfaces (Epic 23G)
 - real fallback execution/retry
 - Codex Docker worker execution
 - MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, explicit proposal approval workflow with execution bundle, passive context attachments, worker proposal lint/preflight only, and run-scoped proposal review queue without execution
@@ -365,11 +373,17 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 ## Next implementation order
 
-Current next sequence:
+Current next sequence (Epic 23 — see [docs/EPIC_23_ROADMAP.md](docs/EPIC_23_ROADMAP.md)):
 
-1. MCP manager
-2. memory index retrieval/LanceDB search
-3. UI/dashboard
+1. Insight evaluator and learning-proposal lifecycle (`23.1–23.3`)
+2. Universal skill registry (`23.4–23.7`)
+3. Persistent agents and sessions (`23.8–23.11`)
+4. Proactive runtime (`deond`, cron, heartbeat) (`23.12–23.15`)
+5. Work queue, leases, budgets (`23.16–23.19`)
+6. OpenClaw migration (`23.20–23.23`)
+7. Rich runtime actions (`23.24–23.27`)
+
+Deferred after operational foundation: MCP execution manager, active LanceDB retrieval in runner, UI/dashboard.
 
 ## Coding style
 

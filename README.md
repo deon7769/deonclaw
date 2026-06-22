@@ -167,10 +167,11 @@ Implemented:
 - provider credential policy config (`configs/examples/provider-credential-policy.yaml`), no provider call
 - provider adapters config (`configs/examples/provider-adapters.yaml`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
+- insight trigger policy validate, evidence bundle build from runs, and trigger evaluate (`insights policy validate`, `insights evidence build`, `insights trigger evaluate`), no evaluator or learning proposals yet
 
 Not implemented yet:
 
-- Insight and learning loop over runs, commits, corrections, and skills
+- Insight evaluator, learning proposals, approval/apply, and effectiveness measurement (Epic 23.1+)
 - Universal skill registry and portable session skill snapshots
 - Persistent agents, sessions, inbox, assignment, and delegation
 - `deond` daemon, cron, heartbeat, hooks, and wakeup queue
