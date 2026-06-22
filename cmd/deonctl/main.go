@@ -124,6 +124,17 @@ Usage:
   deonctl insights effectiveness report --effectiveness <effectiveness.json> [--output-format text|json]
   deonctl insights timeline --bundle <learning-proposals.json> [--effectiveness <effectiveness.json>] [--output-format text|json]
   deonctl insights report --insight <insight-report.json> [--output-format text|json]
+  deonctl skills policy validate --config <skill-policy.yaml>
+  deonctl skills inspect <path|git:owner/repo@ref> [--output-format text|json]
+  deonctl skills import <path|git:owner/repo@ref> --output <skill-import-plan.json> [--policy <skill-policy.yaml>]
+  deonctl skills install <path> --registry-root <dir> [--as <name>] [--policy <skill-policy.yaml>] [--output <install-result.json>]
+  deonctl skills verify <name> --registry-root <dir> [--output-format text|json]
+  deonctl skills list --registry-root <dir> [--output-format text|json]
+  deonctl skills show <name> --registry-root <dir> [--output-format text|json]
+  deonctl skills enable <name> --agent <agent-id> --registry-root <dir>
+  deonctl skills disable <name> --agent <agent-id> --registry-root <dir>
+  deonctl skills snapshot --agent <agent-id> --session <session-id> --registry-root <dir> --output <snapshot.json> [--policy <skill-policy.yaml>]
+  deonctl skills materialize --snapshot <snapshot.json> --workspace <path> --registry-root <dir> [--output <materialize-result.json>]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
@@ -1950,6 +1961,108 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runInsightsTimeline(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "skills":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "policy":
+			if len(args) < 3 || args[2] != "validate" {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseSkillsPolicyValidateOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsPolicyValidate(opts, stdout, stderr)
+		case "inspect":
+			opts, err := parseSkillsInspectOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsInspect(opts, stdout, stderr)
+		case "import":
+			opts, err := parseSkillsImportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsImport(opts, stdout, stderr)
+		case "install":
+			opts, err := parseSkillsInstallOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsInstall(opts, stdout, stderr)
+		case "verify":
+			opts, err := parseSkillsVerifyOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsVerify(opts, stdout, stderr)
+		case "list":
+			opts, err := parseSkillsListOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsList(opts, stdout, stderr)
+		case "show":
+			opts, err := parseSkillsShowOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsShow(opts, stdout, stderr)
+		case "enable":
+			opts, err := parseSkillsEnableOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsEnable(opts, stdout, stderr)
+		case "disable":
+			opts, err := parseSkillsEnableOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsDisable(opts, stdout, stderr)
+		case "snapshot":
+			opts, err := parseSkillsSnapshotOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsSnapshot(opts, stdout, stderr)
+		case "materialize":
+			opts, err := parseSkillsMaterializeOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runSkillsMaterialize(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2

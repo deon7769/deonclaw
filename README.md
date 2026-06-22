@@ -171,10 +171,10 @@ Implemented:
 - insight reviewer dry-run/evaluate and insight report materialization (`insights evaluate dry-run`, `insights evaluate`, `insights report`), no live Codex/OpenCode reviewer execution or learning proposals yet
 - learning proposal materialize/list/show from insight reports and reviewer responses (`insights proposals materialize`, `insights proposals list`, `insights proposals show`)
 - learning proposal approval, apply dry-run/preview execute, effectiveness record/report, and timeline (`insights proposals approve`, `insights proposals apply dry-run`, `insights proposals apply`, `insights effectiveness record`, `insights effectiveness report`, `insights timeline`), documentation-like types only for preview apply; skill/memory/policy types blocked
+- universal skill registry foundation (`skills policy validate`, `skills inspect`, `skills import`, `skills install`, `skills verify`, `skills list`, `skills show`, `skills enable`, `skills disable`, `skills snapshot`, `skills materialize`), local install only; git import plan-only; no worker auto-loading yet
 
 Not implemented yet:
 
-- Universal skill registry and portable session skill snapshots
 - Persistent agents, sessions, inbox, assignment, and delegation
 - `deond` daemon, cron, heartbeat, hooks, and wakeup queue
 - Work queue, execution leases, budgets, usage events, and hard stops

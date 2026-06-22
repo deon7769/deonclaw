@@ -142,6 +142,7 @@ Implemented:
 - insight reviewer dry-run/evaluate and insight report materialization (`insights evaluate dry-run`, `insights evaluate`, `insights report`), no live Codex/OpenCode reviewer execution yet
 - learning proposal materialize/list/show (`insights proposals materialize`, `insights proposals list`, `insights proposals show`)
 - learning proposal approval, apply dry-run/preview execute, effectiveness record/report, and timeline (`insights proposals approve`, `insights proposals apply dry-run`, `insights proposals apply`, `insights effectiveness record`, `insights effectiveness report`, `insights timeline`), documentation-like types only for preview apply; skill/memory/policy types blocked
+- universal skill registry foundation (`skills policy validate`, `skills inspect`, `skills import`, `skills install`, `skills verify`, `skills list`, `skills show`, `skills enable`, `skills disable`, `skills snapshot`, `skills materialize`), local install only; git import plan-only; no worker auto-loading yet
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -149,7 +150,6 @@ Implemented:
 
 Not implemented yet:
 
-- Universal skill registry and portable session skill snapshots (Epic 23B)
 - Persistent agents, sessions, inbox, assignment, and delegation (Epic 23C)
 - `deond` daemon, cron, heartbeat, hooks, and wakeup queue (Epic 23D)
 - Work queue, execution leases, budgets, usage events, and hard stops (Epic 23E)
@@ -377,12 +377,11 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence (Epic 23 — see [docs/EPIC_23_ROADMAP.md](docs/EPIC_23_ROADMAP.md)):
 
-1. Universal skill registry (`23.4–23.7`)
-2. Persistent agents and sessions (`23.8–23.11`)
-3. Proactive runtime (`deond`, cron, heartbeat) (`23.12–23.15`)
-4. Work queue, leases, budgets (`23.16–23.19`)
-5. OpenClaw migration (`23.20–23.23`)
-6. Rich runtime actions (`23.24–23.27`)
+1. Persistent agents and sessions (`23.8–23.11`)
+2. Proactive runtime (`deond`, cron, heartbeat) (`23.12–23.15`)
+3. Work queue, leases, budgets (`23.16–23.19`)
+4. OpenClaw migration (`23.20–23.23`)
+5. Rich runtime actions (`23.24–23.27`)
 
 Deferred after operational foundation: MCP execution manager, active LanceDB retrieval in runner, UI/dashboard.
 

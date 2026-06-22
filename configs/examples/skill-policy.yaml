@@ -1,5 +1,28 @@
 skill_policy:
+  default_visibility: deny
   default_update_mode: proposal_only
+
+  allow_sources:
+    - local
+    - managed
+    - workspace
+
+  deny_sources:
+    - archive
+
+  require_approval_for:
+    - git
+    - archive
+    - skill_patch
+
+  permissions:
+    network: deny
+    shell: ask
+    secrets: deny
+
+  agent_allowlists:
+    legacy-manual:
+      - github-review
 
   states:
     - draft
