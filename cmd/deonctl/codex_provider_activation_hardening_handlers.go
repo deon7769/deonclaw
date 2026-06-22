@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"io"
+	"sort"
+	"strings"
 
 	"github.com/deon7769/deonclaw/internal/lancedbpolicy"
 	"github.com/deon7769/deonclaw/internal/retrievalcontext"
@@ -67,6 +69,20 @@ type codexProviderActivationFinalAuditOptions struct {
 
 type codexProviderActivationCIReportOptions struct {
 	codexProviderActivationFinalAuditOptions
+}
+
+func requireCLIPaths(paths map[string]string) error {
+	missing := make([]string, 0, len(paths))
+	for flag, value := range paths {
+		if value == "" {
+			missing = append(missing, flag)
+		}
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	sort.Strings(missing)
+	return fmt.Errorf("missing required flags: %s", strings.Join(missing, ", "))
 }
 
 func parseCodexProviderActivationOperatorReviewBundleOptions(args []string) (codexProviderActivationOperatorReviewBundleOptions, error) {
@@ -149,8 +165,20 @@ func parseCodexProviderActivationOperatorReviewBundleOptions(args []string) (cod
 			return codexProviderActivationOperatorReviewBundleOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
 	}
-	if opts.activationReleasePackagePath == "" || opts.outputPath == "" {
-		return codexProviderActivationOperatorReviewBundleOptions{}, fmt.Errorf("missing required flags")
+	if err := requireCLIPaths(map[string]string{
+		"--activation-release-package":      opts.activationReleasePackagePath,
+		"--activation-release-gate":         opts.activationReleaseGatePath,
+		"--activation-policy-plan":          opts.activationPolicyPlanPath,
+		"--activation-approval":             opts.activationApprovalPath,
+		"--activation-rehearsal":            opts.activationRehearsalPath,
+		"--activation-readiness-audit":      opts.activationReadinessAuditPath,
+		"--real-call-proposal":              opts.realCallProposalPath,
+		"--execution-simulation-report":     opts.executionSimulationReportPath,
+		"--credential-policy-plan":          opts.credentialPolicyPlanPath,
+		"--response-change-proposal-report": opts.responseChangeProposalReportPath,
+		"--output":                          opts.outputPath,
+	}); err != nil {
+		return codexProviderActivationOperatorReviewBundleOptions{}, err
 	}
 	if opts.outputFormat != "text" && opts.outputFormat != "json" {
 		return codexProviderActivationOperatorReviewBundleOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
@@ -238,8 +266,20 @@ func parseCodexProviderActivationOperatorReviewReportOptions(args []string) (cod
 			return codexProviderActivationOperatorReviewReportOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
 	}
-	if opts.operatorReviewBundlePath == "" {
-		return codexProviderActivationOperatorReviewReportOptions{}, fmt.Errorf("missing --operator-review-bundle")
+	if err := requireCLIPaths(map[string]string{
+		"--operator-review-bundle":          opts.operatorReviewBundlePath,
+		"--activation-release-package":      opts.activationReleasePackagePath,
+		"--activation-release-gate":         opts.activationReleaseGatePath,
+		"--activation-policy-plan":          opts.activationPolicyPlanPath,
+		"--activation-approval":             opts.activationApprovalPath,
+		"--activation-rehearsal":            opts.activationRehearsalPath,
+		"--activation-readiness-audit":      opts.activationReadinessAuditPath,
+		"--real-call-proposal":              opts.realCallProposalPath,
+		"--execution-simulation-report":     opts.executionSimulationReportPath,
+		"--credential-policy-plan":          opts.credentialPolicyPlanPath,
+		"--response-change-proposal-report": opts.responseChangeProposalReportPath,
+	}); err != nil {
+		return codexProviderActivationOperatorReviewReportOptions{}, err
 	}
 	if opts.outputFormat != "text" && opts.outputFormat != "json" {
 		return codexProviderActivationOperatorReviewReportOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)
@@ -397,8 +437,21 @@ func parseCodexProviderActivationFinalAuditOptions(args []string) (codexProvider
 			return codexProviderActivationFinalAuditOptions{}, fmt.Errorf("unknown argument %q", args[i])
 		}
 	}
-	if opts.activationReleasePackagePath == "" || opts.activationReleaseGatePath == "" || opts.operatorReviewBundlePath == "" || opts.killSwitchPlanPath == "" {
-		return codexProviderActivationFinalAuditOptions{}, fmt.Errorf("missing required flags")
+	if err := requireCLIPaths(map[string]string{
+		"--activation-release-package":      opts.activationReleasePackagePath,
+		"--activation-release-gate":         opts.activationReleaseGatePath,
+		"--operator-review-bundle":          opts.operatorReviewBundlePath,
+		"--kill-switch-plan":                opts.killSwitchPlanPath,
+		"--activation-policy-plan":          opts.activationPolicyPlanPath,
+		"--activation-readiness-audit":      opts.activationReadinessAuditPath,
+		"--real-call-proposal":              opts.realCallProposalPath,
+		"--credential-policy-plan":          opts.credentialPolicyPlanPath,
+		"--response-change-proposal-report": opts.responseChangeProposalReportPath,
+		"--activation-approval":             opts.activationApprovalPath,
+		"--activation-rehearsal":            opts.activationRehearsalPath,
+		"--execution-simulation-report":     opts.executionSimulationReportPath,
+	}); err != nil {
+		return codexProviderActivationFinalAuditOptions{}, err
 	}
 	if opts.outputFormat != "text" && opts.outputFormat != "json" {
 		return codexProviderActivationFinalAuditOptions{}, fmt.Errorf("unsupported output format %q", opts.outputFormat)

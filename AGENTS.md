@@ -397,3 +397,17 @@ make ship MSG="short commit message"
 `make ship` runs formatting, `git diff --check`, `go test ./...`, then commits and pushes the current branch. It is intentionally scoped to the DeonClaw remote and must not be reused for other repositories.
 
 Do not commit generated secrets, tokens, local auth files, memory vault contents or domain data.
+
+## Learned User Preferences
+
+- Do not implement sprints directly on `main`; create a `cursor/<topic>-<sprint>` feature branch first
+- Default Git workflow is feature branch, push branch, and open a draft PR against `main`; do not merge without CI/smoke review
+- When commit/push is requested without branch context, confirm the current branch before proceeding; the user has corrected mistaken commits to `main`
+- Update mandatory sprint documentation (README, AGENTS.md, relevant docs, fixture README) in the same sprint before commit
+- Honor explicit "commit/push to main" only when the user states it clearly; otherwise use the feature-branch workflow
+
+## Learned Workspace Facts
+
+- Pre-ship validation for provider-call chain sprints: `gofmt -w .`, `git diff --check`, `go test ./...`, `make provider-call-chain-smoke`
+- `make provider-call-chain-smoke` is the end-to-end CI guard for the provider-call chain fixture through the current activation gates
+- Feature branch naming pattern: `cursor/<descriptive-topic>-<sprint-range>`

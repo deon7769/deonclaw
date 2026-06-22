@@ -42,7 +42,14 @@ type ProviderActivationFinalAuditResult struct {
 	NetworkCall                bool     `json:"network_call"`
 	SecretValuesRead           bool     `json:"secret_values_read"`
 	TransportCalled            bool     `json:"transport_called"`
+	SentToProvider             bool     `json:"sent_to_provider"`
+	ReceivedFromProvider       bool     `json:"received_from_provider"`
 	WorkspaceModified          bool     `json:"workspace_modified"`
+	DiffApplied                bool     `json:"diff_applied"`
+	CommitCreated              bool     `json:"commit_created"`
+	PRCreated                  bool     `json:"pr_created"`
+	WorkerExecution            bool     `json:"worker_execution"`
+	PromptInjectionRealRunner  bool     `json:"prompt_injection_real_runner"`
 	BlockedReason              string   `json:"blocked_reason"`
 	Warnings                   []string `json:"warnings,omitempty"`
 	Failures                   []string `json:"failures,omitempty"`
@@ -64,7 +71,14 @@ type ProviderActivationCIReportResult struct {
 	NetworkCall                bool     `json:"network_call"`
 	SecretValuesRead           bool     `json:"secret_values_read"`
 	TransportCalled            bool     `json:"transport_called"`
+	SentToProvider             bool     `json:"sent_to_provider"`
+	ReceivedFromProvider       bool     `json:"received_from_provider"`
 	WorkspaceModified          bool     `json:"workspace_modified"`
+	DiffApplied                bool     `json:"diff_applied"`
+	CommitCreated              bool     `json:"commit_created"`
+	PRCreated                  bool     `json:"pr_created"`
+	WorkerExecution            bool     `json:"worker_execution"`
+	PromptInjectionRealRunner  bool     `json:"prompt_injection_real_runner"`
 	BlockedReason              string   `json:"blocked_reason"`
 	ExpectedLocalCommands      []string `json:"expected_local_commands,omitempty"`
 	ExpectedPRChecklist        []string `json:"expected_pr_checklist,omitempty"`
@@ -158,9 +172,20 @@ func ProviderActivationFinalAudit(opts ProviderActivationFinalAuditOptions) (Pro
 		failures = append(failures, "activation readiness audit must keep activation blocked")
 	}
 
-	result := ProviderActivationFinalAuditResult{
+	result := blockedProviderActivationFinalAuditResult(failures)
+	if len(failures) > 0 {
+		result.Status = lancedbpolicy.StatusFailed
+	} else {
+		result.FinalAuditReady = true
+		result.KillSwitchActive = killSwitch.KillSwitchValidated && killSwitch.GlobalDisabled
+	}
+	return result, nil
+}
+
+func blockedProviderActivationFinalAuditResult(failures []string) ProviderActivationFinalAuditResult {
+	return ProviderActivationFinalAuditResult{
 		Status:                     lancedbpolicy.StatusOK,
-		KillSwitchActive:           killSwitch.KillSwitchValidated && killSwitch.GlobalDisabled,
+		KillSwitchActive:           false,
 		OperatorReviewRequired:     true,
 		RealActivationSupportedNow: false,
 		ActivationAllowedNow:       false,
@@ -168,25 +193,21 @@ func ProviderActivationFinalAudit(opts ProviderActivationFinalAuditOptions) (Pro
 		NetworkCall:                false,
 		SecretValuesRead:           false,
 		TransportCalled:            false,
+		SentToProvider:             false,
+		ReceivedFromProvider:       false,
 		WorkspaceModified:          false,
+		DiffApplied:                false,
+		CommitCreated:              false,
+		PRCreated:                  false,
+		WorkerExecution:            false,
+		PromptInjectionRealRunner:  false,
 		BlockedReason:              ProviderCallExecutorBlockedReason,
 		Failures:                   failures,
 	}
-	if len(failures) > 0 {
-		result.Status = lancedbpolicy.StatusFailed
-		result.KillSwitchActive = false
-	} else {
-		result.FinalAuditReady = true
-	}
-	return result, nil
 }
 
-func ProviderActivationCIReport(opts ProviderActivationCIReportOptions) (ProviderActivationCIReportResult, error) {
-	audit, err := ProviderActivationFinalAudit(opts.ProviderActivationFinalAuditOptions)
-	if err != nil {
-		return ProviderActivationCIReportResult{}, err
-	}
-	result := ProviderActivationCIReportResult{
+func providerActivationFinalAuditResultFromAudit(audit ProviderActivationFinalAuditResult) ProviderActivationCIReportResult {
+	return ProviderActivationCIReportResult{
 		Status:                     audit.Status,
 		FinalAuditReady:            audit.FinalAuditReady,
 		KillSwitchActive:           audit.KillSwitchActive,
@@ -197,12 +218,27 @@ func ProviderActivationCIReport(opts ProviderActivationCIReportOptions) (Provide
 		NetworkCall:                audit.NetworkCall,
 		SecretValuesRead:           audit.SecretValuesRead,
 		TransportCalled:            audit.TransportCalled,
+		SentToProvider:             audit.SentToProvider,
+		ReceivedFromProvider:       audit.ReceivedFromProvider,
 		WorkspaceModified:          audit.WorkspaceModified,
+		DiffApplied:                audit.DiffApplied,
+		CommitCreated:              audit.CommitCreated,
+		PRCreated:                  audit.PRCreated,
+		WorkerExecution:            audit.WorkerExecution,
+		PromptInjectionRealRunner:  audit.PromptInjectionRealRunner,
 		BlockedReason:              audit.BlockedReason,
-		ExpectedLocalCommands:      append([]string(nil), providerActivationCIExpectedCommands...),
-		ExpectedPRChecklist:        append([]string(nil), providerActivationExpectedPRChecklist...),
 		Failures:                   append([]string(nil), audit.Failures...),
 	}
+}
+
+func ProviderActivationCIReport(opts ProviderActivationCIReportOptions) (ProviderActivationCIReportResult, error) {
+	audit, err := ProviderActivationFinalAudit(opts.ProviderActivationFinalAuditOptions)
+	if err != nil {
+		return ProviderActivationCIReportResult{}, err
+	}
+	result := providerActivationFinalAuditResultFromAudit(audit)
+	result.ExpectedLocalCommands = append([]string(nil), providerActivationCIExpectedCommands...)
+	result.ExpectedPRChecklist = append([]string(nil), providerActivationExpectedPRChecklist...)
 	if audit.Status == lancedbpolicy.StatusFailed {
 		return result, nil
 	}
@@ -216,6 +252,9 @@ func WriteProviderActivationFinalAuditJSON(result ProviderActivationFinalAuditRe
 		return err
 	}
 	data = append(data, '\n')
+	if strings.Contains(string(data), "text_excerpt") || strings.Contains(string(data), "alpha text") {
+		return fmt.Errorf("provider activation final audit must not contain materialized preview text")
+	}
 	_, err = out.Write(data)
 	return err
 }

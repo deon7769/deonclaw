@@ -170,9 +170,7 @@ func assertProviderActivationFinalAuditBlocked(t *testing.T, result retrievalcon
 	if !result.FinalAuditReady || !result.KillSwitchActive || !result.OperatorReviewRequired {
 		t.Fatalf("final audit = %#v, want ready with kill switch and operator review", result)
 	}
-	if result.RealActivationSupportedNow || result.ActivationAllowedNow || result.ProviderCall || result.NetworkCall || result.SecretValuesRead || result.TransportCalled || result.WorkspaceModified {
-		t.Fatalf("final audit flags must stay blocked: %#v", result)
-	}
+	assertProviderActivationHardeningExecutionFlagsBlocked(t, "final audit", result.RealActivationSupportedNow, result.ActivationAllowedNow, result.ProviderCall, result.NetworkCall, result.SecretValuesRead, result.TransportCalled, result.SentToProvider, result.ReceivedFromProvider, result.WorkspaceModified, result.DiffApplied, result.CommitCreated, result.PRCreated, result.WorkerExecution, result.PromptInjectionRealRunner)
 }
 
 func assertProviderActivationCIReportBlocked(t *testing.T, result retrievalcontext.ProviderActivationCIReportResult) {
@@ -180,11 +178,17 @@ func assertProviderActivationCIReportBlocked(t *testing.T, result retrievalconte
 	if !result.CIObservabilityReady || !result.FinalAuditReady || !result.KillSwitchActive {
 		t.Fatalf("ci report = %#v, want observability ready", result)
 	}
-	if result.RealActivationSupportedNow || result.ActivationAllowedNow {
-		t.Fatalf("ci report activation flags must stay blocked: %#v", result)
-	}
+	assertProviderActivationHardeningExecutionFlagsBlocked(t, "ci report", result.RealActivationSupportedNow, result.ActivationAllowedNow, result.ProviderCall, result.NetworkCall, result.SecretValuesRead, result.TransportCalled, result.SentToProvider, result.ReceivedFromProvider, result.WorkspaceModified, result.DiffApplied, result.CommitCreated, result.PRCreated, result.WorkerExecution, result.PromptInjectionRealRunner)
 	if len(result.ExpectedLocalCommands) == 0 || len(result.ExpectedPRChecklist) == 0 {
 		t.Fatal("ci report must include expected commands and PR checklist")
+	}
+}
+
+func assertProviderActivationHardeningExecutionFlagsBlocked(t *testing.T, label string, realActivationSupportedNow, activationAllowedNow, providerCall, networkCall, secretValuesRead, transportCalled, sentToProvider, receivedFromProvider, workspaceModified, diffApplied, commitCreated, prCreated, workerExecution, promptInjectionRealRunner bool) {
+	t.Helper()
+	if realActivationSupportedNow || activationAllowedNow || providerCall || networkCall || secretValuesRead || transportCalled || sentToProvider || receivedFromProvider || workspaceModified || diffApplied || commitCreated || prCreated || workerExecution || promptInjectionRealRunner {
+		t.Fatalf("%s execution flags must stay blocked: real_activation_supported_now=%t activation_allowed_now=%t provider_call=%t network_call=%t secret_values_read=%t transport_called=%t sent_to_provider=%t received_from_provider=%t workspace_modified=%t diff_applied=%t commit_created=%t pr_created=%t worker_execution=%t prompt_injection_real_runner=%t",
+			label, realActivationSupportedNow, activationAllowedNow, providerCall, networkCall, secretValuesRead, transportCalled, sentToProvider, receivedFromProvider, workspaceModified, diffApplied, commitCreated, prCreated, workerExecution, promptInjectionRealRunner)
 	}
 }
 
