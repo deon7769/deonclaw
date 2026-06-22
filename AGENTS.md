@@ -147,6 +147,7 @@ Implemented:
 - proactive runtime foundation (`daemon status`, `daemon doctor`, `daemon start`, `daemon stop`, `daemon run-once`, `schedules validate`, `schedules sync`, `schedules list`, `schedules due`, `heartbeat validate`, `heartbeat dry-run`, `hooks validate`, `hooks plan`), SQLite schema v3 for schedules/wakeups/heartbeat/daemon state; run-once materializes wakeups from persisted `NextDueAt` with catch-up/max-lateness semantics and atomic queued wakeup claims; heartbeat dry-run with `HEARTBEAT_OK` no-op; hooks plan-only; proactive runtime fixture smoke in CI (`scripts/proactive-runtime-fixture-smoke.sh`, `make proactive-runtime-smoke`); no `deonclawd` long-running process or worker dispatch yet
 - skill registry security hardening (`skills approve`, approval required before `skills enable`/active, snapshot hash/revision validation, workspace path containment on materialize)
 - delegation security hardening (component-aware path subset checks, manager-role privilege escalation guard)
+- work queue and execution leases foundation (`work list`, `work show`, `work claim`, `work release`, `work leases list`, `work recover`, `work doctor`), SQLite schema v4 for `execution_leases` and `work_queue_events`; atomic claim/release with TTL recovery; no worker dispatch from queue yet
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

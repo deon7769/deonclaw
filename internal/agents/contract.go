@@ -19,12 +19,17 @@ const (
 )
 
 const (
-	WorkItemStatusQueued    = "queued"
-	WorkItemStatusAssigned  = "assigned"
-	WorkItemStatusRunning   = "running"
-	WorkItemStatusCompleted = "completed"
-	WorkItemStatusCancelled = "cancelled"
-	WorkItemStatusBlocked   = "blocked"
+	WorkItemStatusQueued         = "queued"
+	WorkItemStatusAssigned       = "assigned"
+	WorkItemStatusLeased         = "leased"
+	WorkItemStatusRunning        = "running"
+	WorkItemStatusReviewRequired = "review_required"
+	WorkItemStatusCompleted      = "completed"
+	WorkItemStatusSucceeded      = "succeeded"
+	WorkItemStatusFailed         = "failed"
+	WorkItemStatusCancelled      = "cancelled"
+	WorkItemStatusBlocked        = "blocked"
+	WorkItemStatusDeadLetter     = "dead_letter"
 )
 
 const (

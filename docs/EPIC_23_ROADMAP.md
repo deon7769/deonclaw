@@ -137,6 +137,8 @@ Add atomic checkout, leases, usage normalization, cost events, budget reservatio
 
 Detailed design: [BUDGETS_AND_COSTS.md](BUDGETS_AND_COSTS.md).
 
+**Status:** 23.16 work queue and leases in progress on `cursor/work-queue-leases-23-16` (execution leases, atomic claim/release, recovery, `deonctl work` CLI). Budgets/usage (23.17–23.19) not started.
+
 ### 23F — OpenClaw Migration (`23.20–23.23`)
 
 Provide inspect, plan, apply, verify, shadow, cutover, and rollback flows for OpenClaw agents, skills, memory, cron, heartbeat, and session metadata.

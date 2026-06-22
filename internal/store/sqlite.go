@@ -19,7 +19,7 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 4
 
 func OpenSQLite(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
@@ -119,6 +119,9 @@ func (s *SQLiteStore) bootstrap(ctx context.Context) error {
 		return err
 	}
 	if err := s.bootstrapProactive(ctx); err != nil {
+		return err
+	}
+	if err := s.bootstrapWorkQueue(ctx); err != nil {
 		return err
 	}
 	if err := s.recordSchemaMigration(ctx, currentSchemaVersion); err != nil {

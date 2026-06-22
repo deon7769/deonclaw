@@ -19,6 +19,10 @@ type WorkItem struct {
 	TaskID           string   `json:"task_id,omitempty"`
 	GoalID           string   `json:"goal_id,omitempty"`
 	Priority         int      `json:"priority"`
+	Attempt          int      `json:"attempt"`
+	MaxAttempts      int      `json:"max_attempts,omitempty"`
+	BudgetPolicy     string   `json:"budget_policy,omitempty"`
+	EstimatedCostUSD float64  `json:"estimated_cost_usd,omitempty"`
 	AllowedPaths     []string `json:"allowed_paths"`
 	ForbiddenPaths   []string `json:"forbidden_paths"`
 	DefinitionOfDone []string `json:"definition_of_done"`

@@ -164,6 +164,13 @@ Usage:
   deonctl heartbeat dry-run --agent <agent-id> --policy <policy-id> --config <heartbeat.yaml> [--agent-busy]
   deonctl hooks validate --config <hooks.yaml>
   deonctl hooks plan --config <hooks.yaml> --event <event-name>
+  deonctl work list --store <deonclaw.db>
+  deonctl work show <work-item-id> --store <deonclaw.db>
+  deonctl work claim --store <deonclaw.db> --agent <agent-id> [--work-item <id>] [--ttl-seconds <n>]
+  deonctl work release --store <deonclaw.db> --lease <lease-id> [--reason <text>] [--requeue]
+  deonctl work leases list --store <deonclaw.db>
+  deonctl work recover --store <deonclaw.db>
+  deonctl work doctor --store <deonclaw.db>
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
@@ -2405,6 +2412,73 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runHooksPlan(configPath, event, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "work":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "list":
+			storePath, err := parseWorkStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkList(storePath, stdout, stderr)
+		case "show":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			storePath, err := parseWorkStoreArg(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkShow(storePath, args[2], stdout, stderr)
+		case "claim":
+			opts, err := parseWorkClaimOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkClaim(opts, stdout, stderr)
+		case "release":
+			opts, err := parseWorkReleaseOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkRelease(opts, stdout, stderr)
+		case "recover":
+			storePath, err := parseWorkStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkRecover(storePath, stdout, stderr)
+		case "doctor":
+			storePath, err := parseWorkStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkDoctor(storePath, stdout, stderr)
+		case "leases":
+			if len(args) < 3 || args[2] != "list" {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			storePath, err := parseWorkStoreArg(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkLeasesList(storePath, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
