@@ -34,6 +34,11 @@ type ProviderRealActivationDesignReviewPackageResult struct {
 	SentToProvider                        bool     `json:"sent_to_provider"`
 	ReceivedFromProvider                  bool     `json:"received_from_provider"`
 	WorkspaceModified                     bool     `json:"workspace_modified"`
+	DiffApplied                           bool     `json:"diff_applied"`
+	CommitCreated                         bool     `json:"commit_created"`
+	PRCreated                             bool     `json:"pr_created"`
+	WorkerExecution                       bool     `json:"worker_execution"`
+	PromptInjectionRealRunner             bool     `json:"prompt_injection_real_runner"`
 	BlockedReason                         string   `json:"blocked_reason"`
 	KillSwitchActive                      bool     `json:"kill_switch_active"`
 	OperatorReviewRequired                bool     `json:"operator_review_required"`
@@ -74,6 +79,11 @@ type ProviderRealActivationDesignReviewGateResult struct {
 	SentToProvider                        bool     `json:"sent_to_provider"`
 	ReceivedFromProvider                  bool     `json:"received_from_provider"`
 	WorkspaceModified                     bool     `json:"workspace_modified"`
+	DiffApplied                           bool     `json:"diff_applied"`
+	CommitCreated                         bool     `json:"commit_created"`
+	PRCreated                             bool     `json:"pr_created"`
+	WorkerExecution                       bool     `json:"worker_execution"`
+	PromptInjectionRealRunner             bool     `json:"prompt_injection_real_runner"`
 	BlockedReason                         string   `json:"blocked_reason"`
 	KillSwitchActive                      bool     `json:"kill_switch_active"`
 	OperatorReviewRequired                bool     `json:"operator_review_required"`
@@ -161,7 +171,7 @@ func ProviderRealActivationDesignReviewGate(opts ProviderRealActivationDesignRev
 	if !pkg.RealActivationDesignReviewReady {
 		failures = append(failures, "design review package real_activation_design_review_ready must be true")
 	}
-	if pkg.RealDispatchSupportedNow || pkg.ActivationAllowedNow || pkg.SecretValuesRead || pkg.ProviderCall || pkg.NetworkCall || pkg.TransportCalled || pkg.SentToProvider || pkg.ReceivedFromProvider || pkg.WorkspaceModified {
+	if pkg.RealDispatchSupportedNow || pkg.ActivationAllowedNow || pkg.SecretValuesRead || pkg.ProviderCall || pkg.NetworkCall || pkg.TransportCalled || pkg.SentToProvider || pkg.ReceivedFromProvider || pkg.WorkspaceModified || pkg.DiffApplied || pkg.CommitCreated || pkg.PRCreated || pkg.WorkerExecution || pkg.PromptInjectionRealRunner {
 		failures = append(failures, "design review package must keep execution flags blocked")
 	}
 	if !pkg.KillSwitchActive || !pkg.OperatorReviewRequired {
@@ -309,6 +319,11 @@ func blockedProviderRealActivationDesignReviewPackage(chain providerRealActivati
 		SentToProvider:                        false,
 		ReceivedFromProvider:                  false,
 		WorkspaceModified:                     false,
+		DiffApplied:                           false,
+		CommitCreated:                         false,
+		PRCreated:                             false,
+		WorkerExecution:                       false,
+		PromptInjectionRealRunner:             false,
 		BlockedReason:                         ProviderCallExecutorBlockedReason,
 		KillSwitchActive:                      chain.killSwitchActive,
 		OperatorReviewRequired:                chain.operatorReviewRequired,
@@ -341,6 +356,11 @@ func blockedProviderRealActivationDesignReviewGate(chain providerRealActivationD
 		SentToProvider:                        false,
 		ReceivedFromProvider:                  false,
 		WorkspaceModified:                     false,
+		DiffApplied:                           false,
+		CommitCreated:                         false,
+		PRCreated:                             false,
+		WorkerExecution:                       false,
+		PromptInjectionRealRunner:             false,
 		BlockedReason:                         ProviderCallExecutorBlockedReason,
 		KillSwitchActive:                      chain.killSwitchActive,
 		OperatorReviewRequired:                chain.operatorReviewRequired,

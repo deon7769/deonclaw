@@ -50,21 +50,22 @@ type ProviderSecretReadProposalInspectOptions struct {
 }
 
 type ProviderSecretReadProposalInspectResult struct {
-	Status                     string   `json:"status"`
-	SecretReadProposalReady    bool     `json:"secret_read_proposal_ready"`
-	SecretReadAllowedNow       bool     `json:"secret_read_allowed_now"`
-	SecretValuesRead           bool     `json:"secret_values_read"`
-	ProviderCall               bool     `json:"provider_call"`
-	NetworkCall                bool     `json:"network_call"`
-	TransportCalled            bool     `json:"transport_called"`
-	ActivationAllowedNow       bool     `json:"activation_allowed_now"`
-	BlockedReason              string   `json:"blocked_reason"`
-	CredentialPolicyPlanSHA256 string   `json:"credential_policy_plan_sha256,omitempty"`
-	ActivationFinalAuditSHA256 string   `json:"activation_final_audit_sha256,omitempty"`
-	ActivationCIReportSHA256   string   `json:"activation_ci_report_sha256,omitempty"`
-	ProviderPayloadSHA256      string   `json:"provider_payload_sha256,omitempty"`
-	Warnings                   []string `json:"warnings,omitempty"`
-	Failures                   []string `json:"failures,omitempty"`
+	Status                      string   `json:"status"`
+	SecretReadProposalReady     bool     `json:"secret_read_proposal_ready"`
+	SecretReadAllowedNow        bool     `json:"secret_read_allowed_now"`
+	SecretValuesRead            bool     `json:"secret_values_read"`
+	ProviderCall                bool     `json:"provider_call"`
+	NetworkCall                 bool     `json:"network_call"`
+	TransportCalled             bool     `json:"transport_called"`
+	ActivationAllowedNow        bool     `json:"activation_allowed_now"`
+	BlockedReason               string   `json:"blocked_reason"`
+	CredentialPolicyPlanSHA256  string   `json:"credential_policy_plan_sha256,omitempty"`
+	ActivationFinalAuditSHA256  string   `json:"activation_final_audit_sha256,omitempty"`
+	ActivationCIReportSHA256    string   `json:"activation_ci_report_sha256,omitempty"`
+	ActivationReleaseGateSHA256 string   `json:"activation_release_gate_sha256,omitempty"`
+	ProviderPayloadSHA256       string   `json:"provider_payload_sha256,omitempty"`
+	Warnings                    []string `json:"warnings,omitempty"`
+	Failures                    []string `json:"failures,omitempty"`
 }
 
 type providerSecretReadProposalChain struct {
@@ -126,26 +127,28 @@ func InspectProviderSecretReadProposal(path string, opts ProviderSecretReadPropo
 	reconcileProviderExecutorHash("secret read proposal", proposal.CredentialPolicyPlanSHA256, chain.credentialPolicyPlanSHA256, &failures)
 	reconcileProviderExecutorHash("secret read proposal", proposal.ActivationFinalAuditSHA256, chain.activationFinalAuditSHA256, &failures)
 	reconcileProviderExecutorHash("secret read proposal", proposal.ActivationCIReportSHA256, chain.activationCIReportSHA256, &failures)
+	reconcileProviderExecutorHash("secret read proposal", proposal.ActivationReleaseGateSHA256, chain.activationReleaseGateSHA256, &failures)
 	reconcileProviderExecutorHash("secret read proposal", proposal.ProviderPayloadSHA256, chain.providerPayloadSHA256, &failures)
 	if sha256Hex(proposalData) == "" {
 		failures = append(failures, "secret read proposal hash missing")
 	}
 
 	result := ProviderSecretReadProposalInspectResult{
-		Status:                     lancedbpolicy.StatusOK,
-		SecretReadProposalReady:    proposal.SecretReadProposalReady,
-		SecretReadAllowedNow:       false,
-		SecretValuesRead:           false,
-		ProviderCall:               false,
-		NetworkCall:                false,
-		TransportCalled:            false,
-		ActivationAllowedNow:       false,
-		BlockedReason:              ProviderCallExecutorBlockedReason,
-		CredentialPolicyPlanSHA256: chain.credentialPolicyPlanSHA256,
-		ActivationFinalAuditSHA256: chain.activationFinalAuditSHA256,
-		ActivationCIReportSHA256:   chain.activationCIReportSHA256,
-		ProviderPayloadSHA256:      chain.providerPayloadSHA256,
-		Failures:                   failures,
+		Status:                      lancedbpolicy.StatusOK,
+		SecretReadProposalReady:     proposal.SecretReadProposalReady,
+		SecretReadAllowedNow:        false,
+		SecretValuesRead:            false,
+		ProviderCall:                false,
+		NetworkCall:                 false,
+		TransportCalled:             false,
+		ActivationAllowedNow:        false,
+		BlockedReason:               ProviderCallExecutorBlockedReason,
+		CredentialPolicyPlanSHA256:  chain.credentialPolicyPlanSHA256,
+		ActivationFinalAuditSHA256:  chain.activationFinalAuditSHA256,
+		ActivationCIReportSHA256:    chain.activationCIReportSHA256,
+		ActivationReleaseGateSHA256: chain.activationReleaseGateSHA256,
+		ProviderPayloadSHA256:       chain.providerPayloadSHA256,
+		Failures:                    failures,
 	}
 	if len(failures) > 0 {
 		result.Status = lancedbpolicy.StatusFailed

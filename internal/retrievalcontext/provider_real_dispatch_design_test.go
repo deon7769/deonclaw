@@ -193,7 +193,7 @@ func assertProviderRealDispatchDesignBlocked(t *testing.T, result retrievalconte
 	if result.RealDispatchCommandAvailable || result.ExecuteSubcommandRegistered {
 		t.Fatalf("dispatch design must keep execute disabled: %#v", result)
 	}
-	if result.ProviderCall || result.NetworkCall || result.TransportCalled || result.SecretValuesRead || result.SentToProvider {
+	if result.ProviderCall || result.NetworkCall || result.TransportCalled || result.SecretValuesRead || result.SentToProvider || result.ReceivedFromProvider || result.WorkspaceModified || result.DiffApplied || result.CommitCreated || result.PRCreated || result.WorkerExecution || result.PromptInjectionRealRunner {
 		t.Fatalf("dispatch design flags must stay blocked: %#v", result)
 	}
 	if result.BlockedReason != retrievalcontext.ProviderCallExecutorBlockedReason {
@@ -209,7 +209,7 @@ func assertProviderRealActivationDesignReviewBlocked(t *testing.T, result retrie
 	if !result.KillSwitchActive || !result.OperatorReviewRequired {
 		t.Fatalf("design review package governance = %#v", result)
 	}
-	assertProviderRealActivationDesignExecutionFlagsBlocked(t, "design review package", result.RealDispatchSupportedNow, result.ActivationAllowedNow, result.SecretValuesRead, result.ProviderCall, result.NetworkCall, result.TransportCalled, result.SentToProvider, result.ReceivedFromProvider, result.WorkspaceModified)
+	assertProviderRealActivationDesignExecutionFlagsBlocked(t, "design review package", result.RealDispatchSupportedNow, result.ActivationAllowedNow, result.SecretValuesRead, result.ProviderCall, result.NetworkCall, result.TransportCalled, result.SentToProvider, result.ReceivedFromProvider, result.WorkspaceModified, result.DiffApplied, result.CommitCreated, result.PRCreated, result.WorkerExecution, result.PromptInjectionRealRunner)
 }
 
 func assertProviderRealActivationDesignReviewGateBlocked(t *testing.T, result retrievalcontext.ProviderRealActivationDesignReviewGateResult) {
@@ -220,14 +220,14 @@ func assertProviderRealActivationDesignReviewGateBlocked(t *testing.T, result re
 	if !result.KillSwitchActive || !result.OperatorReviewRequired {
 		t.Fatalf("design review gate governance = %#v", result)
 	}
-	assertProviderRealActivationDesignExecutionFlagsBlocked(t, "design review gate", result.RealDispatchSupportedNow, result.ActivationAllowedNow, result.SecretValuesRead, result.ProviderCall, result.NetworkCall, result.TransportCalled, result.SentToProvider, result.ReceivedFromProvider, result.WorkspaceModified)
+	assertProviderRealActivationDesignExecutionFlagsBlocked(t, "design review gate", result.RealDispatchSupportedNow, result.ActivationAllowedNow, result.SecretValuesRead, result.ProviderCall, result.NetworkCall, result.TransportCalled, result.SentToProvider, result.ReceivedFromProvider, result.WorkspaceModified, result.DiffApplied, result.CommitCreated, result.PRCreated, result.WorkerExecution, result.PromptInjectionRealRunner)
 }
 
-func assertProviderRealActivationDesignExecutionFlagsBlocked(t *testing.T, label string, realDispatchSupportedNow, activationAllowedNow, secretValuesRead, providerCall, networkCall, transportCalled, sentToProvider, receivedFromProvider, workspaceModified bool) {
+func assertProviderRealActivationDesignExecutionFlagsBlocked(t *testing.T, label string, realDispatchSupportedNow, activationAllowedNow, secretValuesRead, providerCall, networkCall, transportCalled, sentToProvider, receivedFromProvider, workspaceModified, diffApplied, commitCreated, prCreated, workerExecution, promptInjectionRealRunner bool) {
 	t.Helper()
-	if realDispatchSupportedNow || activationAllowedNow || secretValuesRead || providerCall || networkCall || transportCalled || sentToProvider || receivedFromProvider || workspaceModified {
-		t.Fatalf("%s execution flags must stay blocked: real_dispatch_supported_now=%t activation_allowed_now=%t secret_values_read=%t provider_call=%t network_call=%t transport_called=%t sent_to_provider=%t received_from_provider=%t workspace_modified=%t",
-			label, realDispatchSupportedNow, activationAllowedNow, secretValuesRead, providerCall, networkCall, transportCalled, sentToProvider, receivedFromProvider, workspaceModified)
+	if realDispatchSupportedNow || activationAllowedNow || secretValuesRead || providerCall || networkCall || transportCalled || sentToProvider || receivedFromProvider || workspaceModified || diffApplied || commitCreated || prCreated || workerExecution || promptInjectionRealRunner {
+		t.Fatalf("%s execution flags must stay blocked: real_dispatch_supported_now=%t activation_allowed_now=%t secret_values_read=%t provider_call=%t network_call=%t transport_called=%t sent_to_provider=%t received_from_provider=%t workspace_modified=%t diff_applied=%t commit_created=%t pr_created=%t worker_execution=%t prompt_injection_real_runner=%t",
+			label, realDispatchSupportedNow, activationAllowedNow, secretValuesRead, providerCall, networkCall, transportCalled, sentToProvider, receivedFromProvider, workspaceModified, diffApplied, commitCreated, prCreated, workerExecution, promptInjectionRealRunner)
 	}
 }
 
@@ -236,6 +236,35 @@ func TestProviderRealDispatchDesignChainOK(t *testing.T) {
 	chdir(t, dir)
 	chain := setupProviderCallChainFixture(t)
 	runProviderRealDispatchDesignChain(t, chain)
+}
+
+func TestProviderSecretReadProposalInspectFailsWhenActivationReleaseGateSHA256Mismatch(t *testing.T) {
+	dir := t.TempDir()
+	chdir(t, dir)
+	chain := setupProviderCallChainFixture(t)
+	artifacts := runProviderRealDispatchDesignChain(t, chain)
+
+	data, err := os.ReadFile(artifacts.secretReadProposalPath)
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	patched := bytes.Replace(data, []byte(`"activation_release_gate_sha256": "`), []byte(`"activation_release_gate_sha256": "mismatch-`), 1)
+	if err := os.WriteFile(artifacts.secretReadProposalPath, patched, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	inspect, err := retrievalcontext.InspectProviderSecretReadProposal(artifacts.secretReadProposalPath, retrievalcontext.ProviderSecretReadProposalInspectOptions{
+		CredentialPolicyPlanPath:  artifacts.credentialPolicyPlanPath,
+		ActivationFinalAuditPath:  artifacts.activationFinalAuditPath,
+		ActivationCIReportPath:    artifacts.activationCIReportPath,
+		ActivationReleaseGatePath: artifacts.activationReleaseGatePath,
+	})
+	if err != nil {
+		t.Fatalf("InspectProviderSecretReadProposal() error = %v", err)
+	}
+	if inspect.Status != lancedbpolicy.StatusFailed {
+		t.Fatalf("inspect = %#v, want failed on activation_release_gate_sha256 mismatch", inspect)
+	}
 }
 
 func TestProviderSecretReadProposalFailsWhenSecretReadAllowedNow(t *testing.T) {

@@ -42,6 +42,13 @@ type ProviderRealDispatchDesignResult struct {
 	TransportCalled                       bool      `json:"transport_called"`
 	SecretValuesRead                      bool      `json:"secret_values_read"`
 	SentToProvider                        bool      `json:"sent_to_provider"`
+	ReceivedFromProvider                  bool      `json:"received_from_provider"`
+	WorkspaceModified                     bool      `json:"workspace_modified"`
+	DiffApplied                           bool      `json:"diff_applied"`
+	CommitCreated                         bool      `json:"commit_created"`
+	PRCreated                             bool      `json:"pr_created"`
+	WorkerExecution                       bool      `json:"worker_execution"`
+	PromptInjectionRealRunner             bool      `json:"prompt_injection_real_runner"`
 	BlockedReason                         string    `json:"blocked_reason"`
 	FutureDispatchCommand                 string    `json:"future_dispatch_command,omitempty"`
 	RequiredConfirmFlags                  []string  `json:"required_confirm_flags,omitempty"`
@@ -124,7 +131,7 @@ func ProviderRealDispatchDesignReport(opts ProviderRealDispatchDesignReportOptio
 	if design.RealDispatchCommandAvailable || design.ExecuteSubcommandRegistered {
 		failures = append(failures, "real dispatch design must keep execute command disabled")
 	}
-	if design.ProviderCall || design.NetworkCall || design.TransportCalled || design.SecretValuesRead || design.SentToProvider {
+	if design.ProviderCall || design.NetworkCall || design.TransportCalled || design.SecretValuesRead || design.SentToProvider || design.ReceivedFromProvider || design.WorkspaceModified || design.DiffApplied || design.CommitCreated || design.PRCreated || design.WorkerExecution || design.PromptInjectionRealRunner {
 		failures = append(failures, "real dispatch design must keep execution flags blocked")
 	}
 	if design.FutureDispatchCommand != futureProviderRealDispatchCommand {
@@ -251,6 +258,13 @@ func blockedProviderRealDispatchDesign(chain providerRealDispatchDesignChain, fa
 		TransportCalled:                       false,
 		SecretValuesRead:                      false,
 		SentToProvider:                        false,
+		ReceivedFromProvider:                  false,
+		WorkspaceModified:                     false,
+		DiffApplied:                           false,
+		CommitCreated:                         false,
+		PRCreated:                             false,
+		WorkerExecution:                       false,
+		PromptInjectionRealRunner:             false,
 		BlockedReason:                         ProviderCallExecutorBlockedReason,
 		FutureDispatchCommand:                 futureProviderRealDispatchCommand,
 		RequiredConfirmFlags:                  append([]string(nil), futureProviderRealDispatchConfirmFlags...),
