@@ -445,6 +445,146 @@ func TestMaterializeProposalsRejectsUnknownType(t *testing.T) {
 	}
 }
 
+func testLearningProposal(t *testing.T, proposalType string, patchPath string) (LearningProposal, LearningProposalBundle) {
+	t.Helper()
+	now := time.Date(2026, 6, 22, 15, 0, 0, 0, time.UTC)
+	proposal := LearningProposal{
+		ProposalID:            "lp_test_doc",
+		Type:                  proposalType,
+		Status:                ProposalStatusPending,
+		Target:                "docs/INSIGHT_LEARNING_LOOP.md",
+		InsightID:             "ins_test",
+		InsightSHA256:         "insight-sha",
+		EvidenceBundleSHA256:  "evidence-sha",
+		Reason:                "Document validation_failed trigger behavior.",
+		ProposedChangeSummary: "Add an example for validation_failed evidence bundles.",
+		PatchPath:             patchPath,
+		Confidence:            0.82,
+		AutoApplyAllowed:      false,
+		ApprovalRequired:      true,
+		CreatedAt:             now.Format(time.RFC3339Nano),
+	}
+	hash, err := ProposalHash(proposal)
+	if err != nil {
+		t.Fatalf("ProposalHash() error = %v", err)
+	}
+	proposal.SHA256 = hash
+
+	bundle := LearningProposalBundle{
+		InsightID:            "ins_test",
+		InsightSHA256:        "insight-sha",
+		EvidenceBundleSHA256: "evidence-sha",
+		CreatedAt:            now.Format(time.RFC3339Nano),
+		Proposals:            []LearningProposal{proposal},
+	}
+	bundleHash, err := ProposalBundleHash(bundle)
+	if err != nil {
+		t.Fatalf("ProposalBundleHash() error = %v", err)
+	}
+	bundle.SHA256 = bundleHash
+	return proposal, bundle
+}
+
+func TestValidateApprovalAgainstProposalRejectsStaleHash(t *testing.T) {
+	proposal, bundle := testLearningProposal(t, ProposalTypeDocumentation, "")
+	approval, err := BuildProposalApproval(proposal, bundle, BuildProposalApprovalOptions{
+		Reviewer: ReviewerCodex,
+		Decision: ApprovalDecisionApproved,
+		Reason:   "Looks good.",
+	})
+	if err != nil {
+		t.Fatalf("BuildProposalApproval() error = %v", err)
+	}
+	proposal.SHA256 = "stale-hash"
+	err = ValidateApprovalAgainstProposal(approval, proposal)
+	if err == nil {
+		t.Fatal("ValidateApprovalAgainstProposal() expected stale hash error")
+	}
+	if !strings.Contains(err.Error(), "stale") {
+		t.Fatalf("error = %v, want stale hash message", err)
+	}
+}
+
+func TestApplyDryRunBlockedWithoutApproval(t *testing.T) {
+	proposal, _ := testLearningProposal(t, ProposalTypeDocumentation, "")
+	result, err := ApplyDryRun(ApplyOptions{Proposal: proposal})
+	if err != nil {
+		t.Fatalf("ApplyDryRun() error = %v", err)
+	}
+	if result.WouldApply {
+		t.Fatal("ApplyDryRun() would_apply = true without approval")
+	}
+	if result.BlockedReason == "" {
+		t.Fatal("ApplyDryRun() blocked_reason is empty")
+	}
+}
+
+func TestApplyDryRunOKWithApprovedApproval(t *testing.T) {
+	proposal, bundle := testLearningProposal(t, ProposalTypeDocumentation, "")
+	approval, err := BuildProposalApproval(proposal, bundle, BuildProposalApprovalOptions{
+		Reviewer: ReviewerCodex,
+		Decision: ApprovalDecisionApproved,
+		Reason:   "Approved for preview apply.",
+	})
+	if err != nil {
+		t.Fatalf("BuildProposalApproval() error = %v", err)
+	}
+	result, err := ApplyDryRun(ApplyOptions{Proposal: proposal, Approval: approval})
+	if err != nil {
+		t.Fatalf("ApplyDryRun() error = %v", err)
+	}
+	if !result.WouldApply {
+		t.Fatalf("ApplyDryRun() would_apply = false, blocked_reason=%q", result.BlockedReason)
+	}
+	if result.Status != ApplyStatusOK {
+		t.Fatalf("ApplyDryRun() status = %q, want %q", result.Status, ApplyStatusOK)
+	}
+}
+
+func TestApplyDryRunSkillPatchBlockedWithoutPatchPath(t *testing.T) {
+	proposal, bundle := testLearningProposal(t, ProposalTypeSkillPatch, "")
+	approval, err := BuildProposalApproval(proposal, bundle, BuildProposalApprovalOptions{
+		Reviewer: ReviewerCodex,
+		Decision: ApprovalDecisionApproved,
+		Reason:   "Approved for review.",
+	})
+	if err != nil {
+		t.Fatalf("BuildProposalApproval() error = %v", err)
+	}
+	result, err := ApplyDryRun(ApplyOptions{Proposal: proposal, Approval: approval})
+	if err != nil {
+		t.Fatalf("ApplyDryRun() error = %v", err)
+	}
+	if result.WouldApply {
+		t.Fatal("ApplyDryRun() would_apply = true for skill_patch without patch_path")
+	}
+	if !strings.Contains(result.BlockedReason, "patch_path") {
+		t.Fatalf("blocked_reason = %q, want patch_path requirement", result.BlockedReason)
+	}
+}
+
+func TestRecordEffectivenessLinksProposalToRun(t *testing.T) {
+	proposal, _ := testLearningProposal(t, ProposalTypeDocumentation, "")
+	record, err := RecordEffectiveness(RecordEffectivenessOptions{
+		Proposal: proposal,
+		RunID:    "run-abc",
+		Metric:   EffectivenessMetricValidationPassRate,
+		Value:    1.0,
+	})
+	if err != nil {
+		t.Fatalf("RecordEffectiveness() error = %v", err)
+	}
+	if record.ProposalID != proposal.ProposalID {
+		t.Fatalf("proposal_id = %q, want %q", record.ProposalID, proposal.ProposalID)
+	}
+	if record.RunID != "run-abc" {
+		t.Fatalf("run_id = %q, want run-abc", record.RunID)
+	}
+	if record.Metric != EffectivenessMetricValidationPassRate {
+		t.Fatalf("metric = %q", record.Metric)
+	}
+}
+
 const exampleInsightPolicyYAML = `
 insight_policy:
   enabled: true

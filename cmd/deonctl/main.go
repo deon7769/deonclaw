@@ -117,6 +117,12 @@ Usage:
   deonctl insights proposals materialize --insight <insight-report.json> --response <reviewer-response.json> --output <learning-proposals.json> [--config <insight-policy.yaml>]
   deonctl insights proposals list --bundle <learning-proposals.json> [--output-format text|json]
   deonctl insights proposals show --bundle <learning-proposals.json> --proposal <proposal-id> [--output-format text|json]
+  deonctl insights proposals approve --bundle <learning-proposals.json> --proposal <proposal-id> --reviewer codex|opencode --decision approved|rejected --reason <text> --output <approval.json> [--bundle-output <learning-proposals.json>]
+  deonctl insights proposals apply dry-run --bundle <learning-proposals.json> --proposal <proposal-id> [--approval <approval.json>] --output <apply-dry-run.json>
+  deonctl insights proposals apply --bundle <learning-proposals.json> --proposal <proposal-id> --approval <approval.json> --preview-output <preview.md> --output <apply-result.json> --confirm-apply [--bundle-output <learning-proposals.json>]
+  deonctl insights effectiveness record --bundle <learning-proposals.json> --proposal <proposal-id> --run <run-id> --metric validation_pass_rate|repeated_failure_count|time_to_fix_ms --value <float> --output <effectiveness.json> [--effectiveness <effectiveness.json>]
+  deonctl insights effectiveness report --effectiveness <effectiveness.json> [--output-format text|json]
+  deonctl insights timeline --bundle <learning-proposals.json> [--effectiveness <effectiveness.json>] [--output-format text|json]
   deonctl insights report --insight <insight-report.json> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
@@ -1867,6 +1873,37 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runInsightsProposalsShow(opts, stdout, stderr)
+			case "approve":
+				opts, err := parseInsightsProposalsApproveOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsProposalsApprove(opts, stdout, stderr)
+			case "apply":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "dry-run":
+					opts, err := parseInsightsProposalsApplyDryRunOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runInsightsProposalsApplyDryRun(opts, stdout, stderr)
+				default:
+					opts, err := parseInsightsProposalsApplyOptions(args[3:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runInsightsProposalsApply(opts, stdout, stderr)
+				}
 			default:
 				fmt.Fprint(stderr, usage)
 				return 2
@@ -1879,6 +1916,40 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runInsightsReport(opts, stdout, stderr)
+		case "effectiveness":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "record":
+				opts, err := parseInsightsEffectivenessRecordOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsEffectivenessRecord(opts, stdout, stderr)
+			case "report":
+				opts, err := parseInsightsEffectivenessReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runInsightsEffectivenessReport(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "timeline":
+			opts, err := parseInsightsTimelineOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runInsightsTimeline(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
