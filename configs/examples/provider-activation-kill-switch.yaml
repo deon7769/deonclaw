@@ -1,0 +1,11 @@
+provider_activation_kill_switch:
+  global_disabled: true
+  block_provider_call: true
+  block_network: true
+  block_secret_read: true
+  block_transport: true
+  block_workspace_write: true
+  block_diff_apply: true
+  block_worker_execution: true
+  block_prompt_injection: true
+  blocked_reason: implementation_not_enabled

@@ -130,7 +130,9 @@ Implemented:
 - provider execution simulation layer (`provider-request-envelope`, `provider-adapter-registry`, `provider-adapter-plan`, `provider-response-fixture`, `provider-execution-simulation-bundle`, `provider-execution-simulation-report`), no provider call
 - provider activation readiness layer (`provider-credential-policy`, `provider-real-call-proposal`, `provider-response-change-proposal`, `provider-activation-readiness-audit`), no provider call
 - provider activation control plane (`provider-activation-policy`, `provider-activation-approval`, `provider-activation-rehearsal`, `provider-activation-release-package`, `provider-activation-release-gate`), no provider call
+- provider activation hardening (`provider-activation-operator-review-bundle`, `provider-activation-kill-switch`, `provider-activation-final-audit`, `provider-activation-ci-report`), no provider call
 - provider activation policy config (`configs/examples/provider-activation-policy.yaml`), no provider call
+- provider activation kill-switch config (`configs/examples/provider-activation-kill-switch.yaml`), no provider call
 - provider credential policy config (`configs/examples/provider-credential-policy.yaml`), no provider call
 - provider adapters config (`configs/examples/provider-adapters.yaml`), no provider call
 - provider call executor policy config (`configs/examples/provider-call-executor.yaml`), no provider call
@@ -395,3 +397,17 @@ make ship MSG="short commit message"
 `make ship` runs formatting, `git diff --check`, `go test ./...`, then commits and pushes the current branch. It is intentionally scoped to the DeonClaw remote and must not be reused for other repositories.
 
 Do not commit generated secrets, tokens, local auth files, memory vault contents or domain data.
+
+## Learned User Preferences
+
+- Do not implement sprints directly on `main`; create a `cursor/<topic>-<sprint>` feature branch first
+- Default Git workflow is feature branch, push branch, and open a draft PR against `main`; do not merge without CI/smoke review
+- When commit/push is requested without branch context, confirm the current branch before proceeding; the user has corrected mistaken commits to `main`
+- Update mandatory sprint documentation (README, AGENTS.md, relevant docs, fixture README) in the same sprint before commit
+- Honor explicit "commit/push to main" only when the user states it clearly; otherwise use the feature-branch workflow
+
+## Learned Workspace Facts
+
+- Pre-ship validation for provider-call chain sprints: `gofmt -w .`, `git diff --check`, `go test ./...`, `make provider-call-chain-smoke`
+- `make provider-call-chain-smoke` is the end-to-end CI guard for the provider-call chain fixture through the current activation gates
+- Feature branch naming pattern: `cursor/<descriptive-topic>-<sprint-range>`

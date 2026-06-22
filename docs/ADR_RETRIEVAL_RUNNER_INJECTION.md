@@ -84,6 +84,10 @@ retrieval-context (runner metadata attachment)
 | 22.54 | `worker codex provider-activation-approval` new/approve/inspect (future activation approval, no provider call) |
 | 22.55 | `worker codex provider-activation-rehearsal` / `rehearsal-report` (activation sequence rehearsal, no provider call) |
 | 22.56 | `worker codex provider-activation-release-package` / `release-gate` (activation release gate, no provider call) |
+| 22.57 | activation chain hardening / unified anti-leak helpers for metadata JSON/stdout |
+| 22.58 | `worker codex provider-activation-operator-review-bundle` / `report` (operator review metadata, no provider call) |
+| 22.59 | `worker codex provider-activation-kill-switch` validate/plan (kill-switch manifest, no provider call) |
+| 22.60 | `worker codex provider-activation-final-audit` / `ci-report` (final audit gate, no provider call) |
 
 ### What already exists
 
@@ -240,9 +244,17 @@ Future injection design and implementation must **not** include:
 
 **Task 22.55 (implemented):** *Activation rehearsal/report* — metadata-only sequence validation with `future_steps`. **Still no transport**, no dispatch.
 
-**Task 22.56 (implemented):** *Activation release package/release-gate* — last gate before any real provider dispatch; `activation_gate_ready: true`, `real_activation_supported_now: false`. **Still no real provider call**.
+**Task 22.56 (implemented):** *Activation release package/release-gate* — consolidates activation control plane; `activation_gate_ready: true`, `real_activation_supported_now: false`. **Still no real provider call**.
 
-**Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag and enabled policy.
+**Task 22.57 (implemented):** *Activation chain hardening* — unified anti-leak helpers for metadata JSON/stdout; fixture README path fixes. **Still no real provider call**.
+
+**Task 22.58 (implemented):** *Operator review bundle/report* — metadata-only human review with critical hashes and blocked checklist. **Still no provider call**, `operator_approved_now: false`.
+
+**Task 22.59 (implemented):** *Activation kill-switch validate/plan* — `provider-activation-kill-switch.yaml` with `global_disabled: true` and all `block_*: true`. **Still no activation path**.
+
+**Task 22.60 (implemented):** *Activation final audit/CI report* — last gate before any real provider dispatch design; `final_audit_ready: true`, `kill_switch_active: true`. **Still no real provider call**.
+
+**Task 22.41+ (proposal):** real provider dispatch behind explicit confirm flag, enabled policy, and inactive kill-switch removal.
 
 Until a future execution task ships, the codebase remains at metadata-only runner attachment plus governed offline artifacts and plan-only injection policy.
 

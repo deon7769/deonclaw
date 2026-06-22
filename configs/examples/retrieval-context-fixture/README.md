@@ -827,7 +827,7 @@ deonctl worker codex provider-activation-readiness-report \
 
 ~~~bash
 deonctl worker codex provider-activation-policy validate \
-  --config configs/examples/provider-activation-policy.yaml \
+  --config ../provider-activation-policy.yaml \
   --output-format json
 ~~~
 
@@ -835,7 +835,7 @@ deonctl worker codex provider-activation-policy validate \
 
 ~~~bash
 deonctl worker codex provider-activation-policy plan \
-  --config configs/examples/provider-activation-policy.yaml \
+  --config ../provider-activation-policy.yaml \
   --output retrieval-context-provider-activation-policy-plan.json \
   --output-format json
 ~~~
@@ -939,10 +939,121 @@ deonctl worker codex provider-activation-release-gate \
   --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
   --response-change-proposal-report retrieval-context-provider-response-change-proposal-report.json \
   --activation-release-package retrieval-context-provider-activation-release-package.json \
+  --output-format json > retrieval-context-provider-activation-release-gate.json
+~~~
+
+### 76. Provider activation operator review bundle
+
+~~~bash
+deonctl worker codex provider-activation-operator-review-bundle \
+  --activation-release-package retrieval-context-provider-activation-release-package.json \
+  --activation-release-gate retrieval-context-provider-activation-release-gate.json \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-rehearsal retrieval-context-provider-activation-rehearsal.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --response-change-proposal-report retrieval-context-provider-response-change-proposal-report.json \
+  --output retrieval-context-provider-activation-operator-review-bundle.json \
   --output-format json
 ~~~
 
-## CI smoke (Tasks 22.37–22.56)
+### 77. Provider activation operator review report
+
+~~~bash
+deonctl worker codex provider-activation-operator-review-report \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --activation-release-package retrieval-context-provider-activation-release-package.json \
+  --activation-release-gate retrieval-context-provider-activation-release-gate.json \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-rehearsal retrieval-context-provider-activation-rehearsal.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --response-change-proposal-report retrieval-context-provider-response-change-proposal-report.json \
+  --output-format json
+~~~
+
+### 78. Provider activation kill-switch validate
+
+~~~bash
+deonctl worker codex provider-activation-kill-switch validate \
+  --config ../provider-activation-kill-switch.yaml \
+  --output-format json
+~~~
+
+### 79. Provider activation kill-switch plan
+
+~~~bash
+deonctl worker codex provider-activation-kill-switch plan \
+  --config ../provider-activation-kill-switch.yaml \
+  --output retrieval-context-provider-activation-kill-switch-plan.json \
+  --output-format json
+~~~
+
+### 80. Provider activation final audit
+
+~~~bash
+deonctl worker codex provider-activation-final-audit \
+  --activation-release-package retrieval-context-provider-activation-release-package.json \
+  --activation-release-gate retrieval-context-provider-activation-release-gate.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --response-change-proposal-report retrieval-context-provider-response-change-proposal-report.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-rehearsal retrieval-context-provider-activation-rehearsal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --output-format json
+~~~
+
+### 81. Provider activation CI report
+
+~~~bash
+deonctl worker codex provider-activation-ci-report \
+  --activation-release-package retrieval-context-provider-activation-release-package.json \
+  --activation-release-gate retrieval-context-provider-activation-release-gate.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --activation-policy-plan retrieval-context-provider-activation-policy-plan.json \
+  --activation-readiness-audit retrieval-context-provider-activation-readiness-audit.json \
+  --real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --response-change-proposal-report retrieval-context-provider-response-change-proposal-report.json \
+  --activation-approval retrieval-context-provider-activation-approval.json \
+  --activation-rehearsal retrieval-context-provider-activation-rehearsal.json \
+  --execution-simulation-report retrieval-context-provider-execution-simulation-report.json \
+  --output-format json
+~~~
+
+### 82. Smoke final local command
+
+From the repository root:
+
+~~~bash
+make provider-call-chain-smoke
+~~~
+
+### 83. Expected PR/CI checklist
+
+- `gofmt -w .`
+- `git diff --check`
+- `go test ./...`
+- `make provider-call-chain-smoke`
+- all metadata artifacts keep `activation_allowed_now: false`
+- kill-switch remains `global_disabled: true`
+- operator review remains required with `operator_approved_now: false`
+- no `text_excerpt` or `alpha text` in metadata JSON/stdout
+- do not merge until CI smoke is green
+
+## CI smoke (Tasks 22.37–22.60)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -952,7 +1063,7 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts final activation release gate keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), activation readiness layer (22.49–22.52), and activation control plane (22.53–22.56).
+This executes the chain in isolated temp dirs and asserts final activation CI report keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), activation readiness layer (22.49–22.52), activation control plane (22.53–22.56), and activation hardening (22.57–22.60).
 
 See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
@@ -1006,7 +1117,10 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-activation-approval inspect returns `activation_authorized_for_future: true`, `activation_allowed_now: false`, `allowed_use: provider_activation_policy_only`, all execution flags false
 - optional provider-activation-rehearsal/report returns `activation_rehearsal_ready: true`, `activation_sequence_validated: true`, `future_steps` populated, all execution flags false
 - optional provider-activation-release-package/gate returns `activation_release_package_ready: true`, `activation_gate_ready: true`, `real_activation_supported_now: false`, `activation_allowed_now: false`, all execution flags false
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.52)
+- optional provider-activation-operator-review-bundle/report returns `operator_review_bundle_ready: true`, `operator_review_required: true`, `operator_approved_now: false`, all execution flags false
+- optional provider-activation-kill-switch validate/plan returns `kill_switch_validated: true`, `global_disabled: true`, all block flags true, `activation_allowed_now: false`
+- optional provider-activation-final-audit/ci-report returns `final_audit_ready: true`, `ci_observability_ready: true`, `kill_switch_active: true`, `operator_review_required: true`, all execution flags false
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.60)
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`
