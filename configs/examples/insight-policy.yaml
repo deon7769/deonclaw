@@ -1,0 +1,15 @@
+insight_policy:
+  enabled: true
+  evaluate_after_runs: 1
+  evaluate_after_commits: 2
+  evaluate_after_turns: 6
+  always_on:
+    - validation_failed
+    - user_correction
+    - approval_denied
+    - repeated_error
+  reviewer:
+    preferred: codex
+    fallback: opencode
+  auto_propose: true
+  auto_apply: false

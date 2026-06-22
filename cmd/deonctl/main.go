@@ -109,6 +109,9 @@ Usage:
   deonctl memory lancedb report --manifest <lancedb-write-smoke-manifest.json> --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
   deonctl memory lancedb search-smoke --policy <lancedb-policy-write-smoke.yaml> (--query-vector <json-array>|--query-chunk-id <chunk-id>) --top-k <n> --artifacts-dir <dir> --confirm-search-smoke
   deonctl memory lancedb search-report --result <lancedb-search-smoke-result.json> --policy <lancedb-policy-write-smoke.yaml> [--output-format text|json]
+  deonctl insights policy validate --config <insight-policy.yaml>
+  deonctl insights evidence build --store <path> --run <run-id> --output <evidence-bundle.json> [--trigger <trigger>] [--policy-ref <path>]
+  deonctl insights trigger evaluate --config <insight-policy.yaml> --evidence <evidence-bundle.json> [--output-format text|json]
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
@@ -1758,6 +1761,52 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				fmt.Fprint(stderr, usage)
 				return 2
 			}
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "insights":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "policy":
+			if len(args) < 3 || args[2] != "validate" {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseInsightsPolicyValidateOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runInsightsPolicyValidate(opts, stdout, stderr)
+		case "evidence":
+			if len(args) < 3 || args[2] != "build" {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseInsightsEvidenceBuildOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runInsightsEvidenceBuild(opts, stdout, stderr)
+		case "trigger":
+			if len(args) < 3 || args[2] != "evaluate" {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			opts, err := parseInsightsTriggerEvaluateOptions(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			return runInsightsTriggerEvaluate(opts, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2
