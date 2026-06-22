@@ -1,6 +1,6 @@
-# Provider call chain gate (Tasks 22.37–22.64)
+# Provider call chain gate (Tasks 22.37–22.68)
 
-This document defines the **governance gates before any real provider executor dispatch** (Task 22.64+).
+This document defines the **governance gates before any real provider executor dispatch** (Task 22.68+).
 
 ## Purpose
 
@@ -62,6 +62,14 @@ Task 22.63 adds **real dispatch command design/report** — future `provider-rea
 
 Task 22.64 adds **real activation design review package/gate** — consolidates 22.61–22.63; `real_activation_design_gate_ready: true`, `real_dispatch_supported_now: false`.
 
+Task 22.65 adds **external dispatch approval** new/approve/inspect — manual authorization for future real dispatch; `external_approval_allowed_now: false`.
+
+Task 22.66 adds **real dispatch runbook** generate/report — metadata-only operational steps; no executable scripts.
+
+Task 22.67 adds **real dispatch risk register/report** — enumerated risks with `current_status: blocked`.
+
+Task 22.68 adds **preimplementation gate/report** — last gate before any future real dispatch implementation sprint; `real_dispatch_supported_now: false`.
+
 ## Chain boundary (must stay false)
 
 | Flag | Meaning |
@@ -113,8 +121,12 @@ Before any future real provider dispatch:
 33. **`provider-real-transport-implementation-plan`** + **report** — future transport contract (`transport_enabled: false`, `BlockedProviderTransport` active)
 34. **`provider-real-dispatch-design`** + **report** — future dispatch command design (`execute_subcommand_registered: false`)
 35. **`provider-real-activation-design-review-package`** + **gate** — real dispatch design review (`real_dispatch_supported_now: false`)
+36. **`provider-real-dispatch-external-approval`** new/approve/inspect — external manual authorization (`external_approval_allowed_now: false`)
+37. **`provider-real-dispatch-runbook`** generate/report — metadata-only operational runbook (`script_generated: false`)
+38. **`provider-real-dispatch-risk-register`** + **report** — risk register (`risks_blocked: true`, no `active_execution`)
+39. **`provider-real-dispatch-preimplementation-gate`** + **report** — preimplementation gate (`real_dispatch_supported_now: false`)
 
-The full chain through **real activation design review gate** is the last gate before any real provider dispatch execution. Kill-switch must remain active; operator review remains required; no secret reads, no provider call, no transport, no network.
+The full chain through **preimplementation gate** is the last gate before any real provider dispatch implementation. Kill-switch must remain active; operator review remains required; external approval authorizes future only; no secret reads, no provider call, no transport, no network, no execute subcommand.
 
 ## Final audit expectations
 
@@ -486,6 +498,48 @@ Audit, executor, simulation, activation, and fixture JSON/stdout must not contai
   "blocked_reason": "implementation_not_enabled"
 }
 ```
+
+## External approval package expectations (Tasks 22.65–22.68)
+
+`deonctl worker codex provider-real-dispatch-external-approval inspect` must return:
+
+```json
+{
+  "status": "ok",
+  "external_approval_authorized_for_future": true,
+  "external_approval_allowed_now": false,
+  "real_dispatch_allowed_now": false,
+  "execute_subcommand_registered": false,
+  "secret_values_read": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+`deonctl worker codex provider-real-dispatch-preimplementation-gate` must return:
+
+```json
+{
+  "status": "ok",
+  "preimplementation_gate_ready": true,
+  "real_dispatch_supported_now": false,
+  "real_dispatch_allowed_now": false,
+  "execute_subcommand_registered": false,
+  "kill_switch_active": true,
+  "operator_review_required": true,
+  "secret_values_read": false,
+  "provider_call": false,
+  "network_call": false,
+  "transport_called": false,
+  "workspace_modified": false,
+  "blocked_reason": "implementation_not_enabled"
+}
+```
+
+Real dispatch `execute` subcommand remains **not registered**. Secret reads, provider calls, transport, and network remain blocked.
 
 ## Executor preflight expectations (Task 22.41)
 

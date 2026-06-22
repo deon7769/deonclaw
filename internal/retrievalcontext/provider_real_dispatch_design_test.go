@@ -15,6 +15,7 @@ type providerRealDispatchDesignArtifacts struct {
 	realTransportImplementationPlanPath string
 	realDispatchDesignPath              string
 	designReviewPackagePath             string
+	designReviewGatePath                string
 }
 
 func runProviderRealDispatchDesignChain(t *testing.T, chain providerCallChainFixture) providerRealDispatchDesignArtifacts {
@@ -144,12 +145,19 @@ func runProviderRealDispatchDesignChain(t *testing.T, chain providerCallChainFix
 	}
 	assertNoPreviewLeakInString(t, "design review gate stdout", gateBuf.String())
 
+	const designReviewGatePath = "provider-real-activation-design-review-gate.json"
+	if err := os.WriteFile(designReviewGatePath, gateBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(design review gate) error = %v", err)
+	}
+	assertNoPreviewLeakInFile(t, designReviewGatePath)
+
 	return providerRealDispatchDesignArtifacts{
 		providerActivationHardeningArtifacts: hardening,
 		secretReadProposalPath:               secretReadProposalPath,
 		realTransportImplementationPlanPath:  realTransportPlanPath,
 		realDispatchDesignPath:               realDispatchDesignPath,
 		designReviewPackagePath:              designReviewPackagePath,
+		designReviewGatePath:                 designReviewGatePath,
 	}
 }
 

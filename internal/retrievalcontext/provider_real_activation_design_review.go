@@ -390,6 +390,14 @@ func LoadProviderRealActivationDesignReviewPackage(path string) (ProviderRealAct
 	return result, data, nil
 }
 
+func ParseProviderRealActivationDesignReviewGateJSON(data []byte) (ProviderRealActivationDesignReviewGateResult, error) {
+	var result ProviderRealActivationDesignReviewGateResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ProviderRealActivationDesignReviewGateResult{}, fmt.Errorf("parse provider real activation design review gate json: %w", err)
+	}
+	return result, nil
+}
+
 func writeProviderRealActivationDesignReviewPackageJSON(path string, result ProviderRealActivationDesignReviewPackageResult) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return fmt.Errorf("create provider real activation design review package output dir: %w", err)

@@ -5,7 +5,7 @@ usage() {
   cat <<EOF
 Usage: bash scripts/provider-call-chain-fixture-smoke.sh [--cli-only|--library-only]
 
-Runs Task 22.37–22.64 provider-call chain fixture smoke / CI guard.
+Runs Task 22.37–22.68 provider-call chain fixture smoke / CI guard.
 
 Default: library e2e + CLI e2e (isolated temp dirs via go test).
 

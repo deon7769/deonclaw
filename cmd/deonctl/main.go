@@ -202,6 +202,15 @@ Usage:
   deonctl worker codex provider-real-dispatch-design-report --real-dispatch-design <provider-real-dispatch-design.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --secret-read-proposal <provider-secret-read-proposal.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --provider-request-envelope <provider-request-envelope.json> --provider-real-call-proposal <provider-real-call-proposal.json> [--output-format text|json]
   deonctl worker codex provider-real-activation-design-review-package --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> --output <provider-real-activation-design-review-package.json> [--output-format text|json]
   deonctl worker codex provider-real-activation-design-review-gate --design-review-package <provider-real-activation-design-review-package.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-real-dispatch-external-approval new --design-review-package <provider-real-activation-design-review-package.json> --design-review-gate <provider-real-activation-design-review-gate.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-dispatch-design <provider-real-dispatch-design.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> --output <provider-real-dispatch-external-approval-request.json>
+  deonctl worker codex provider-real-dispatch-external-approval approve --request <provider-real-dispatch-external-approval-request.json> --output <provider-real-dispatch-external-approval.json> --confirm-design-review-package-sha256 <sha256> --confirm-design-review-gate-sha256 <sha256> --confirm-secret-read-proposal-sha256 <sha256> --confirm-real-dispatch-design-sha256 <sha256> --confirm-provider-payload-sha256 <sha256>
+  deonctl worker codex provider-real-dispatch-external-approval inspect --approval <provider-real-dispatch-external-approval.json> [--request <provider-real-dispatch-external-approval-request.json>] [--design-review-gate <provider-real-activation-design-review-gate.json>] [--output-format text|json]
+  deonctl worker codex provider-real-dispatch-runbook generate --external-approval <provider-real-dispatch-external-approval.json> --external-approval-request <provider-real-dispatch-external-approval-request.json> --design-review-gate <provider-real-activation-design-review-gate.json> --real-dispatch-design <provider-real-dispatch-design.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --output <provider-real-dispatch-runbook.json>
+  deonctl worker codex provider-real-dispatch-runbook report --runbook <provider-real-dispatch-runbook.json> --external-approval <provider-real-dispatch-external-approval.json> --external-approval-request <provider-real-dispatch-external-approval-request.json> --design-review-gate <provider-real-activation-design-review-gate.json> --real-dispatch-design <provider-real-dispatch-design.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> [--output-format text|json]
+  deonctl worker codex provider-real-dispatch-risk-register --runbook <provider-real-dispatch-runbook.json> --external-approval <provider-real-dispatch-external-approval.json> --design-review-gate <provider-real-activation-design-review-gate.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --output <provider-real-dispatch-risk-register.json>
+  deonctl worker codex provider-real-dispatch-risk-report --risk-register <provider-real-dispatch-risk-register.json> --runbook <provider-real-dispatch-runbook.json> --external-approval <provider-real-dispatch-external-approval.json> --design-review-gate <provider-real-activation-design-review-gate.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> [--output-format text|json]
+  deonctl worker codex provider-real-dispatch-preimplementation-gate --external-approval <provider-real-dispatch-external-approval.json> --runbook <provider-real-dispatch-runbook.json> --risk-register <provider-real-dispatch-risk-register.json> --design-review-gate <provider-real-activation-design-review-gate.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> [--output-format text|json]
+  deonctl worker codex provider-real-dispatch-preimplementation-report --external-approval <provider-real-dispatch-external-approval.json> --runbook <provider-real-dispatch-runbook.json> --risk-register <provider-real-dispatch-risk-register.json> --design-review-gate <provider-real-activation-design-review-gate.json> --secret-read-proposal <provider-secret-read-proposal.json> --real-transport-implementation-plan <provider-real-transport-implementation-plan.json> --real-dispatch-design <provider-real-dispatch-design.json> --activation-final-audit <provider-activation-final-audit.json> --activation-ci-report <provider-activation-ci-report.json> --kill-switch-plan <provider-activation-kill-switch-plan.json> --operator-review-bundle <provider-activation-operator-review-bundle.json> [--output-format text|json]
   deonctl worker codex run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
   deonctl worker opencode dry-run <task-path> [--workers-config <path>]
   deonctl worker opencode run <task-path> --store <path> --artifacts-dir <path> [--domains <domains.yaml>] [--memory-policy <policy.yaml>] [--workers-config <path>] [--runtime-config <runtime.yaml>] [--validation-runtime local|docker] [--worker-runtime local|docker]
@@ -1623,6 +1632,98 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 					return 2
 				}
 				return runCodexProviderRealActivationDesignReviewGate(opts, stdout, stderr)
+			case "provider-real-dispatch-external-approval":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "new":
+					subOpts, err := parseCodexProviderRealDispatchExternalApprovalNewOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRealDispatchExternalApprovalNew(subOpts, stdout, stderr)
+				case "approve":
+					subOpts, err := parseCodexProviderRealDispatchExternalApprovalApproveOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRealDispatchExternalApprovalApprove(subOpts, stdout, stderr)
+				case "inspect":
+					subOpts, err := parseCodexProviderRealDispatchExternalApprovalInspectOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRealDispatchExternalApprovalInspect(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-real-dispatch-runbook":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				switch args[3] {
+				case "generate":
+					subOpts, err := parseCodexProviderRealDispatchRunbookGenerateOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRealDispatchRunbookGenerate(subOpts, stdout, stderr)
+				case "report":
+					subOpts, err := parseCodexProviderRealDispatchRunbookReportOptions(args[4:])
+					if err != nil {
+						fmt.Fprintf(stderr, "error: %v\n", err)
+						fmt.Fprint(stderr, usage)
+						return 2
+					}
+					return runCodexProviderRealDispatchRunbookReport(subOpts, stdout, stderr)
+				default:
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+			case "provider-real-dispatch-risk-register":
+				opts, err := parseCodexProviderRealDispatchRiskRegisterOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealDispatchRiskRegister(opts, stdout, stderr)
+			case "provider-real-dispatch-risk-report":
+				opts, err := parseCodexProviderRealDispatchRiskReportOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealDispatchRiskReport(opts, stdout, stderr)
+			case "provider-real-dispatch-preimplementation-gate":
+				opts, err := parseCodexProviderRealDispatchPreimplementationGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealDispatchPreimplementationGate(opts, stdout, stderr)
+			case "provider-real-dispatch-preimplementation-report":
+				opts, err := parseCodexProviderRealDispatchPreimplementationGateOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				return runCodexProviderRealDispatchPreimplementationReport(opts, stdout, stderr)
 			case "run":
 				opts, err := parseCodexRunOptions(args[3:])
 				if err != nil {
