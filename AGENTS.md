@@ -423,9 +423,12 @@ Do not commit generated secrets, tokens, local auth files, memory vault contents
 - When commit/push is requested without branch context, confirm the current branch before proceeding; the user has corrected mistaken commits to `main`
 - Update mandatory sprint documentation (README, AGENTS.md, relevant docs, fixture README) in the same sprint before commit
 - Honor explicit "commit/push to main" only when the user states it clearly; otherwise use the feature-branch workflow
+- After main-direct Epic vertical slices, use feature branch and draft PR for hardening, CI, or security reconciliation work
 
 ## Learned Workspace Facts
 
 - Pre-ship validation for provider-call chain sprints: `gofmt -w .`, `git diff --check`, `go test ./...`, `make provider-call-chain-smoke`
 - `make provider-call-chain-smoke` is the end-to-end CI guard for the provider-call chain fixture through the current activation gates
+- Pre-ship validation for proactive runtime sprints: `gofmt -w .`, `git diff --check`, `go test ./...`, `make proactive-runtime-smoke`
+- `make proactive-runtime-smoke` is the end-to-end CI guard for the proactive runtime fixture through daemon/schedules/heartbeat/hooks smoke
 - Feature branch naming pattern: `cursor/<descriptive-topic>-<sprint-range>`
