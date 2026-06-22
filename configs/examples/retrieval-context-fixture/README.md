@@ -1053,7 +1053,122 @@ make provider-call-chain-smoke
 - no `text_excerpt` or `alpha text` in metadata JSON/stdout
 - do not merge until CI smoke is green
 
-## CI smoke (Tasks 22.37–22.60)
+### 84. Provider secret-read proposal new
+
+~~~bash
+deonctl worker codex provider-secret-read-proposal new \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --activation-release-gate retrieval-context-provider-activation-release-gate.json \
+  --output retrieval-context-provider-secret-read-proposal.json \
+  --output-format json
+~~~
+
+Save final audit and CI report from steps 80–81 when running manually:
+
+~~~bash
+deonctl worker codex provider-activation-final-audit ... --output-format json > retrieval-context-provider-activation-final-audit.json
+deonctl worker codex provider-activation-ci-report ... --output-format json > retrieval-context-provider-activation-ci-report.json
+~~~
+
+### 85. Provider secret-read proposal inspect
+
+~~~bash
+deonctl worker codex provider-secret-read-proposal inspect \
+  --proposal retrieval-context-provider-secret-read-proposal.json \
+  --credential-policy-plan retrieval-context-provider-credential-policy-plan.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --activation-release-gate retrieval-context-provider-activation-release-gate.json \
+  --output-format json
+~~~
+
+### 86. Provider real transport implementation plan
+
+~~~bash
+deonctl worker codex provider-real-transport-implementation-plan \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --provider-adapter-plan retrieval-context-provider-adapter-plan.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --output retrieval-context-provider-real-transport-implementation-plan.json \
+  --output-format json
+~~~
+
+### 87. Provider real transport implementation report
+
+~~~bash
+deonctl worker codex provider-real-transport-implementation-report \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --provider-adapter-plan retrieval-context-provider-adapter-plan.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --output-format json
+~~~
+
+### 88. Provider real dispatch design
+
+~~~bash
+deonctl worker codex provider-real-dispatch-design \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --provider-request-envelope retrieval-context-provider-request-envelope.json \
+  --provider-real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --output retrieval-context-provider-real-dispatch-design.json \
+  --output-format json
+~~~
+
+### 89. Provider real dispatch design report
+
+~~~bash
+deonctl worker codex provider-real-dispatch-design-report \
+  --real-dispatch-design retrieval-context-provider-real-dispatch-design.json \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --provider-request-envelope retrieval-context-provider-request-envelope.json \
+  --provider-real-call-proposal retrieval-context-provider-real-call-proposal.json \
+  --output-format json
+~~~
+
+### 90. Provider real activation design review package
+
+~~~bash
+deonctl worker codex provider-real-activation-design-review-package \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --real-dispatch-design retrieval-context-provider-real-dispatch-design.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --output retrieval-context-provider-real-activation-design-review-package.json \
+  --output-format json
+~~~
+
+### 91. Provider real activation design review gate
+
+~~~bash
+deonctl worker codex provider-real-activation-design-review-gate \
+  --design-review-package retrieval-context-provider-real-activation-design-review-package.json \
+  --secret-read-proposal retrieval-context-provider-secret-read-proposal.json \
+  --real-transport-implementation-plan retrieval-context-provider-real-transport-implementation-plan.json \
+  --real-dispatch-design retrieval-context-provider-real-dispatch-design.json \
+  --activation-final-audit retrieval-context-provider-activation-final-audit.json \
+  --activation-ci-report retrieval-context-provider-activation-ci-report.json \
+  --kill-switch-plan retrieval-context-provider-activation-kill-switch-plan.json \
+  --operator-review-bundle retrieval-context-provider-activation-operator-review-bundle.json \
+  --output-format json
+~~~
+
+## CI smoke (Tasks 22.37–22.64)
 
 Run the provider-call chain fixture smoke from the repository root:
 
@@ -1063,7 +1178,7 @@ make provider-call-chain-smoke
 bash scripts/provider-call-chain-fixture-smoke.sh
 ~~~
 
-This executes the chain in isolated temp dirs and asserts final activation CI report keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), activation readiness layer (22.49–22.52), activation control plane (22.53–22.56), and activation hardening (22.57–22.60).
+This executes the chain in isolated temp dirs and asserts real activation design review gate keeps `provider_call`, `network_call`, `worker_execution`, `sent_to_provider`, `transport_called`, `received_from_provider`, `secret_values_read`, and `workspace_modified` false. It exercises executor sprint (22.41–22.44), execution simulation layer (22.45–22.48), activation readiness layer (22.49–22.52), activation control plane (22.53–22.56), activation hardening (22.57–22.60), and real dispatch design package (22.61–22.64).
 
 See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md) for the last-gate boundary before any real provider dispatch.
 
@@ -1120,7 +1235,8 @@ See [docs/PROVIDER_CALL_CHAIN_GATE.md](../../../docs/PROVIDER_CALL_CHAIN_GATE.md
 - optional provider-activation-operator-review-bundle/report returns `operator_review_bundle_ready: true`, `operator_review_required: true`, `operator_approved_now: false`, all execution flags false
 - optional provider-activation-kill-switch validate/plan returns `kill_switch_validated: true`, `global_disabled: true`, all block flags true, `activation_allowed_now: false`
 - optional provider-activation-final-audit/ci-report returns `final_audit_ready: true`, `ci_observability_ready: true`, `kill_switch_active: true`, `operator_review_required: true`, all execution flags false
-- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.60)
+- `make provider-call-chain-smoke` passes library + CLI fixture e2e guards (Tasks 22.37–22.64)
+- optional provider-real-activation-design-review-gate returns `real_activation_design_gate_ready: true`, `real_dispatch_supported_now: false`, `kill_switch_active: true`, `operator_review_required: true`, all execution flags false
 - `can_inject_now: false` in injection-plan and governance-report
 - `required_future_flag: --confirm-inject-materialized-context` in injection-plan
 - only `retrieval-context-materialized.json` / `.md` contain chunk text excerpts; other artifacts must not include `text_excerpt`

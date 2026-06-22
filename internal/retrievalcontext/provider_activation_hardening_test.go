@@ -15,6 +15,8 @@ type providerActivationHardeningArtifacts struct {
 	operatorReviewBundlePath  string
 	killSwitchConfigPath      string
 	killSwitchPlanPath        string
+	activationFinalAuditPath  string
+	activationCIReportPath    string
 }
 
 func runProviderActivationHardeningChain(t *testing.T, chain providerCallChainFixture) providerActivationHardeningArtifacts {
@@ -143,12 +145,36 @@ func runProviderActivationHardeningChain(t *testing.T, chain providerCallChainFi
 	}
 	assertProviderActivationCIReportBlocked(t, ciReport)
 
+	const activationFinalAuditPath = "provider-activation-final-audit.json"
+	var auditBuf bytes.Buffer
+	if err := retrievalcontext.WriteProviderActivationFinalAuditJSON(audit, &auditBuf); err != nil {
+		t.Fatalf("WriteProviderActivationFinalAuditJSON() error = %v", err)
+	}
+	if err := os.WriteFile(activationFinalAuditPath, auditBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(final audit) error = %v", err)
+	}
+	assertNoPreviewLeakInFile(t, activationFinalAuditPath)
+	assertNoPreviewLeakInString(t, "final audit stdout", auditBuf.String())
+
+	const activationCIReportPath = "provider-activation-ci-report.json"
+	var ciReportBuf bytes.Buffer
+	if err := retrievalcontext.WriteProviderActivationCIReportJSON(ciReport, &ciReportBuf); err != nil {
+		t.Fatalf("WriteProviderActivationCIReportJSON() error = %v", err)
+	}
+	if err := os.WriteFile(activationCIReportPath, ciReportBuf.Bytes(), 0o644); err != nil {
+		t.Fatalf("WriteFile(ci report) error = %v", err)
+	}
+	assertNoPreviewLeakInFile(t, activationCIReportPath)
+	assertNoPreviewLeakInString(t, "ci report stdout", ciReportBuf.String())
+
 	return providerActivationHardeningArtifacts{
 		providerActivationControlArtifacts: control,
 		activationReleaseGatePath:          activationReleaseGatePath,
 		operatorReviewBundlePath:           operatorReviewBundlePath,
 		killSwitchConfigPath:               killSwitchConfigPath,
 		killSwitchPlanPath:                 killSwitchPlanPath,
+		activationFinalAuditPath:           activationFinalAuditPath,
+		activationCIReportPath:             activationCIReportPath,
 	}
 }
 

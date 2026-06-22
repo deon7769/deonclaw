@@ -51,6 +51,7 @@ type ProviderActivationFinalAuditResult struct {
 	WorkerExecution            bool     `json:"worker_execution"`
 	PromptInjectionRealRunner  bool     `json:"prompt_injection_real_runner"`
 	BlockedReason              string   `json:"blocked_reason"`
+	ProviderPayloadSHA256      string   `json:"provider_payload_sha256,omitempty"`
 	Warnings                   []string `json:"warnings,omitempty"`
 	Failures                   []string `json:"failures,omitempty"`
 }
@@ -80,6 +81,7 @@ type ProviderActivationCIReportResult struct {
 	WorkerExecution            bool     `json:"worker_execution"`
 	PromptInjectionRealRunner  bool     `json:"prompt_injection_real_runner"`
 	BlockedReason              string   `json:"blocked_reason"`
+	ProviderPayloadSHA256      string   `json:"provider_payload_sha256,omitempty"`
 	ExpectedLocalCommands      []string `json:"expected_local_commands,omitempty"`
 	ExpectedPRChecklist        []string `json:"expected_pr_checklist,omitempty"`
 	Warnings                   []string `json:"warnings,omitempty"`
@@ -173,6 +175,9 @@ func ProviderActivationFinalAudit(opts ProviderActivationFinalAuditOptions) (Pro
 	}
 
 	result := blockedProviderActivationFinalAuditResult(failures)
+	if pkg.ProviderPayloadSHA256 != "" {
+		result.ProviderPayloadSHA256 = pkg.ProviderPayloadSHA256
+	}
 	if len(failures) > 0 {
 		result.Status = lancedbpolicy.StatusFailed
 	} else {
@@ -227,6 +232,7 @@ func providerActivationFinalAuditResultFromAudit(audit ProviderActivationFinalAu
 		WorkerExecution:            audit.WorkerExecution,
 		PromptInjectionRealRunner:  audit.PromptInjectionRealRunner,
 		BlockedReason:              audit.BlockedReason,
+		ProviderPayloadSHA256:      audit.ProviderPayloadSHA256,
 		Failures:                   append([]string(nil), audit.Failures...),
 	}
 }
@@ -279,6 +285,30 @@ func WriteProviderActivationCIReportJSON(result ProviderActivationCIReportResult
 	}
 	_, err = out.Write(data)
 	return err
+}
+
+func LoadProviderActivationFinalAudit(path string) (ProviderActivationFinalAuditResult, []byte, error) {
+	data, err := readArtifactBytesNoTextExcerpt("provider activation final audit", path)
+	if err != nil {
+		return ProviderActivationFinalAuditResult{}, nil, err
+	}
+	var result ProviderActivationFinalAuditResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ProviderActivationFinalAuditResult{}, nil, fmt.Errorf("parse provider activation final audit json: %w", err)
+	}
+	return result, data, nil
+}
+
+func LoadProviderActivationCIReport(path string) (ProviderActivationCIReportResult, []byte, error) {
+	data, err := readArtifactBytesNoTextExcerpt("provider activation ci report", path)
+	if err != nil {
+		return ProviderActivationCIReportResult{}, nil, err
+	}
+	var result ProviderActivationCIReportResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ProviderActivationCIReportResult{}, nil, fmt.Errorf("parse provider activation ci report json: %w", err)
+	}
+	return result, data, nil
 }
 
 func WriteProviderActivationCIReportText(result ProviderActivationCIReportResult, out io.Writer) error {
