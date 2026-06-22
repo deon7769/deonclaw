@@ -1,0 +1,11 @@
+hooks:
+  - id: post-run-insight
+    event: run.completed
+    action: insights.evidence.build
+    enabled: true
+    policy: internal-only
+  - id: schedule-due-audit
+    event: schedule.due
+    action: daemon.audit
+    enabled: true
+    policy: internal-only

@@ -1,0 +1,8 @@
+schedules:
+  - id: smoke-heartbeat
+    kind: heartbeat
+    name: Proactive runtime smoke heartbeat
+    status: active
+    agent_id: backend-engineer
+    heartbeat_policy_id: backend-default
+    every: 30m

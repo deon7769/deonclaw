@@ -1,0 +1,18 @@
+heartbeat_policies:
+  backend-default:
+    enabled: true
+    every: 30m
+    target: none
+    active_hours:
+      start: "08:00"
+      end: "22:00"
+      timezone: America/Sao_Paulo
+    skip_when_busy: true
+    isolated_session: false
+    light_context: true
+    timeout_seconds: 120
+    no_op_token: HEARTBEAT_OK
+    ack_max_chars: 32
+    prompt: |
+      Review due items, failed runs, pending approvals, and follow-ups.
+      If nothing needs attention, return HEARTBEAT_OK.

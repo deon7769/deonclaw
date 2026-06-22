@@ -150,6 +150,19 @@ Usage:
   deonctl agents inbox accept <item-id> --store <deonclaw.db>
   deonctl agents inbox defer <item-id> --store <deonclaw.db>
   deonctl agents delegate propose --parent-agent <agent-id> --child-agent <agent-id> --parent-work-item <work-item-id> --task <task.yaml> --reason <text> --output <delegation-proposal.json> --store <deonclaw.db>
+  deonctl daemon status --store <deonclaw.db>
+  deonctl daemon doctor --store <deonclaw.db>
+  deonctl daemon start --store <deonclaw.db>
+  deonctl daemon stop --store <deonclaw.db>
+  deonctl daemon run-once --store <deonclaw.db> [--heartbeat-config <heartbeat.yaml>] [--hooks-config <hooks.yaml>]
+  deonctl schedules validate --config <schedules.yaml>
+  deonctl schedules sync --config <schedules.yaml> --store <deonclaw.db>
+  deonctl schedules list --store <deonclaw.db>
+  deonctl schedules due --store <deonclaw.db>
+  deonctl heartbeat validate --config <heartbeat.yaml>
+  deonctl heartbeat dry-run --agent <agent-id> --policy <policy-id> --config <heartbeat.yaml> [--agent-busy]
+  deonctl hooks validate --config <hooks.yaml>
+  deonctl hooks plan --config <hooks.yaml> --event <event-name>
   deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
@@ -2261,6 +2274,128 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runAgentsDelegatePropose(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "daemon":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "status", "doctor", "start", "stop":
+			storePath, err := parseDaemonStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			switch args[1] {
+			case "status":
+				return runDaemonStatus(storePath, stdout, stderr)
+			case "doctor":
+				return runDaemonDoctor(storePath, stdout, stderr)
+			case "start":
+				return runDaemonStart(storePath, stdout, stderr)
+			case "stop":
+				return runDaemonStop(storePath, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		case "run-once":
+			opts, err := parseDaemonRunOnceOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runDaemonRunOnce(opts, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "schedules":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			configPath, err := parseConfigPathArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runSchedulesValidate(configPath, stdout, stderr)
+		case "sync":
+			configPath, storePath, err := parseSchedulesSyncOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runSchedulesSync(configPath, storePath, stdout, stderr)
+		case "list":
+			storePath, err := parseDaemonStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runSchedulesList(storePath, stdout, stderr)
+		case "due":
+			storePath, err := parseDaemonStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runSchedulesDue(storePath, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "heartbeat":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			configPath, err := parseConfigPathArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runHeartbeatValidate(configPath, stdout, stderr)
+		case "dry-run":
+			agentID, policyID, configPath, agentBusy, err := parseHeartbeatDryRunOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runHeartbeatDryRun(agentID, policyID, configPath, agentBusy, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "hooks":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			configPath, err := parseConfigPathArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runHooksValidate(configPath, stdout, stderr)
+		case "plan":
+			configPath, event, err := parseHooksPlanOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runHooksPlan(configPath, event, stdout, stderr)
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2

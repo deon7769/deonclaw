@@ -173,10 +173,11 @@ Implemented:
 - learning proposal approval, apply dry-run/preview execute, effectiveness record/report, and timeline (`insights proposals approve`, `insights proposals apply dry-run`, `insights proposals apply`, `insights effectiveness record`, `insights effectiveness report`, `insights timeline`), documentation-like types only for preview apply; skill/memory/policy types blocked
 - universal skill registry foundation (`skills policy validate`, `skills inspect`, `skills import`, `skills install`, `skills verify`, `skills list`, `skills show`, `skills enable`, `skills disable`, `skills snapshot`, `skills materialize`), local install only; git import plan-only; no worker auto-loading yet
 - persistent agents and sessions foundation (`agents validate`, `agents sync`, `agents list`, `agents show`, `agents pause`, `agents resume`, `agents terminate`, `agents sessions create/list/show`, `agents assign`, `agents inbox list/accept/defer`, `agents delegate propose`), SQLite-backed; no automatic run dispatch yet
+- proactive runtime foundation (`daemon status`, `daemon doctor`, `daemon start`, `daemon stop`, `daemon run-once`, `schedules validate`, `schedules sync`, `schedules list`, `schedules due`, `heartbeat validate`, `heartbeat dry-run`, `hooks validate`, `hooks plan`), SQLite schema v3 for schedules/wakeups/heartbeat/daemon state; run-once materializes wakeups and processes heartbeat dry-run with `HEARTBEAT_OK` no-op; hooks plan-only; no `deonclawd` long-running process or worker dispatch yet
 
 Not implemented yet:
 
-- `deond` daemon, cron, heartbeat, hooks, and wakeup queue
+- `deonclawd` long-running daemon process and automatic worker dispatch from wakeups
 - Work queue, execution leases, budgets, usage events, and hard stops
 - OpenClaw migration inspect/plan/apply/shadow/cutover/rollback
 - Rich Git/browser/action contracts and future UI/API surfaces

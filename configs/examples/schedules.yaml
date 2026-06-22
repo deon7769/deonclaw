@@ -1,0 +1,26 @@
+schedules:
+  - id: daily-review
+    kind: cron
+    name: Daily repository review
+    status: active
+    agent_id: engineering-manager
+    cron: "0 9 * * 1-5"
+    timezone: America/Sao_Paulo
+    active_hours:
+      start: "08:00"
+      end: "22:00"
+      timezone: America/Sao_Paulo
+    concurrency_policy: skip_if_running
+  - id: backend-heartbeat
+    kind: heartbeat
+    name: Backend heartbeat
+    status: active
+    agent_id: backend-engineer
+    heartbeat_policy_id: backend-default
+    every: 30m
+  - id: one-shot-reminder
+    kind: at
+    name: One shot reminder
+    status: active
+    agent_id: legacy-manual
+    at: "2030-01-01T09:00:00Z"
