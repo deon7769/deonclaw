@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -232,6 +233,113 @@ func TestBuildEvidenceRejectsSecretLikeValues(t *testing.T) {
 	}
 }
 
+func TestPlanEvaluationAndMaterializeReport(t *testing.T) {
+	root := t.TempDir()
+	now := time.Date(2026, 6, 22, 13, 0, 0, 0, time.UTC)
+	bundle := EvidenceBundle{
+		EvidenceBundleID: "evb_test_plan",
+		CreatedAt:        now.Format(time.RFC3339Nano),
+		Scope: EvidenceScope{
+			Repository: "deonclaw",
+			AgentID:    LegacyManualAgentID,
+			TaskID:     "task-1",
+		},
+		Trigger: TriggerValidationFailed,
+		RunIDs:  []string{"run-1"},
+		SHA256:  "abc123",
+	}
+
+	plan, prompt, err := PlanEvaluation(bundle, ReviewerCodex)
+	if err != nil {
+		t.Fatalf("PlanEvaluation() error = %v", err)
+	}
+	if plan.WorkerExecution {
+		t.Fatal("worker_execution should be false")
+	}
+	if !strings.Contains(prompt, "DeonClaw learning reviewer") {
+		t.Fatal("prompt should include reviewer instructions")
+	}
+
+	promptPath := filepath.Join(root, "reviewer-prompt.txt")
+	promptSHA, err := WriteEvaluationPrompt(prompt, promptPath)
+	if err != nil {
+		t.Fatalf("WriteEvaluationPrompt() error = %v", err)
+	}
+	plan.PromptPath = promptPath
+	plan.PromptSHA256 = promptSHA
+
+	planPath := filepath.Join(root, "evaluation-plan.json")
+	if err := WriteEvaluationPlan(plan, planPath); err != nil {
+		t.Fatalf("WriteEvaluationPlan() error = %v", err)
+	}
+
+	responsePath := filepath.Join(root, "reviewer-response.json")
+	if err := os.WriteFile(responsePath, []byte(exampleReviewerResponseJSON), 0o644); err != nil {
+		t.Fatalf("WriteFile(reviewer-response.json) error = %v", err)
+	}
+	report, err := MaterializeInsightReport(EvaluateOptions{
+		Evidence:     bundle,
+		Reviewer:     ReviewerCodex,
+		ResponsePath: responsePath,
+		Now:          now,
+	})
+	if err != nil {
+		t.Fatalf("MaterializeInsightReport() error = %v", err)
+	}
+	if report.ProposalCount != 1 {
+		t.Fatalf("proposal_count = %d, want 1", report.ProposalCount)
+	}
+	if report.ContainsChainOfThought {
+		t.Fatal("contains_chain_of_thought must be false")
+	}
+	if err := ValidateReport(report); err != nil {
+		t.Fatalf("ValidateReport() error = %v", err)
+	}
+
+	reportPath := filepath.Join(root, "insight-report.json")
+	if err := WriteReportJSON(report, reportPath); err != nil {
+		t.Fatalf("WriteReportJSON() error = %v", err)
+	}
+	roundTrip, err := ReadReportJSON(reportPath)
+	if err != nil {
+		t.Fatalf("ReadReportJSON() error = %v", err)
+	}
+	if roundTrip.InsightID != report.InsightID {
+		t.Fatalf("insight_id mismatch: %q vs %q", roundTrip.InsightID, report.InsightID)
+	}
+}
+
+func TestReadReportRejectsChainOfThoughtField(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "bad-report.json")
+	payload := []byte(`{
+  "insight_id": "ins_bad",
+  "status": "ok",
+  "created_at": "2026-06-22T13:00:00Z",
+  "trigger": "run_completed",
+  "scope": {"repository":"deonclaw","agent_id":"legacy-manual"},
+  "evidence_bundle_sha256": "abc",
+  "reviewer": "codex",
+  "observations": [],
+  "what_worked": [],
+  "what_failed": [],
+  "reusable_lessons": [],
+  "uncertainties": [],
+  "risk_notes": [],
+  "proposal_count": 0,
+  "action_required": false,
+  "contains_chain_of_thought": false,
+  "sha256": "def",
+  "chain_of_thought": "hidden"
+}`)
+	if err := os.WriteFile(path, payload, 0o644); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if _, err := ReadReportJSON(path); err == nil {
+		t.Fatal("ReadReportJSON() expected error for chain_of_thought field")
+	}
+}
+
 const exampleInsightPolicyYAML = `
 insight_policy:
   enabled: true
@@ -249,3 +357,22 @@ insight_policy:
   auto_propose: true
   auto_apply: false
 `
+
+const exampleReviewerResponseJSON = `{
+  "observations": ["Validation failed after the run completed."],
+  "what_worked": ["Evidence bundle captured validation status and diff summary."],
+  "what_failed": ["go test ./... exited non-zero."],
+  "reusable_lessons": ["Failed validation runs should trigger insight review before retry."],
+  "uncertainties": [],
+  "risk_notes": [],
+  "proposals": [
+    {
+      "type": "documentation",
+      "target": "docs/INSIGHT_LEARNING_LOOP.md",
+      "reason": "Document validation_failed trigger behavior.",
+      "proposed_change_summary": "Add an example for validation_failed evidence bundles.",
+      "confidence": 0.82
+    }
+  ],
+  "action_required": true
+}`

@@ -1,0 +1,26 @@
+{
+  "observations": [
+    "Validation failed after the run completed."
+  ],
+  "what_worked": [
+    "Evidence bundle captured validation status and diff summary."
+  ],
+  "what_failed": [
+    "go test ./... exited non-zero."
+  ],
+  "reusable_lessons": [
+    "Failed validation runs should trigger insight review before retry."
+  ],
+  "uncertainties": [],
+  "risk_notes": [],
+  "proposals": [
+    {
+      "type": "documentation",
+      "target": "docs/INSIGHT_LEARNING_LOOP.md",
+      "reason": "Document validation_failed trigger behavior.",
+      "proposed_change_summary": "Add an example for validation_failed evidence bundles.",
+      "confidence": 0.82
+    }
+  ],
+  "action_required": true
+}
