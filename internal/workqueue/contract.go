@@ -8,10 +8,21 @@ const (
 
 	DefaultLeaseTTLSeconds = 900
 
-	EventClaimed   = "work.claimed"
-	EventReleased  = "work.released"
-	EventRecovered = "work.lease.recovered"
-	EventEnqueued  = "work.enqueued"
+	EventClaimed       = "work.claimed"
+	EventReleased      = "work.released"
+	EventRecovered     = "work.lease.recovered"
+	EventEnqueued      = "work.enqueued"
+	EventAssigned      = "work.assigned"
+	EventAccepted      = "work.accepted"
+	EventQueued        = "work.queued"
+	EventLeaseRenewed  = "work.lease.renewed"
+	EventRunning       = "work.running"
+	EventSucceeded     = "work.succeeded"
+	EventFailed        = "work.failed"
+	EventBlocked       = "work.blocked"
+	EventDeadLettered  = "work.dead_lettered"
+	EventBudgetBlocked = "work.budget.blocked"
+	EventReviewQueued  = "work.review.queued"
 )
 
 type Lease struct {
@@ -54,10 +65,19 @@ type RecoveryReport struct {
 	Findings []RecoveryFinding `json:"findings"`
 }
 
+type DoctorFinding struct {
+	Severity   string `json:"severity"`
+	Code       string `json:"code"`
+	Message    string `json:"message"`
+	WorkItemID string `json:"work_item_id,omitempty"`
+	LeaseID    string `json:"lease_id,omitempty"`
+	InboxID    string `json:"inbox_id,omitempty"`
+}
+
 type DoctorReport struct {
-	Status        string         `json:"status"`
-	QueuedWork    int            `json:"queued_work"`
-	LeasedWork    int            `json:"leased_work"`
-	ActiveLeases  int            `json:"active_leases"`
-	LeaseRecovery RecoveryReport `json:"lease_recovery"`
+	Status       string          `json:"status"`
+	QueuedWork   int             `json:"queued_work"`
+	LeasedWork   int             `json:"leased_work"`
+	ActiveLeases int             `json:"active_leases"`
+	Findings     []DoctorFinding `json:"findings,omitempty"`
 }

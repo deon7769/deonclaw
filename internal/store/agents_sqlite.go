@@ -354,6 +354,24 @@ func (s *SQLiteStore) ListInboxByAgent(ctx context.Context, agentID string) ([]a
 	return result, rows.Err()
 }
 
+func (s *SQLiteStore) ListAllInbox(ctx context.Context) ([]agents.InboxItem, error) {
+	rows, err := s.db.QueryContext(ctx, `SELECT id, agent_id, work_item_id, status, created_at, updated_at
+		FROM agent_inbox ORDER BY created_at, id`)
+	if err != nil {
+		return nil, fmt.Errorf("list all inbox: %w", err)
+	}
+	defer rows.Close()
+	result := make([]agents.InboxItem, 0)
+	for rows.Next() {
+		var item agents.InboxItem
+		if err := rows.Scan(&item.ID, &item.AgentID, &item.WorkItemID, &item.Status, &item.CreatedAt, &item.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
 func (s *SQLiteStore) UpdateInboxItem(ctx context.Context, item agents.InboxItem) error {
 	return s.SaveInboxItem(ctx, item)
 }

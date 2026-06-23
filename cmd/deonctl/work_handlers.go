@@ -78,9 +78,6 @@ func runWorkClaim(opts workClaimOptions, stdout io.Writer, stderr io.Writer) int
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	_ = encoder.Encode(result)
-	if !result.Claimed {
-		return 1
-	}
 	return 0
 }
 
@@ -135,26 +132,45 @@ func runWorkDoctor(storePath string, stdout io.Writer, stderr io.Writer) int {
 		return 1
 	}
 	defer db.Close()
-	ctx := context.Background()
-	now := time.Now().UTC()
-	recovery, _ := db.RecoverWorkQueue(ctx, now)
-	items, err := db.ListWorkItems(ctx)
+	report, err := db.WorkDoctor(context.Background(), time.Now().UTC())
 	if err != nil {
 		fmt.Fprintf(stderr, "work doctor failed: %v\n", err)
 		return 1
 	}
-	leases, err := db.ListLeases(ctx)
-	if err != nil {
-		fmt.Fprintf(stderr, "work doctor failed: %v\n", err)
-		return 1
-	}
-	report := workqueue.Doctor(items, leases, recovery)
 	encoder := json.NewEncoder(stdout)
 	encoder.SetIndent("", "  ")
 	_ = encoder.Encode(report)
-	if report.Status != "ok" {
+	if report.Status == "failed" {
 		return 1
 	}
+	return 0
+}
+
+type workLeaseRenewOptions struct {
+	storePath  string
+	leaseID    string
+	ttlSeconds int
+}
+
+func runWorkLeaseRenew(opts workLeaseRenewOptions, stdout io.Writer, stderr io.Writer) int {
+	db, err := store.OpenSQLite(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "work lease renew failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+	ttl := time.Duration(opts.ttlSeconds) * time.Second
+	if opts.ttlSeconds == 0 {
+		ttl = workqueue.DefaultLeaseTTLSeconds * time.Second
+	}
+	lease, err := db.RenewLease(context.Background(), opts.leaseID, ttl, time.Now().UTC())
+	if err != nil {
+		fmt.Fprintf(stderr, "work lease renew failed: %v\n", err)
+		return 1
+	}
+	encoder := json.NewEncoder(stdout)
+	encoder.SetIndent("", "  ")
+	_ = encoder.Encode(lease)
 	return 0
 }
 
@@ -264,6 +280,42 @@ func parseWorkReleaseOptions(args []string) (workReleaseOptions, error) {
 	}
 	if opts.storePath == "" || opts.leaseID == "" {
 		return workReleaseOptions{}, fmt.Errorf("missing --store or --lease")
+	}
+	return opts, nil
+}
+
+func parseWorkLeaseRenewOptions(args []string) (workLeaseRenewOptions, error) {
+	var opts workLeaseRenewOptions
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--store":
+			if i+1 >= len(args) {
+				return workLeaseRenewOptions{}, fmt.Errorf("missing value for --store")
+			}
+			opts.storePath = args[i+1]
+			i++
+		case "--lease":
+			if i+1 >= len(args) {
+				return workLeaseRenewOptions{}, fmt.Errorf("missing value for --lease")
+			}
+			opts.leaseID = args[i+1]
+			i++
+		case "--ttl-seconds":
+			if i+1 >= len(args) {
+				return workLeaseRenewOptions{}, fmt.Errorf("missing value for --ttl-seconds")
+			}
+			var n int
+			if _, err := fmt.Sscanf(args[i+1], "%d", &n); err != nil {
+				return workLeaseRenewOptions{}, fmt.Errorf("invalid --ttl-seconds")
+			}
+			opts.ttlSeconds = n
+			i++
+		default:
+			return workLeaseRenewOptions{}, fmt.Errorf("unknown argument %q", args[i])
+		}
+	}
+	if opts.storePath == "" || opts.leaseID == "" {
+		return workLeaseRenewOptions{}, fmt.Errorf("missing --store or --lease")
 	}
 	return opts, nil
 }

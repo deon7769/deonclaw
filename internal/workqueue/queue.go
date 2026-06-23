@@ -8,8 +8,7 @@ import (
 )
 
 var claimableStatuses = map[string]struct{}{
-	agents.WorkItemStatusQueued:   {},
-	agents.WorkItemStatusAssigned: {},
+	agents.WorkItemStatusQueued: {},
 }
 
 func CanClaim(item agents.WorkItem) error {

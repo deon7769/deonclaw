@@ -372,29 +372,18 @@ func runAgentsAssign(opts agentsAssignOptions, stdout io.Writer, stderr io.Write
 		fmt.Fprintf(stderr, "agents assign failed: %v\n", err)
 		return 1
 	}
-	workItem, err := agents.WorkItemFromTask(agents.WorkItemFromTaskOptions{
-		Task:            *task,
-		AssignedAgentID: agent.ID,
-		CreatedBy:       opts.createdBy,
+	now := time.Now().UTC()
+	result, _, err := db.AssignWorkItemWithSnapshot(ctx, store.AssignWorkItemWithSnapshotOptions{
+		Agent:     agent,
+		Task:      *task,
+		CreatedBy: opts.createdBy,
+		Now:       now,
 	})
 	if err != nil {
 		fmt.Fprintf(stderr, "agents assign failed: %v\n", err)
 		return 1
 	}
-	result, err := agents.AssignWorkItem(agents.AssignTaskOptions{Agent: agent, WorkItem: workItem, CreatedBy: opts.createdBy})
-	if err != nil {
-		fmt.Fprintf(stderr, "agents assign failed: %v\n", err)
-		return 1
-	}
-	if err := db.SaveWorkItem(ctx, result.WorkItem); err != nil {
-		fmt.Fprintf(stderr, "agents assign failed: %v\n", err)
-		return 1
-	}
-	if err := db.SaveInboxItem(ctx, result.InboxItem); err != nil {
-		fmt.Fprintf(stderr, "agents assign failed: %v\n", err)
-		return 1
-	}
-	if err := db.SaveLifecycleEvent(ctx, agents.NewLifecycleEvent(agent.ID, agents.EventAgentAssigned, opts.createdBy, result.WorkItem.ID, time.Now().UTC())); err != nil {
+	if err := db.SaveLifecycleEvent(ctx, agents.NewLifecycleEvent(agent.ID, agents.EventAgentAssigned, opts.createdBy, result.WorkItem.ID, now)); err != nil {
 		fmt.Fprintf(stderr, "agents assign failed: %v\n", err)
 		return 1
 	}
@@ -424,7 +413,25 @@ func runAgentsInboxList(opts agentsInboxOptions, stdout io.Writer, stderr io.Wri
 }
 
 func runAgentsInboxAccept(itemID string, opts agentsInboxOptions, stdout io.Writer, stderr io.Writer) int {
-	return runAgentsInboxTransition(itemID, opts, agents.AcceptInboxItem, agents.EventInboxAccepted, "agents inbox accept", stdout, stderr)
+	db, err := openAgentStore(opts.storePath)
+	if err != nil {
+		fmt.Fprintf(stderr, "agents inbox accept failed: %v\n", err)
+		return 1
+	}
+	defer db.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	accepted, workItem, err := db.AcceptInboxAndQueueWork(ctx, itemID, now)
+	if err != nil {
+		fmt.Fprintf(stderr, "agents inbox accept failed: %v\n", err)
+		return 1
+	}
+	if err := db.SaveLifecycleEvent(ctx, agents.NewLifecycleEvent(accepted.AgentID, agents.EventInboxAccepted, "operator", itemID, now)); err != nil {
+		fmt.Fprintf(stderr, "agents inbox accept failed: %v\n", err)
+		return 1
+	}
+	fmt.Fprintf(stdout, "agents inbox accept: ok item=%s work_item=%s status=%s\n", accepted.ID, workItem.ID, workItem.Status)
+	return 0
 }
 
 func runAgentsInboxDefer(itemID string, opts agentsInboxOptions, stdout io.Writer, stderr io.Writer) int {

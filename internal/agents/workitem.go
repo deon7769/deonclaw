@@ -11,25 +11,31 @@ import (
 )
 
 type WorkItem struct {
-	ID               string   `json:"id"`
-	Title            string   `json:"title"`
-	Status           string   `json:"status"`
-	AssignedAgentID  string   `json:"assigned_agent_id"`
-	ParentWorkItemID string   `json:"parent_work_item_id,omitempty"`
-	TaskID           string   `json:"task_id,omitempty"`
-	GoalID           string   `json:"goal_id,omitempty"`
-	Priority         int      `json:"priority"`
-	Attempt          int      `json:"attempt"`
-	MaxAttempts      int      `json:"max_attempts,omitempty"`
-	BudgetPolicy     string   `json:"budget_policy,omitempty"`
-	EstimatedCostUSD float64  `json:"estimated_cost_usd,omitempty"`
-	AllowedPaths     []string `json:"allowed_paths"`
-	ForbiddenPaths   []string `json:"forbidden_paths"`
-	DefinitionOfDone []string `json:"definition_of_done"`
-	Dependencies     []string `json:"dependencies,omitempty"`
-	CreatedBy        string   `json:"created_by"`
-	CreatedAt        string   `json:"created_at"`
-	UpdatedAt        string   `json:"updated_at"`
+	ID                 string   `json:"id"`
+	Title              string   `json:"title"`
+	Status             string   `json:"status"`
+	Kind               string   `json:"kind,omitempty"`
+	AssignedAgentID    string   `json:"assigned_agent_id"`
+	ParentWorkItemID   string   `json:"parent_work_item_id,omitempty"`
+	TaskID             string   `json:"task_id,omitempty"`
+	GoalID             string   `json:"goal_id,omitempty"`
+	Priority           int      `json:"priority"`
+	Attempt            int      `json:"attempt"`
+	MaxAttempts        int      `json:"max_attempts,omitempty"`
+	BudgetPolicy       string   `json:"budget_policy,omitempty"`
+	EstimatedCostUSD   float64  `json:"estimated_cost_usd,omitempty"`
+	TaskSnapshotSHA256 string   `json:"task_snapshot_sha256,omitempty"`
+	TriggerType        string   `json:"trigger_type,omitempty"`
+	ScheduleID         string   `json:"schedule_id,omitempty"`
+	WakeupID           string   `json:"wakeup_id,omitempty"`
+	AssignmentMode     string   `json:"assignment_mode,omitempty"`
+	AllowedPaths       []string `json:"allowed_paths"`
+	ForbiddenPaths     []string `json:"forbidden_paths"`
+	DefinitionOfDone   []string `json:"definition_of_done"`
+	Dependencies       []string `json:"dependencies,omitempty"`
+	CreatedBy          string   `json:"created_by"`
+	CreatedAt          string   `json:"created_at"`
+	UpdatedAt          string   `json:"updated_at"`
 }
 
 type WorkItemFromTaskOptions struct {
@@ -60,22 +66,25 @@ func WorkItemFromTask(opts WorkItemFromTaskOptions) (WorkItem, error) {
 		createdBy = "operator"
 	}
 	workID := newWorkItemID(opts.Task.ID, agentID, now)
-	return WorkItem{
+	item := WorkItem{
 		ID:               workID,
 		Title:            opts.Task.Title,
 		Status:           WorkItemStatusAssigned,
+		Kind:             WorkItemKindTask,
 		AssignedAgentID:  agentID,
 		ParentWorkItemID: strings.TrimSpace(opts.ParentWorkItemID),
 		TaskID:           opts.Task.ID,
 		GoalID:           strings.TrimSpace(opts.GoalID),
 		Priority:         priority,
+		MaxAttempts:      DefaultWorkItemMaxAttempts,
 		AllowedPaths:     append([]string(nil), opts.Task.AllowedPaths...),
 		ForbiddenPaths:   append([]string(nil), opts.Task.ForbiddenPaths...),
 		DefinitionOfDone: append([]string(nil), opts.Task.DefinitionOfDone...),
 		CreatedBy:        createdBy,
 		CreatedAt:        now.Format(time.RFC3339Nano),
 		UpdatedAt:        now.Format(time.RFC3339Nano),
-	}, nil
+	}
+	return item, nil
 }
 
 func newWorkItemID(taskID string, agentID string, now time.Time) string {
