@@ -43,20 +43,25 @@ func ValidateReserveOptions(opts ReserveBudgetOptions) error {
 	return nil
 }
 
-func CommitAmount(reservation Reservation, actualMicroUSD int64) (Reservation, int64, int64, error) {
+func CommitAmount(reservation Reservation, actualMicroUSD int64) (Reservation, int64, int64, int64, error) {
 	if actualMicroUSD < 0 {
-		return Reservation{}, 0, 0, fmt.Errorf("actual_microusd must be non-negative")
+		return Reservation{}, 0, 0, 0, fmt.Errorf("actual_microusd must be non-negative")
 	}
 	if reservation.Status != ReservationReserved {
-		return Reservation{}, 0, 0, fmt.Errorf("reservation %q status %q is not reserved", reservation.ID, reservation.Status)
+		return Reservation{}, 0, 0, 0, fmt.Errorf("reservation %q status %q is not reserved", reservation.ID, reservation.Status)
 	}
 	releaseReserved := reservation.EstimatedMicroUSD
+	overage := int64(0)
 	if actualMicroUSD > reservation.EstimatedMicroUSD {
-		releaseReserved = actualMicroUSD
+		overage = actualMicroUSD - reservation.EstimatedMicroUSD
 	}
 	reservation.CommittedMicroUSD = actualMicroUSD
+	reservation.OverageMicroUSD = overage
 	reservation.Status = ReservationCommitted
-	return reservation, releaseReserved, actualMicroUSD, nil
+	if overage > 0 {
+		reservation.Status = ReservationOverBudget
+	}
+	return reservation, releaseReserved, actualMicroUSD, overage, nil
 }
 
 func ReleaseAmount(reservation Reservation) int64 {

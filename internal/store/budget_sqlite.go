@@ -246,6 +246,10 @@ func (s *SQLiteStore) ReserveBudget(ctx context.Context, opts budget.ReserveBudg
 }
 
 func (s *SQLiteStore) CommitReservation(ctx context.Context, reservationID string, event usage.Event, actualMicroUSD int64, now time.Time) (budget.Reservation, error) {
+	return s.CommitReservationWithUsage(ctx, reservationID, event, actualMicroUSD, now)
+}
+
+func (s *SQLiteStore) CommitReservationWithUsage(ctx context.Context, reservationID string, event usage.Event, actualMicroUSD int64, now time.Time) (budget.Reservation, error) {
 	if now.IsZero() {
 		now = time.Now().UTC()
 	}
@@ -260,17 +264,21 @@ func (s *SQLiteStore) CommitReservation(ctx context.Context, reservationID strin
 	if err != nil {
 		return budget.Reservation{}, err
 	}
-	if reservation.Status == budget.ReservationCommitted {
+	if reservation.Status == budget.ReservationCommitted || reservation.Status == budget.ReservationOverBudget {
+		if strings.TrimSpace(event.ID) != "" {
+			if err := saveUsageEventTx(ctx, tx, event); err != nil {
+				return budget.Reservation{}, err
+			}
+		}
 		if err := tx.Commit(); err != nil {
 			return budget.Reservation{}, err
 		}
 		return reservation, nil
 	}
-	updated, releaseReserved, commitAmount, err := budget.CommitAmount(reservation, actualMicroUSD)
+	updated, releaseReserved, commitAmount, overage, err := budget.CommitAmount(reservation, actualMicroUSD)
 	if err != nil {
 		return budget.Reservation{}, err
 	}
-	_ = event
 	result, err := tx.ExecContext(ctx, `UPDATE budget_windows
 		SET reserved_microusd = reserved_microusd - ?, committed_microusd = committed_microusd + ?, updated_at = ?
 		WHERE id = ? AND reserved_microusd >= ?`,
@@ -283,11 +291,36 @@ func (s *SQLiteStore) CommitReservation(ctx context.Context, reservationID strin
 		return budget.Reservation{}, fmt.Errorf("budget window update failed for reservation %q", reservationID)
 	}
 	updated.UpdatedAt = stamp
-	if err := saveReservationTx(ctx, tx, updated); err != nil {
+	if err := updateReservationTx(ctx, tx, updated); err != nil {
 		return budget.Reservation{}, err
+	}
+	window, err := windowTx(ctx, tx, reservation.WindowID)
+	if err != nil {
+		return budget.Reservation{}, err
+	}
+	policy, err := budgetPolicyTx(ctx, tx, window.PolicyID)
+	if err != nil {
+		return budget.Reservation{}, err
+	}
+	window.Status = budget.WindowStatusAfterCommit(window, policy)
+	if err := updateWindowTx(ctx, tx, window, stamp); err != nil {
+		return budget.Reservation{}, err
+	}
+	if overage > 0 && window.CommittedMicroUSD >= window.HardLimitMicroUSD {
+		_ = overage
+	}
+	if strings.TrimSpace(event.ID) != "" {
+		if err := saveUsageEventTx(ctx, tx, event); err != nil {
+			return budget.Reservation{}, err
+		}
 	}
 	if err := tx.Commit(); err != nil {
 		return budget.Reservation{}, err
+	}
+	if window.CommittedMicroUSD >= window.HardLimitMicroUSD && strings.TrimSpace(reservation.AgentID) != "" {
+		if agent, err := s.Agent(ctx, reservation.AgentID); err == nil {
+			_, _, _ = s.ApplyBudgetExhausted(ctx, agent, policy, now)
+		}
 	}
 	return updated, nil
 }
@@ -482,6 +515,54 @@ func saveReservationTx(ctx context.Context, tx *sql.Tx, reservation budget.Reser
 	}
 	reservation.ID = existing.ID
 	return nil
+}
+
+func updateReservationTx(ctx context.Context, tx *sql.Tx, reservation budget.Reservation) error {
+	configJSON, _ := json.Marshal(map[string]any{"overage_microusd": reservation.OverageMicroUSD})
+	_, err := tx.ExecContext(ctx, `UPDATE budget_reservations
+		SET status = ?, committed_microusd = ?, config_json = ?, updated_at = ?
+		WHERE id = ?`,
+		reservation.Status, reservation.CommittedMicroUSD, string(configJSON), reservation.UpdatedAt, reservation.ID,
+	)
+	return err
+}
+
+func windowTx(ctx context.Context, tx *sql.Tx, id string) (budget.Window, error) {
+	row := tx.QueryRowContext(ctx, `SELECT id, policy_id, period_start, period_end, hard_limit_microusd, reserved_microusd, committed_microusd, status
+		FROM budget_windows WHERE id = ?`, id)
+	var window budget.Window
+	if err := row.Scan(&window.ID, &window.PolicyID, &window.PeriodStart, &window.PeriodEnd,
+		&window.HardLimitMicroUSD, &window.ReservedMicroUSD, &window.CommittedMicroUSD, &window.Status); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return budget.Window{}, fmt.Errorf("budget window %q: %w", id, ErrNotFound)
+		}
+		return budget.Window{}, err
+	}
+	return window, nil
+}
+
+func updateWindowTx(ctx context.Context, tx *sql.Tx, window budget.Window, stamp string) error {
+	_, err := tx.ExecContext(ctx, `UPDATE budget_windows SET status = ?, updated_at = ? WHERE id = ?`,
+		window.Status, stamp, window.ID,
+	)
+	return err
+}
+
+func budgetPolicyTx(ctx context.Context, tx *sql.Tx, id string) (budget.Policy, error) {
+	row := tx.QueryRowContext(ctx, `SELECT config_json FROM budget_policies WHERE id = ?`, id)
+	var raw string
+	if err := row.Scan(&raw); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return budget.Policy{}, fmt.Errorf("budget policy %q: %w", id, ErrNotFound)
+		}
+		return budget.Policy{}, err
+	}
+	var policy budget.Policy
+	if err := json.Unmarshal([]byte(raw), &policy); err != nil {
+		return budget.Policy{}, err
+	}
+	policy.ID = id
+	return policy, nil
 }
 
 type queryer interface {

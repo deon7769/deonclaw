@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -19,6 +20,9 @@ type workDispatchOnceOptions struct {
 	leaseID               string
 	mode                  string
 	confirmWorkerDispatch bool
+	artifactsDir          string
+	registryRoot          string
+	skillPolicyPath       string
 }
 
 func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr io.Writer) int {
@@ -32,12 +36,35 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 	if mode == "" {
 		mode = dispatch.ModeFake
 	}
+	artifactsDir := strings.TrimSpace(opts.artifactsDir)
+	if artifactsDir == "" {
+		fmt.Fprintf(stderr, "work dispatch-once failed: --artifacts-dir is required\n")
+		return 1
+	}
+	if err := os.MkdirAll(artifactsDir, 0o755); err != nil {
+		fmt.Fprintf(stderr, "work dispatch-once failed: artifacts dir: %v\n", err)
+		return 1
+	}
+	skillPolicy, err := loadSkillPolicy(opts.skillPolicyPath)
+	if err != nil {
+		fmt.Fprintf(stderr, "work dispatch-once failed: skill policy: %v\n", err)
+		return 1
+	}
+	registryRoot := strings.TrimSpace(opts.registryRoot)
+	if registryRoot == "" {
+		fmt.Fprintf(stderr, "work dispatch-once failed: --registry-root is required\n")
+		return 1
+	}
 	svc := dispatch.Service{Repo: db}
 	result, err := svc.DispatchOnce(context.Background(), dispatch.OnceOptions{
 		WorkItemID:            opts.workItemID,
 		LeaseID:               opts.leaseID,
 		Mode:                  mode,
 		ConfirmWorkerDispatch: opts.confirmWorkerDispatch,
+		ArtifactsDir:          artifactsDir,
+		RegistryRoot:          registryRoot,
+		SkillPolicy:           skillPolicy,
+		EvidenceBuilder:       dispatch.NewEvidenceBuilder(artifactsDir),
 		CodexRunner:           dispatch.NewFakeWorkerRunner(),
 		OpenCodeRunner:        dispatch.NewFakeWorkerRunner(),
 		PricingLoader:         dispatch.DefaultPricingLoader,
@@ -46,7 +73,7 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
 	_ = enc.Encode(result)
-	if err != nil && result.Status != "budget_blocked" {
+	if err != nil && result.Status != "budget_blocked" && result.Status != "blocked" && result.Status != "not_started" {
 		fmt.Fprintf(stderr, "work dispatch-once failed: %v\n", err)
 		return 1
 	}
@@ -201,8 +228,22 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 	leaseID, _ := parseOptionalFlag(args, "--lease")
 	mode, _ := parseOptionalFlag(args, "--mode")
 	_, confirm := parseOptionalFlag(args, "--confirm-worker-dispatch")
+	artifactsDir, err := parseConfigFlag(args, "--artifacts-dir")
+	if err != nil {
+		return workDispatchOnceOptions{}, err
+	}
+	registryRoot, err := parseConfigFlag(args, "--registry-root")
+	if err != nil {
+		return workDispatchOnceOptions{}, err
+	}
+	skillPolicyPath, err := parseConfigFlag(args, "--skill-policy")
+	if err != nil {
+		return workDispatchOnceOptions{}, err
+	}
 	return workDispatchOnceOptions{
-		storePath: storePath, workItemID: workItemID, leaseID: leaseID, mode: mode, confirmWorkerDispatch: confirm,
+		storePath: storePath, workItemID: workItemID, leaseID: leaseID, mode: mode,
+		confirmWorkerDispatch: confirm, artifactsDir: artifactsDir, registryRoot: registryRoot,
+		skillPolicyPath: skillPolicyPath,
 	}, nil
 }
 

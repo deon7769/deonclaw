@@ -8,6 +8,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/budget"
 	"github.com/deon7769/deonclaw/internal/insights"
 	"github.com/deon7769/deonclaw/internal/runs"
+	"github.com/deon7769/deonclaw/internal/skills"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/usage"
 	"github.com/deon7769/deonclaw/internal/workqueue"
@@ -16,6 +17,9 @@ import (
 const (
 	ModeFake = "fake"
 	ModeReal = "real"
+
+	BlockedBudgetPolicyRequired = "budget_policy_required"
+	BlockedRealModeUnsupported  = "real_dispatch_not_wired"
 
 	StepValidateOptions      = "01_validate_options"
 	StepLoadWorkItem         = "02_load_work_item"
@@ -49,9 +53,12 @@ type Repository interface {
 	Agent(ctx context.Context, id string) (agents.Agent, error)
 	SaveAgent(ctx context.Context, agent agents.Agent) error
 	WorkItemTaskSnapshot(ctx context.Context, workItemID string) (agents.WorkItemTaskSnapshot, error)
+	ClaimWorkItem(ctx context.Context, agentID string, workItemID string, ttl time.Duration, now time.Time) (workqueue.ClaimResult, error)
 	Lease(ctx context.Context, id string) (workqueue.Lease, error)
 	SaveLease(ctx context.Context, lease workqueue.Lease) error
+	ReleaseLease(ctx context.Context, leaseID string, reason string, requeue bool, now time.Time) error
 	ListLeases(ctx context.Context) ([]workqueue.Lease, error)
+	SaveSession(ctx context.Context, session agents.Session) error
 	SaveRun(ctx context.Context, run *runs.Run) error
 	SaveTask(ctx context.Context, task *tasks.Task) error
 	AppendWorkQueueEvent(ctx context.Context, event workqueue.QueueEvent) error
@@ -59,6 +66,7 @@ type Repository interface {
 	GetOrCreateWindow(ctx context.Context, policy budget.Policy, now time.Time) (budget.Window, error)
 	ReserveBudget(ctx context.Context, opts budget.ReserveBudgetOptions) (budget.ReserveBudgetResult, error)
 	CommitReservation(ctx context.Context, reservationID string, event usage.Event, actualMicroUSD int64, now time.Time) (budget.Reservation, error)
+	CommitReservationWithUsage(ctx context.Context, reservationID string, event usage.Event, actualMicroUSD int64, now time.Time) (budget.Reservation, error)
 	ReleaseReservation(ctx context.Context, reservationID string, reason string, now time.Time) (budget.Reservation, error)
 	ApplyBudgetExhausted(ctx context.Context, agent agents.Agent, policy budget.Policy, now time.Time) (agents.Agent, string, error)
 	SaveUsageEvent(ctx context.Context, event usage.Event) error
@@ -97,8 +105,12 @@ type EvidenceBuilder func(ctx context.Context, repo Repository, runID string, no
 type OnceOptions struct {
 	WorkItemID            string
 	LeaseID               string
+	LeaseTTL              time.Duration
 	Mode                  string
 	ConfirmWorkerDispatch bool
+	ArtifactsDir          string
+	RegistryRoot          string
+	SkillPolicy           skills.Policy
 	BudgetConfigLoader    BudgetConfigLoader
 	PricingLoader         PricingLoader
 	EvidenceBuilder       EvidenceBuilder

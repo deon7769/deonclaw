@@ -23,7 +23,11 @@ const (
 	ReservationCancelled  = "cancelled"
 	ReservationOverBudget = "over_budget"
 
-	WindowOpen = "open"
+	WindowStatusActive    = "active"
+	WindowStatusWarning   = "warning"
+	WindowStatusExhausted = "exhausted"
+
+	WindowOpen = "open" // legacy bootstrap default
 )
 
 type Policy struct {
@@ -64,6 +68,7 @@ type Reservation struct {
 	AgentID           string `json:"agent_id,omitempty"`
 	EstimatedMicroUSD int64  `json:"estimated_microusd"`
 	CommittedMicroUSD int64  `json:"committed_microusd"`
+	OverageMicroUSD   int64  `json:"overage_microusd,omitempty"`
 	Status            string `json:"status"`
 	CreatedAt         string `json:"created_at"`
 	UpdatedAt         string `json:"updated_at"`

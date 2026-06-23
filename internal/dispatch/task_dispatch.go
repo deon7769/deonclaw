@@ -32,9 +32,6 @@ func ValidateDispatchableWorkItem(item agents.WorkItem, leaseID string) error {
 	if strings.TrimSpace(item.AssignedAgentID) == "" {
 		return fmt.Errorf("work item %q has no assigned agent", item.ID)
 	}
-	if strings.TrimSpace(leaseID) == "" && item.Status == agents.WorkItemStatusLeased {
-		return fmt.Errorf("leased work item %q requires lease id", item.ID)
-	}
 	return nil
 }
 

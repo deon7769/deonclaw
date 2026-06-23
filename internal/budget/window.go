@@ -51,6 +51,28 @@ func CanReserve(window Window, policy Policy, requested int64) error {
 	return nil
 }
 
+func WindowStatusAfterCommit(window Window, policy Policy) string {
+	if window.HardLimitMicroUSD <= 0 {
+		return WindowStatusActive
+	}
+	if window.CommittedMicroUSD >= window.HardLimitMicroUSD {
+		return WindowStatusExhausted
+	}
+	if len(policy.WarningThresholdBasisPoints) > 0 {
+		usedBP := (window.CommittedMicroUSD * 10000) / window.HardLimitMicroUSD
+		maxThreshold := int64(0)
+		for _, threshold := range policy.WarningThresholdBasisPoints {
+			if int64(threshold) > maxThreshold {
+				maxThreshold = int64(threshold)
+			}
+		}
+		if usedBP >= maxThreshold {
+			return WindowStatusWarning
+		}
+	}
+	return WindowStatusActive
+}
+
 func ApplyOnExhausted(agent agents.Agent, policy Policy, now time.Time) (agents.Agent, string, error) {
 	switch policy.OnExhausted {
 	case OnExhaustedPauseAgent:

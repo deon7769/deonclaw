@@ -146,6 +146,32 @@ func (s *SQLiteStore) ModelPrice(ctx context.Context, id string) (usage.ModelPri
 	return price, nil
 }
 
+func saveUsageEventTx(ctx context.Context, tx *sql.Tx, event usage.Event) error {
+	if err := usage.ValidateEvent(event); err != nil {
+		return err
+	}
+	configJSON, _ := json.Marshal(map[string]any{})
+	_, err := tx.ExecContext(ctx, `INSERT INTO usage_events (
+		id, run_id, work_item_id, agent_id, session_id, worker, provider, model, model_profile,
+		input_tokens, output_tokens, cached_input_tokens, tool_call_count, duration_ms,
+		estimated_cost_microusd, actual_cost_microusd, source, confidence, tokens_available, created_at, config_json
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	ON CONFLICT(id) DO UPDATE SET
+		actual_cost_microusd = excluded.actual_cost_microusd,
+		estimated_cost_microusd = excluded.estimated_cost_microusd,
+		config_json = excluded.config_json`,
+		event.ID, event.RunID, event.WorkItemID, event.AgentID, event.SessionID,
+		event.Worker, event.Provider, event.Model, event.ModelProfile,
+		event.InputTokens, event.OutputTokens, event.CachedInputTokens, event.ToolCallCount, event.DurationMS,
+		event.EstimatedCostMicroUSD, event.ActualCostMicroUSD, event.Source, event.Confidence, boolToInt(event.TokensAvailable),
+		event.CreatedAt, string(configJSON),
+	)
+	if err != nil {
+		return fmt.Errorf("save usage event %q: %w", event.ID, err)
+	}
+	return nil
+}
+
 func (s *SQLiteStore) SaveUsageEvent(ctx context.Context, event usage.Event) error {
 	if err := usage.ValidateEvent(event); err != nil {
 		return err
@@ -160,8 +186,8 @@ func (s *SQLiteStore) SaveUsageEvent(ctx context.Context, event usage.Event) err
 		actual_cost_microusd = excluded.actual_cost_microusd,
 		estimated_cost_microusd = excluded.estimated_cost_microusd,
 		config_json = excluded.config_json`,
-		event.ID, event.RunID, nullIfEmpty(event.WorkItemID), nullIfEmpty(event.AgentID), nullIfEmpty(event.SessionID),
-		event.Worker, nullIfEmpty(event.Provider), nullIfEmpty(event.Model), nullIfEmpty(event.ModelProfile),
+		event.ID, event.RunID, event.WorkItemID, event.AgentID, event.SessionID,
+		event.Worker, event.Provider, event.Model, event.ModelProfile,
 		event.InputTokens, event.OutputTokens, event.CachedInputTokens, event.ToolCallCount, event.DurationMS,
 		event.EstimatedCostMicroUSD, event.ActualCostMicroUSD, event.Source, event.Confidence, boolToInt(event.TokensAvailable),
 		event.CreatedAt, string(configJSON),

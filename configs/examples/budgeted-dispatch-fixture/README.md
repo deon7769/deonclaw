@@ -1,13 +1,16 @@
 # Budgeted dispatch fixture
 
-CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`).
+CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`), including **23.19.1** hardening checks.
 
 ## What it validates
 
 - pricing/budget/work-template config validate + sync
-- work item materialization path inputs (task snapshot + queued work)
-- fake `work dispatch-once` success without `provider_call` or `network_call`
-- budget reservation/commit on successful fake run
+- work assign + inbox accept
+- fake `work dispatch-once` **auto-claims lease** (no `--lease` required)
+- mandatory budget reservation/commit before and after worker
+- skill snapshot materialization (empty registry OK)
+- evidence bundle artifact + insight review queue
+- `provider_call: false`, `network_call: false`
 
 ## Commands
 
@@ -21,7 +24,15 @@ deonctl budgets sync --config ../budgets.yaml --store <db>
 deonctl work-templates sync --config ../work-templates.yaml --store <db>
 deonctl agents sync --config ../agents.yaml --store <db> --workers-config ../workers.yaml
 
-deonctl work dispatch-once --store <db> --work-item <id> --lease <lease-id> --mode fake
+deonctl work dispatch-once \
+  --store <db> \
+  --work-item <id> \
+  --mode fake \
+  --artifacts-dir <tmpdir>/artifacts \
+  --registry-root <tmpdir>/skills-registry \
+  --skill-policy ../skill-policy.yaml
 ```
+
+`--mode real` is blocked in this sprint.
 
 See `scripts/budgeted-dispatch-fixture-smoke.sh` for the executable path.
