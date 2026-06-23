@@ -169,9 +169,31 @@ Usage:
   deonctl work claim --store <deonclaw.db> --agent <agent-id> [--work-item <id>] [--ttl-seconds <n>]
   deonctl work release --store <deonclaw.db> --lease <lease-id> [--reason <text>] [--requeue]
   deonctl work leases list --store <deonclaw.db>
+  deonctl work leases renew --store <deonclaw.db> --lease <lease-id> [--ttl-seconds <n>]
   deonctl work recover --store <deonclaw.db>
   deonctl work doctor --store <deonclaw.db>
-  deonctl runs report --store <path> [--by model_profile] [--worker <worker>] [--status succeeded|failed|policy_failed] [--since <RFC3339|YYYY-MM-DD>] [--output-format text|json]
+  deonctl work dispatch-once --store <deonclaw.db> --work-item <id> [--lease <lease-id>] [--mode fake|real] [--confirm-worker-dispatch]
+  deonctl pricing validate --config <model-prices.yaml>
+  deonctl pricing sync --config <model-prices.yaml> --store <deonclaw.db>
+  deonctl pricing list --store <deonclaw.db>
+  deonctl pricing show <model-profile-id> --store <deonclaw.db>
+  deonctl usage record --store <deonclaw.db> --input <usage.json>
+  deonctl usage show <usage-event-id> --store <deonclaw.db>
+  deonctl usage report --store <deonclaw.db> --by agent|worker|model_profile [--since <RFC3339|YYYY-MM-DD>]
+  deonctl budgets validate --config <budgets.yaml>
+  deonctl budgets sync --config <budgets.yaml> --store <deonclaw.db>
+  deonctl budgets status --store <deonclaw.db> [--agent <agent-id>]
+  deonctl budgets plan --config <budgets.yaml> [--agent <agent-id>]
+  deonctl budgets reserve --store <deonclaw.db> --work-item <id> --policy <policy-id> [--estimate-usd <n>]
+  deonctl budgets commit --store <deonclaw.db> --reservation <id> --usage <usage.json>
+  deonctl budgets release --store <deonclaw.db> --reservation <id> [--reason <text>]
+  deonctl budgets report --store <deonclaw.db> [--agent <agent-id>]
+  deonctl budgets override new --policy <policy-id> --output <approval.json> [--agent <id>] [--work-item <id>] [--reviewer <name>] [--reason <text>] [--requested-microusd <n>]
+  deonctl budgets override approve --store <deonclaw.db> --input <approval.json>
+  deonctl budgets override inspect <approval-id> --store <deonclaw.db>
+  deonctl work-templates validate --config <work-templates.yaml>
+  deonctl work-templates sync --config <work-templates.yaml> --store <deonclaw.db>
+  deonctl work-templates list --store <deonclaw.db>
   deonctl runs retrieval-report --store <path> [--run <run-id>] [--output-format text|json]
   deonctl retrieval context inspect --artifact <retrieval-context.json> [--output-format text|json]
   deonctl retrieval context materialize --retrieval-context <retrieval-context.json> --chunks <memory-index-chunks.jsonl> --output <materialized.json> --summary <materialized.md> --max-chars-per-chunk <n> --max-total-chars <n> --confirm-include-chunk-text
@@ -2416,6 +2438,215 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 			fmt.Fprint(stderr, usage)
 			return 2
 		}
+	case "pricing":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			configPath, err := parseConfigFlag(args[2:], "--config")
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runPricingValidate(configPath, stdout, stderr)
+		case "sync":
+			storePath, configPath, err := parseStoreConfigFlags(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runPricingSync(storePath, configPath, stdout, stderr)
+		case "list":
+			storePath, err := parseWorkStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runPricingList(storePath, stdout, stderr)
+		case "show":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			storePath, err := parseWorkStoreArg(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runPricingShow(storePath, args[2], stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "usage":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "record":
+			storePath, inputPath, err := parseStoreInputFlags(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runUsageRecord(storePath, inputPath, stdout, stderr)
+		case "show":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			storePath, err := parseWorkStoreArg(args[3:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runUsageShow(storePath, args[2], stdout, stderr)
+		case "report":
+			opts, err := parseUsageReportOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runUsageReport(opts.storePath, opts.groupBy, opts.since, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "budgets":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			configPath, err := parseConfigFlag(args[2:], "--config")
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsValidate(configPath, stdout, stderr)
+		case "sync":
+			storePath, configPath, err := parseStoreConfigFlags(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsSync(storePath, configPath, stdout, stderr)
+		case "status":
+			storePath, agentID, err := parseStoreAgentFlags(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsStatus(storePath, agentID, stdout, stderr)
+		case "plan":
+			configPath, agentID, err := parseConfigAgentFlags(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsPlan(configPath, agentID, stdout, stderr)
+		case "reserve":
+			opts, err := parseBudgetReserveOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsReserve(opts, stdout, stderr)
+		case "commit":
+			storePath, reservationID, usagePath, err := parseBudgetCommitOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsCommit(storePath, reservationID, usagePath, stdout, stderr)
+		case "release":
+			storePath, reservationID, reason, err := parseBudgetReleaseOptions(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsRelease(storePath, reservationID, reason, stdout, stderr)
+		case "report":
+			storePath, agentID, err := parseStoreAgentFlags(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runBudgetsReport(storePath, agentID, stdout, stderr)
+		case "override":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "new":
+				configPath, outputPath, rest, err := parseOverrideNewOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					return 2
+				}
+				return runBudgetsOverrideNew(configPath, outputPath, rest, stdout, stderr)
+			case "approve":
+				storePath, inputPath, err := parseStoreInputFlags(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					return 2
+				}
+				return runBudgetsOverrideApprove(storePath, inputPath, stdout, stderr)
+			case "inspect":
+				if len(args) < 4 {
+					fmt.Fprint(stderr, usage)
+					return 2
+				}
+				storePath, err := parseWorkStoreArg(args[4:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					return 2
+				}
+				return runBudgetsOverrideInspect(storePath, args[3], stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+	case "work-templates":
+		if len(args) < 2 {
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
+		switch args[1] {
+		case "validate":
+			configPath, err := parseConfigFlag(args[2:], "--config")
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkTemplatesValidate(configPath, stdout, stderr)
+		case "sync":
+			storePath, configPath, err := parseStoreConfigFlags(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkTemplatesSync(storePath, configPath, stdout, stderr)
+		case "list":
+			storePath, err := parseWorkStoreArg(args[2:])
+			if err != nil {
+				fmt.Fprintf(stderr, "error: %v\n", err)
+				return 2
+			}
+			return runWorkTemplatesList(storePath, stdout, stderr)
+		default:
+			fmt.Fprint(stderr, usage)
+			return 2
+		}
 	case "work":
 		if len(args) < 2 {
 			fmt.Fprint(stderr, usage)
@@ -2468,17 +2699,37 @@ func run(args []string, stdout io.Writer, stderr io.Writer) int {
 				return 2
 			}
 			return runWorkDoctor(storePath, stdout, stderr)
-		case "leases":
-			if len(args) < 3 || args[2] != "list" {
-				fmt.Fprint(stderr, usage)
-				return 2
-			}
-			storePath, err := parseWorkStoreArg(args[3:])
+		case "dispatch-once":
+			opts, err := parseWorkDispatchOnceOptions(args[2:])
 			if err != nil {
 				fmt.Fprintf(stderr, "error: %v\n", err)
 				return 2
 			}
-			return runWorkLeasesList(storePath, stdout, stderr)
+			return runWorkDispatchOnce(opts, stdout, stderr)
+		case "leases":
+			if len(args) < 3 {
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
+			switch args[2] {
+			case "list":
+				storePath, err := parseWorkStoreArg(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					return 2
+				}
+				return runWorkLeasesList(storePath, stdout, stderr)
+			case "renew":
+				opts, err := parseWorkLeaseRenewOptions(args[3:])
+				if err != nil {
+					fmt.Fprintf(stderr, "error: %v\n", err)
+					return 2
+				}
+				return runWorkLeaseRenew(opts, stdout, stderr)
+			default:
+				fmt.Fprint(stderr, usage)
+				return 2
+			}
 		default:
 			fmt.Fprint(stderr, usage)
 			return 2

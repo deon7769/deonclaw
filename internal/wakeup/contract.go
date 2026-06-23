@@ -12,6 +12,7 @@ const (
 	StatusCancelled = "cancelled"
 	StatusExpired   = "expired"
 	StatusLost      = "lost"
+	StatusEnqueued  = "enqueued"
 )
 
 type Wakeup struct {
@@ -23,6 +24,8 @@ type Wakeup struct {
 	IdempotencyKey string `json:"idempotency_key"`
 	Attempt        int    `json:"attempt"`
 	RunID          string `json:"run_id,omitempty"`
+	WorkItemID     string `json:"work_item_id,omitempty"`
+	TerminalRunID  string `json:"terminal_run_id,omitempty"`
 	CreatedAt      string `json:"created_at"`
 	ClaimedAt      string `json:"claimed_at,omitempty"`
 	FinishedAt     string `json:"finished_at,omitempty"`

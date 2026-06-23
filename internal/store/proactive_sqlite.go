@@ -142,7 +142,11 @@ func decodeSchedule(raw string) (schedule.Schedule, error) {
 }
 
 func (s *SQLiteStore) SaveWakeup(ctx context.Context, w wakeup.Wakeup) error {
-	data, err := json.Marshal(map[string]string{"skip_reason": w.SkipReason})
+	data, err := json.Marshal(map[string]string{
+		"skip_reason":     w.SkipReason,
+		"work_item_id":    w.WorkItemID,
+		"terminal_run_id": w.TerminalRunID,
+	})
 	if err != nil {
 		return err
 	}
@@ -247,6 +251,8 @@ func scanWakeup(scanner interface{ Scan(...any) error }) (wakeup.Wakeup, error) 
 	var extra map[string]string
 	_ = json.Unmarshal([]byte(configJSON), &extra)
 	w.SkipReason = extra["skip_reason"]
+	w.WorkItemID = extra["work_item_id"]
+	w.TerminalRunID = extra["terminal_run_id"]
 	return w, nil
 }
 
@@ -366,6 +372,16 @@ func (r ProactiveRepo) GetHeartbeatState(agentID string) (heartbeat.State, error
 
 func (r ProactiveRepo) SaveHeartbeatState(state heartbeat.State) error {
 	return r.Store.SaveHeartbeatState(r.Ctx, state)
+}
+
+func (r ProactiveRepo) MaterializeWorkFromWakeup(w wakeup.Wakeup, sched schedule.Schedule, now time.Time) (string, bool, error) {
+	result, err := r.Store.MaterializeWorkFromWakeup(r.Ctx, MaterializeWorkFromWakeupOptions{
+		Wakeup: w, Schedule: sched, Now: now,
+	})
+	if err != nil {
+		return "", false, err
+	}
+	return result.WorkItemID, result.Created, nil
 }
 
 func (s *SQLiteStore) SaveHookDefinitions(ctx context.Context, hooksJSON []byte, now time.Time) error {

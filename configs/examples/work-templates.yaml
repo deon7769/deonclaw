@@ -1,0 +1,9 @@
+work_templates:
+  backend-scheduled-task:
+    task_path: configs/examples/budgeted-dispatch-fixture/task-fake-success.yaml
+    assigned_agent_id: backend-engineer
+    priority: 50
+    max_attempts: 2
+    budget_policy: backend-monthly
+    assignment_mode: auto_accept
+    session_kind: task

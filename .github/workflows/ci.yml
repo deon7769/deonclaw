@@ -30,5 +30,11 @@ jobs:
       - name: Proactive runtime fixture smoke
         run: make proactive-runtime-smoke
 
+      - name: Work queue fixture smoke
+        run: make work-queue-smoke
+
+      - name: Budgeted dispatch fixture smoke
+        run: make budgeted-dispatch-smoke
+
       - name: Test
         run: go test ./...
