@@ -1,0 +1,24 @@
+budget_policies:
+  backend-monthly:
+    scope: agent
+    agent_id: backend-engineer
+    period: monthly
+    timezone: UTC
+    hard_limit_microusd: 50000000
+    warning_threshold_basis_points: [5000, 8000, 9500]
+    reserve_before_run: true
+    default_estimate_microusd: 250000
+    max_single_run_microusd: 3000000
+    on_exhausted: pause_agent
+    allow_operator_override: true
+  global-smoke:
+    scope: global
+    period: monthly
+    timezone: UTC
+    hard_limit_microusd: 100000000
+    warning_threshold_basis_points: [8000]
+    reserve_before_run: true
+    default_estimate_microusd: 100000
+    max_single_run_microusd: 1000000
+    on_exhausted: block_work
+    allow_operator_override: false

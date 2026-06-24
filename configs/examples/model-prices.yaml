@@ -1,0 +1,9 @@
+model_prices:
+  opencode-zai-glm-5-1:
+    provider: z-ai
+    model: glm-5.1
+    currency: USD
+    input_microusd_per_million: 200000
+    output_microusd_per_million: 800000
+    cached_input_microusd_per_million: 20000
+    effective_at: "2026-06-22"

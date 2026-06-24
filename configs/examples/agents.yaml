@@ -24,6 +24,7 @@ agents:
       role: engineer
       supervisor_id: engineering-manager
       default_worker: opencode
+      budget_policy: backend-monthly
       fallback_workers:
         - codex
       model_profile: opencode-zai-glm-5-1

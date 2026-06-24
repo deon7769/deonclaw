@@ -147,6 +147,11 @@ Implemented:
 - proactive runtime foundation (`daemon status`, `daemon doctor`, `daemon start`, `daemon stop`, `daemon run-once`, `schedules validate`, `schedules sync`, `schedules list`, `schedules due`, `heartbeat validate`, `heartbeat dry-run`, `hooks validate`, `hooks plan`), SQLite schema v3 for schedules/wakeups/heartbeat/daemon state; run-once materializes wakeups from persisted `NextDueAt` with catch-up/max-lateness semantics and atomic queued wakeup claims; heartbeat dry-run with `HEARTBEAT_OK` no-op; hooks plan-only; proactive runtime fixture smoke in CI (`scripts/proactive-runtime-fixture-smoke.sh`, `make proactive-runtime-smoke`); no `deonclawd` long-running process or worker dispatch yet
 - skill registry security hardening (`skills approve`, approval required before `skills enable`/active, snapshot hash/revision validation, workspace path containment on materialize)
 - delegation security hardening (component-aware path subset checks, manager-role privilege escalation guard)
+- work queue hardening and execution leases (`work list`, `work show`, `work claim`, `work release`, `work leases list|renew`, `work recover`, `work doctor`), SQLite schema v5 with `work_item_task_snapshots`, transactional inbox accept→queued, immutable task snapshots on assign, lease renew/recover, read-only doctor
+- normalized usage and model pricing ledger (`pricing validate/sync/list/show`, `usage record/show/report`, `internal/money`, `internal/usage`, `model_prices` + `usage_events` tables)
+- budget policies, windows, and atomic reservations (`budgets validate/sync/status/plan/reserve/commit/release/report`, `budgets override new|approve|inspect`, hard stops before worker start)
+- budgeted dispatch vertical slice (`work dispatch-once`, `work-templates validate/sync/list`, fake worker CI path, schedule→work materialization, insight_review queue, `make budgeted-dispatch-smoke`)
+- 23.19.1 dispatch hardening: auto-claim lease, mandatory budget policy, atomic usage+budget commit, lease/budget release on failure, evidence builder, insight review task snapshots, skill snapshot materialization, real mode explicitly blocked in CLI
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -154,11 +159,9 @@ Implemented:
 
 Not implemented yet:
 
-- `deonclawd` long-running daemon process and automatic worker dispatch from wakeups
-- Work queue, execution leases, budgets, usage events, and hard stops (Epic 23E)
-- OpenClaw migration inspect/plan/apply/shadow/cutover/rollback (Epic 23F)
-- Rich Git/browser/action contracts and future UI/API surfaces (Epic 23G)
+- `deonclawd` long-running daemon process and automatic real worker dispatch from wakeups
 - real fallback execution/retry
+- automatic skill apply from learning proposals without explicit approval (skill registry apply with approval is implemented; no auto-apply)
 - Codex Docker worker execution
 - MCP execution/manager; current MCP support is registry config/list/plan/doctor/risk/docker-plan plus local/Docker fake/test smoke, fake read-only tool-smoke, real read-only discovery, one-call real read-only call-smoke, explicit proposal approval workflow with execution bundle, passive context attachments, worker proposal lint/preflight only, and run-scoped proposal review queue without execution
 - memory index retrieval/LanceDB natural-language search or active search in runner
@@ -380,10 +383,9 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Current next sequence (Epic 23 — see [docs/EPIC_23_ROADMAP.md](docs/EPIC_23_ROADMAP.md)):
 
-1. Proactive runtime (`deond`, cron, heartbeat) (`23.12–23.15`)
-2. Work queue, leases, budgets (`23.16–23.19`)
-3. OpenClaw migration (`23.20–23.23`)
-4. Rich runtime actions (`23.24–23.27`)
+1. OpenClaw migration (`23.20–23.23`)
+2. Rich runtime actions (`23.24–23.27`)
+3. `deonclawd` long-running process with scheduled real dispatch
 
 Deferred after operational foundation: MCP execution manager, active LanceDB retrieval in runner, UI/dashboard.
 

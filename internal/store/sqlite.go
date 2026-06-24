@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/artifacts"
@@ -19,7 +20,7 @@ type SQLiteStore struct {
 	db *sql.DB
 }
 
-const currentSchemaVersion = 3
+const currentSchemaVersion = 5
 
 func OpenSQLite(path string) (*SQLiteStore, error) {
 	db, err := sql.Open("sqlite", path)
@@ -119,6 +120,27 @@ func (s *SQLiteStore) bootstrap(ctx context.Context) error {
 		return err
 	}
 	if err := s.bootstrapProactive(ctx); err != nil {
+		return err
+	}
+	if err := s.bootstrapWorkQueue(ctx); err != nil {
+		return err
+	}
+	if err := s.bootstrapTaskSnapshots(ctx); err != nil {
+		return err
+	}
+	if err := s.bootstrapModelPrices(ctx); err != nil {
+		return err
+	}
+	if err := s.bootstrapUsageEvents(ctx); err != nil {
+		return err
+	}
+	if err := s.bootstrapBudget(ctx); err != nil {
+		return err
+	}
+	if err := s.bootstrapWorkTemplates(ctx); err != nil {
+		return err
+	}
+	if err := s.ensureColumn(ctx, "runs", "metadata_json", "TEXT NOT NULL DEFAULT '{}'"); err != nil {
 		return err
 	}
 	if err := s.recordSchemaMigration(ctx, currentSchemaVersion); err != nil {
@@ -279,9 +301,13 @@ func (s *SQLiteStore) Task(ctx context.Context, id string) (*tasks.Task, error) 
 }
 
 func (s *SQLiteStore) SaveRun(ctx context.Context, run *runs.Run) error {
-	_, err := s.db.ExecContext(ctx, `INSERT INTO runs (
-		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, created_at, updated_at, finished_at
-	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	metaJSON, err := encodeDispatchMeta(run.DispatchMeta)
+	if err != nil {
+		return err
+	}
+	_, err = s.db.ExecContext(ctx, `INSERT INTO runs (
+		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, metadata_json, created_at, updated_at, finished_at
+	) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	ON CONFLICT(id) DO UPDATE SET
 		task_id = excluded.task_id,
 		status = excluded.status,
@@ -290,6 +316,7 @@ func (s *SQLiteStore) SaveRun(ctx context.Context, run *runs.Run) error {
 		agent_id = excluded.agent_id,
 		session_id = excluded.session_id,
 		work_item_id = excluded.work_item_id,
+		metadata_json = excluded.metadata_json,
 		created_at = excluded.created_at,
 		updated_at = excluded.updated_at,
 		finished_at = excluded.finished_at`,
@@ -301,6 +328,7 @@ func (s *SQLiteStore) SaveRun(ctx context.Context, run *runs.Run) error {
 		run.AgentID,
 		run.SessionID,
 		run.WorkItemID,
+		metaJSON,
 		formatTime(run.CreatedAt),
 		formatTime(run.UpdatedAt),
 		formatOptionalTime(run.FinishedAt),
@@ -313,7 +341,7 @@ func (s *SQLiteStore) SaveRun(ctx context.Context, run *runs.Run) error {
 
 func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 	row := s.db.QueryRowContext(ctx, `SELECT
-		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, created_at, updated_at, finished_at
+		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, metadata_json, created_at, updated_at, finished_at
 		FROM runs WHERE id = ?`, id)
 
 	var run runs.Run
@@ -321,6 +349,7 @@ func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 	var createdAt, updatedAt string
 	var finishedAt sql.NullString
 	var agentID, sessionID, workItemID sql.NullString
+	var metadataJSON string
 	err := row.Scan(
 		&run.ID,
 		&run.TaskID,
@@ -330,6 +359,7 @@ func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 		&agentID,
 		&sessionID,
 		&workItemID,
+		&metadataJSON,
 		&createdAt,
 		&updatedAt,
 		&finishedAt,
@@ -345,6 +375,9 @@ func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 	run.AgentID = agentID.String
 	run.SessionID = sessionID.String
 	run.WorkItemID = workItemID.String
+	if run.DispatchMeta, err = decodeDispatchMeta(metadataJSON); err != nil {
+		return nil, err
+	}
 	if run.CreatedAt, err = parseTime(createdAt); err != nil {
 		return nil, err
 	}
@@ -359,7 +392,7 @@ func (s *SQLiteStore) Run(ctx context.Context, id string) (*runs.Run, error) {
 
 func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT
-		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, created_at, updated_at, finished_at
+		id, task_id, status, worker, workspace_path, agent_id, session_id, work_item_id, metadata_json, created_at, updated_at, finished_at
 		FROM runs ORDER BY created_at, id`)
 	if err != nil {
 		return nil, fmt.Errorf("list runs: %w", err)
@@ -373,6 +406,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
 		var createdAt, updatedAt string
 		var finishedAt sql.NullString
 		var agentID, sessionID, workItemID sql.NullString
+		var metadataJSON string
 		if err := rows.Scan(
 			&run.ID,
 			&run.TaskID,
@@ -382,6 +416,7 @@ func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
 			&agentID,
 			&sessionID,
 			&workItemID,
+			&metadataJSON,
 			&createdAt,
 			&updatedAt,
 			&finishedAt,
@@ -392,6 +427,9 @@ func (s *SQLiteStore) ListRuns(ctx context.Context) ([]runs.Run, error) {
 		run.AgentID = agentID.String
 		run.SessionID = sessionID.String
 		run.WorkItemID = workItemID.String
+		if run.DispatchMeta, err = decodeDispatchMeta(metadataJSON); err != nil {
+			return nil, err
+		}
 		if run.CreatedAt, err = parseTime(createdAt); err != nil {
 			return nil, err
 		}
@@ -655,6 +693,25 @@ func decodeValidationCommands(data string, target *[]tasks.ValidationCommand) er
 		return fmt.Errorf("decode validation commands: %w", err)
 	}
 	return nil
+}
+
+func decodeDispatchMeta(data string) (runs.DispatchMeta, error) {
+	if strings.TrimSpace(data) == "" || data == "{}" {
+		return runs.DispatchMeta{}, nil
+	}
+	var meta runs.DispatchMeta
+	if err := json.Unmarshal([]byte(data), &meta); err != nil {
+		return runs.DispatchMeta{}, fmt.Errorf("decode dispatch metadata: %w", err)
+	}
+	return meta, nil
+}
+
+func encodeDispatchMeta(meta runs.DispatchMeta) (string, error) {
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return "", fmt.Errorf("encode dispatch metadata: %w", err)
+	}
+	return string(data), nil
 }
 
 func formatTime(value time.Time) string {

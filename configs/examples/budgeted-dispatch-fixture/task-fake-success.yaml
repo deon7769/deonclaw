@@ -1,0 +1,22 @@
+id: task-fake-success
+title: Budgeted dispatch fake success
+domain: general
+worker: codex
+goal: Exercise fake dispatch success path without provider calls.
+mode: read_only
+workspace:
+  strategy: local_repo
+  path: .
+memory:
+  scope: none
+allowed_paths: []
+forbidden_paths:
+  - mysecondbrain/**
+  - escalasoft_brain/**
+  - .env
+  - secrets/**
+expected_outputs:
+  - artifacts/summary.md
+  - artifacts/events.jsonl
+definition_of_done:
+  - dispatch completes in fake mode

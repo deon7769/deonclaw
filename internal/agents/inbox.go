@@ -54,6 +54,31 @@ func AssignWorkItem(opts AssignTaskOptions) (AssignTaskResult, error) {
 	return AssignTaskResult{WorkItem: workItem, InboxItem: item}, nil
 }
 
+func AcceptInboxAndQueueWork(inbox InboxItem, workItem WorkItem, now time.Time) (InboxItem, WorkItem, error) {
+	accepted, err := AcceptInboxItem(inbox, now)
+	if err != nil {
+		return InboxItem{}, WorkItem{}, err
+	}
+	if workItem.Status != WorkItemStatusAssigned && workItem.Status != WorkItemStatusQueued {
+		return InboxItem{}, WorkItem{}, fmt.Errorf("work item status %q cannot be queued from inbox accept", workItem.Status)
+	}
+	workItem.Status = WorkItemStatusQueued
+	workItem.UpdatedAt = accepted.UpdatedAt
+	return accepted, workItem, nil
+}
+
+func QueueWorkItemFromAutoAccept(workItem WorkItem, now time.Time) (WorkItem, error) {
+	if workItem.AssignmentMode != "auto_accept" {
+		return WorkItem{}, fmt.Errorf("work item assignment_mode %q is not auto_accept", workItem.AssignmentMode)
+	}
+	if now.IsZero() {
+		now = time.Now().UTC()
+	}
+	workItem.Status = WorkItemStatusQueued
+	workItem.UpdatedAt = now.Format(time.RFC3339Nano)
+	return workItem, nil
+}
+
 func AcceptInboxItem(item InboxItem, now time.Time) (InboxItem, error) {
 	if item.Status != InboxStatusPending && item.Status != InboxStatusDeferred {
 		return InboxItem{}, fmt.Errorf("inbox item status %q cannot be accepted", item.Status)

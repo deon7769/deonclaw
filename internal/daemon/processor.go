@@ -36,6 +36,7 @@ type Repository interface {
 	GetAgent(id string) (agents.Agent, error)
 	GetHeartbeatState(agentID string) (heartbeat.State, error)
 	SaveHeartbeatState(state heartbeat.State) error
+	MaterializeWorkFromWakeup(w wakeup.Wakeup, sched schedule.Schedule, now time.Time) (workItemID string, created bool, err error)
 }
 
 type RunOnceOptions struct {
@@ -261,10 +262,26 @@ func RunOnce(repo Repository, opts RunOnceOptions) (RunOnceResult, error) {
 		result.Processed++
 		result.Wakeups = append(result.Wakeups, w)
 	} else {
-		w, _ := wakeup.Finish(wakeup.FinishOptions{
-			Wakeup: running, Status: wakeup.StatusSucceeded, SkipReason: "dry-run: work item materialization only", Now: now,
-		})
-		_ = repo.SaveWakeup(w)
+		matID, _, err := repo.MaterializeWorkFromWakeup(running, sched, now)
+		if err != nil {
+			w, finishErr := wakeup.Finish(wakeup.FinishOptions{
+				Wakeup: running, Status: wakeup.StatusFailed, SkipReason: err.Error(), Now: now,
+			})
+			if finishErr != nil {
+				return result, finishErr
+			}
+			if saveErr := repo.SaveWakeup(w); saveErr != nil {
+				return result, saveErr
+			}
+			result.Skipped++
+			return result, nil
+		}
+		w := running
+		w.WorkItemID = matID
+		w.Status = wakeup.StatusEnqueued
+		if err := repo.SaveWakeup(w); err != nil {
+			return result, err
+		}
 		result.Processed++
 		result.Wakeups = append(result.Wakeups, w)
 	}

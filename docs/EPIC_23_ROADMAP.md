@@ -137,6 +137,16 @@ Add atomic checkout, leases, usage normalization, cost events, budget reservatio
 
 Detailed design: [BUDGETS_AND_COSTS.md](BUDGETS_AND_COSTS.md).
 
+**Status:** **operational** on `cursor/work-queue-leases-23-16` — 23.16.1 queue hardening (inbox→queued, task snapshots, lease renew, transactional release/recover, read-only doctor), 23.17 usage/pricing ledger, 23.18 atomic budget reservations, 23.19 budgeted fake dispatch + insight review queue. CI: `make work-queue-smoke`, `make budgeted-dispatch-smoke`. Real worker dispatch requires `--confirm-worker-dispatch` and is excluded from CI.
+
+| Task | State |
+|------|--------|
+| 23A insight kernel | foundation → **integrated** (reviewer queue, proposals) |
+| 23B skill registry | foundation → **integrated** (dispatch skill auto-loading) |
+| 23C persistent agents | **integrated** (queue dispatch linkage) |
+| 23D proactive runtime | foundation → **integrated** (schedule → work item) |
+| 23E budgeted dispatch | **operational** (fixture smoke green) |
+
 ### 23F — OpenClaw Migration (`23.20–23.23`)
 
 Provide inspect, plan, apply, verify, shadow, cutover, and rollback flows for OpenClaw agents, skills, memory, cron, heartbeat, and session metadata.

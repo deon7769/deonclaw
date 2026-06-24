@@ -175,6 +175,7 @@ Implemented:
 - persistent agents and sessions foundation (`agents validate`, `agents sync`, `agents list`, `agents show`, `agents pause`, `agents resume`, `agents terminate`, `agents sessions create/list/show`, `agents assign`, `agents inbox list/accept/defer`, `agents delegate propose`), SQLite-backed; no automatic run dispatch yet
 - proactive runtime foundation (`daemon status`, `daemon doctor`, `daemon start`, `daemon stop`, `daemon run-once`, `schedules validate`, `schedules sync`, `schedules list`, `schedules due`, `heartbeat validate`, `heartbeat dry-run`, `hooks validate`, `hooks plan`), SQLite schema v3; persisted `NextDueAt` due semantics, catch-up/max lateness, atomic wakeup claims; fixture smoke in CI (`make proactive-runtime-smoke`); no `deonclawd` or worker dispatch yet
 - skill approval gate (`skills approve`) and snapshot/registry validation before materialize; delegation path subset and manager privilege guard
+- work queue and execution leases (`deonctl work list/show/claim/release/recover/doctor`); schema v4; no budget enforcement or worker dispatch yet
 
 Not implemented yet:
 

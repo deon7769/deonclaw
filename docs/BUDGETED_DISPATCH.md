@@ -1,0 +1,63 @@
+# Budgeted dispatch
+
+Epic 23.16–23.19 connects work queue leases, atomic budget reservations, immutable task/session/skill snapshots, and fake worker dispatch. **23.19.1** hardened the integration path before merge.
+
+## Command
+
+```bash
+deonctl work dispatch-once \
+  --store <deonclaw.db> \
+  --work-item <work-item-id> \
+  --artifacts-dir <dir> \
+  --registry-root <dir> \
+  --skill-policy <skill-policy.yaml> \
+  [--lease <lease-id>] \
+  --mode fake \
+  [--confirm-worker-dispatch]
+```
+
+Default mode is `fake`. **`--mode real` is blocked** in this sprint (`real_dispatch_not_wired`). Real worker integration is deferred.
+
+`--lease` is optional for queued work: dispatch auto-claims exactly one lease atomically. Already-leased work without `--lease` returns `not_started` without starting a worker.
+
+## Ordering (23.19.1)
+
+1. Load queued work and validate agent/task snapshot
+2. **Acquire or validate active lease** (required before worker)
+3. **Require budget policy** (blocked with `budget_policy_required` if missing)
+4. Budget preflight and atomic reservation
+5. Resolve session and materialize skill snapshot into workspace
+6. Create run, bind lease, mark work running
+7. Start fake worker (never before lease + budget reservation)
+8. **Atomic budget commit + usage event** in one transaction
+9. Release lease, build evidence bundle, queue `insight_review` with task snapshot
+
+See [ADR_BUDGETED_DISPATCH_ORDERING.md](ADR_BUDGETED_DISPATCH_ORDERING.md).
+
+## Fake-only CI boundary
+
+| Boundary | CI / default |
+|---|---|
+| `provider_call` | false |
+| `network_call` | false |
+| `secret_values_read` | false |
+| `automatic_learning_apply` | false |
+| `real_worker_execution` | blocked |
+
+CI runs `make budgeted-dispatch-smoke` with fake workers only.
+
+## Micro-USD
+
+Authoritative costs use `amount_microusd` integers. Budget commit records `overage_microusd` when actual exceeds estimate; window status may move to `warning` or `exhausted` without failing the commit of cost already incurred.
+
+## Learning loop
+
+Dispatch creates evidence under `--artifacts-dir`, then queues `insight_review` work with parent run/evidence refs and a read-only task snapshot. Recursive `insight_review` is blocked. Skill/memory apply never runs automatically.
+
+## Fixture
+
+```bash
+make budgeted-dispatch-smoke
+```
+
+Config tree: `configs/examples/budgeted-dispatch-fixture/`.
