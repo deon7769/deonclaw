@@ -55,6 +55,24 @@ echo "$DISPATCH_JSON" | grep -q '"evidence_bundle_created": true' || { echo "evi
 echo "$DISPATCH_JSON" | grep -q '"review_work_queued": true' || { echo "review not queued" >&2; exit 1; }
 echo "$DISPATCH_JSON" | grep -q '"provider_call": false' || { echo "provider_call not false" >&2; exit 1; }
 
+REVIEW_WORK="$(echo "$DISPATCH_JSON" | sed -n 's/.*"work_item_id": "\(work_insight_[^"]*\)".*/\1/p' | head -1)"
+if [[ -z "$REVIEW_WORK" ]]; then
+  echo "review work item id not found in dispatch output" >&2
+  exit 1
+fi
+
+echo "==> dispatch insight review work (fake)"
+REVIEW_JSON="$("$CLI" work dispatch-once \
+  --store "$DB" \
+  --work-item "$REVIEW_WORK" \
+  --mode fake \
+  --artifacts-dir "$ARTIFACTS/review" \
+  --registry-root "$REGISTRY" \
+  --skill-policy "$SKILL_POLICY")"
+echo "$REVIEW_JSON"
+echo "$REVIEW_JSON" | grep -q '"status": "ok"' || { echo "review dispatch status not ok" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"worker_started": true' || { echo "review worker not started" >&2; exit 1; }
+
 echo "==> package tests"
 go test ./internal/dispatch -run 'TestDispatchOnce' -count=1
 

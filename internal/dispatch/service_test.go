@@ -264,6 +264,152 @@ func TestDispatchOnceNoBudgetPolicyBlocks(t *testing.T) {
 	if result.Status != "blocked" || result.BlockedReason != BlockedBudgetPolicyRequired || called {
 		t.Fatalf("got %+v called=%v", result, called)
 	}
+	if !result.LeaseReleased {
+		t.Fatalf("expected lease released on budget policy block, got %+v", result)
+	}
+}
+
+func TestDispatchOnceInvalidLeaseFails(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "bad-lease.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "agent-a", DisplayName: "A", Role: "engineer", DefaultWorker: "codex",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "p1", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly, Timezone: "UTC",
+		HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000, MaxSingleRunMicroUSD: 3_000_000,
+		ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-lease-invalid", Title: "Invalid lease", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	called := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		return FakeWorkerRun(ctx, opts)
+	})
+	_, err = Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, item, "lease_missing", runner))
+	if err == nil {
+		t.Fatal("expected invalid lease error")
+	}
+	if called {
+		t.Fatal("worker must not run with invalid lease")
+	}
+}
+
+func TestDispatchOnceLeaseWrongWorkItemFails(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "wrong-lease.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "agent-a", DisplayName: "A", Role: "engineer", DefaultWorker: "codex",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "p1", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly, Timezone: "UTC",
+		HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000, MaxSingleRunMicroUSD: 3_000_000,
+		ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	taskA := tasks.Task{
+		ID: "task-a", Title: "A", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	taskB := tasks.Task{
+		ID: "task-b", Title: "B", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	itemA := seedQueuedWork(t, db, agent, policy.ID, taskA)
+	itemB := seedQueuedWork(t, db, agent, policy.ID, taskB)
+	claim, err := db.ClaimWorkItem(ctx, agent.ID, itemA.ID, 15*time.Minute, now)
+	if err != nil || !claim.Claimed {
+		t.Fatalf("ClaimWorkItem() = %+v err=%v", claim, err)
+	}
+	called := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		return FakeWorkerRun(ctx, opts)
+	})
+	_, err = Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, itemB, claim.Lease.ID, runner))
+	if err == nil {
+		t.Fatal("expected lease/work item mismatch error")
+	}
+	if called {
+		t.Fatal("worker must not run with lease for another work item")
+	}
+}
+
+func TestDispatchOnceInsightReviewFakeDispatch(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "review.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "backend-engineer", DisplayName: "Backend", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "backend-monthly", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-fake-success", Title: "Parent", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	parent, err := Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, item, "", NewFakeWorkerRunner()))
+	if err != nil || parent.Status != "ok" || parent.InsightReview == nil {
+		t.Fatalf("parent dispatch = %+v err=%v", parent, err)
+	}
+	reviewID := parent.InsightReview.WorkItemID
+	snapshot, err := db.WorkItemTaskSnapshot(ctx, reviewID)
+	if err != nil {
+		t.Fatalf("review task snapshot missing: %v", err)
+	}
+	if snapshot.WorkItemID != reviewID {
+		t.Fatalf("snapshot work item = %q, want %q", snapshot.WorkItemID, reviewID)
+	}
+	reviewItem, err := db.WorkItem(ctx, reviewID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reviewItem.Kind != agents.WorkItemKindInsightReview {
+		t.Fatalf("review kind = %q", reviewItem.Kind)
+	}
+	reviewResult, err := Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, reviewItem, "", NewFakeWorkerRunner()))
+	if err != nil {
+		t.Fatalf("review dispatch error = %v", err)
+	}
+	if reviewResult.Status != "ok" || !reviewResult.WorkerStarted {
+		t.Fatalf("review dispatch = %+v", reviewResult)
+	}
 }
 
 func TestDispatchRunnerErrorReleasesLease(t *testing.T) {
