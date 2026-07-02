@@ -29,6 +29,7 @@ type workDispatchOnceOptions struct {
 	learningApprovalDecision string
 	learningApprovalReason   string
 	learningApprovalReviewer string
+	learningConfirmApply     bool
 }
 
 func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr io.Writer) int {
@@ -91,6 +92,7 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 		LearningApprovalDecision: opts.learningApprovalDecision,
 		LearningApprovalReason:   opts.learningApprovalReason,
 		LearningApprovalReviewer: opts.learningApprovalReviewer,
+		LearningConfirmApply:     opts.learningConfirmApply,
 		EvidenceBuilder:          dispatch.NewEvidenceBuilder(artifactsDir),
 		CodexRunner:              dispatch.NewFakeWorkerRunner(),
 		OpenCodeRunner:           dispatch.NewFakeWorkerRunner(),
@@ -272,6 +274,7 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 	learningApprovalDecision, approvalDecisionProvided := parseOptionalFlag(args, "--learning-approval-decision")
 	learningApprovalReason, approvalReasonProvided := parseOptionalFlag(args, "--learning-approval-reason")
 	learningApprovalReviewer, approvalReviewerProvided := parseOptionalFlag(args, "--learning-approval-reviewer")
+	_, learningConfirmApply := parseOptionalFlag(args, "--learning-confirm-apply")
 	if approvalDecisionProvided && strings.TrimSpace(learningApprovalDecision) == "" {
 		return workDispatchOnceOptions{}, fmt.Errorf("missing value for --learning-approval-decision")
 	}
@@ -284,6 +287,9 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 	if (strings.TrimSpace(learningApprovalDecision) == "") != (strings.TrimSpace(learningApprovalReason) == "") {
 		return workDispatchOnceOptions{}, fmt.Errorf("--learning-approval-decision and --learning-approval-reason are both required")
 	}
+	if learningConfirmApply && (strings.TrimSpace(learningApprovalDecision) == "" || strings.TrimSpace(learningApprovalReason) == "") {
+		return workDispatchOnceOptions{}, fmt.Errorf("--learning-confirm-apply requires --learning-approval-decision and --learning-approval-reason")
+	}
 	return workDispatchOnceOptions{
 		storePath: storePath, workItemID: workItemID, leaseID: leaseID, mode: mode,
 		confirmWorkerDispatch: confirm, artifactsDir: artifactsDir, registryRoot: registryRoot,
@@ -292,6 +298,7 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 		learningApprovalDecision: learningApprovalDecision,
 		learningApprovalReason:   learningApprovalReason,
 		learningApprovalReviewer: learningApprovalReviewer,
+		learningConfirmApply:     learningConfirmApply,
 	}, nil
 }
 

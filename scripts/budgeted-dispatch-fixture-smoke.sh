@@ -74,8 +74,9 @@ REVIEW_JSON="$("$CLI" work dispatch-once \
   --insight-policy "$INSIGHT_POLICY" \
   --reviewer-response "$REVIEWER_RESPONSE" \
   --learning-approval-decision approved \
-  --learning-approval-reason "Operator approved 23.21 fixture proposal." \
-  --learning-approval-reviewer opencode)"
+  --learning-approval-reason "Operator approved 23.22 fixture proposal." \
+  --learning-approval-reviewer opencode \
+  --learning-confirm-apply)"
 echo "$REVIEW_JSON"
 echo "$REVIEW_JSON" | grep -q '"status": "ok"' || { echo "review dispatch status not ok" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"worker_started": true' || { echo "review worker not started" >&2; exit 1; }
@@ -83,16 +84,27 @@ echo "$REVIEW_JSON" | grep -q '"learning_loop": {' || { echo "learning loop resu
 echo "$REVIEW_JSON" | grep -q '"materialized": true' || { echo "learning loop not materialized" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"proposal_count": 1' || { echo "learning proposal not materialized" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"approval_count": 1' || { echo "learning approval not materialized" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"apply_count": 1' || { echo "learning apply not materialized" >&2; exit 1; }
 APPROVAL_REVIEWER="$(REVIEW_JSON="$REVIEW_JSON" python3 - <<'PY'
 import json
 import os
 from pathlib import Path
 
 doc = json.loads(os.environ["REVIEW_JSON"])
-paths = doc.get("learning_loop", {}).get("approval_paths", [])
-if len(paths) != 1:
+loop = doc.get("learning_loop", {})
+approval_paths = loop.get("approval_paths", [])
+apply_result_paths = loop.get("apply_result_paths", [])
+apply_preview_paths = loop.get("apply_preview_paths", [])
+if len(approval_paths) != 1:
     raise SystemExit("approval path missing")
-approval = json.loads(Path(paths[0]).read_text())
+if len(apply_result_paths) != 1 or len(apply_preview_paths) != 1:
+    raise SystemExit("apply paths missing")
+approval = json.loads(Path(approval_paths[0]).read_text())
+apply_result = json.loads(Path(apply_result_paths[0]).read_text())
+if not apply_result.get("executed"):
+    raise SystemExit("apply result not executed")
+if apply_result.get("applied_artifact") != apply_preview_paths[0]:
+    raise SystemExit("apply preview path mismatch")
 print(approval.get("reviewer", ""))
 PY
 )"
