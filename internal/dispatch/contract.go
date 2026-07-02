@@ -18,8 +18,10 @@ const (
 	ModeFake = "fake"
 	ModeReal = "real"
 
-	BlockedBudgetPolicyRequired = "budget_policy_required"
-	BlockedRealModeUnsupported  = "real_dispatch_not_wired"
+	BlockedBudgetPolicyRequired         = "budget_policy_required"
+	BlockedRealModeUnsupported          = "real_dispatch_not_wired"
+	BlockedRealModeConfirmationRequired = "real_dispatch_requires_confirmation"
+	BlockedRealModeCI                   = "real_dispatch_blocked_in_ci"
 
 	StepValidateOptions      = "01_validate_options"
 	StepLoadWorkItem         = "02_load_work_item"
@@ -108,6 +110,7 @@ type OnceOptions struct {
 	LeaseTTL                 time.Duration
 	Mode                     string
 	ConfirmWorkerDispatch    bool
+	RunningInCI              bool
 	ArtifactsDir             string
 	RegistryRoot             string
 	SkillPolicy              skills.Policy

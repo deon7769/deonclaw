@@ -13,6 +13,8 @@ import (
 	"github.com/deon7769/deonclaw/internal/dispatch"
 	"github.com/deon7769/deonclaw/internal/insights"
 	"github.com/deon7769/deonclaw/internal/store"
+	workercodex "github.com/deon7769/deonclaw/internal/workers/codex"
+	workeropencode "github.com/deon7769/deonclaw/internal/workers/opencode"
 )
 
 type workDispatchOnceOptions struct {
@@ -78,12 +80,19 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 		fmt.Fprintf(stderr, "work dispatch-once failed: --insight-policy is required with --reviewer-response\n")
 		return 1
 	}
+	codexRunner := dispatch.NewFakeWorkerRunner()
+	openCodeRunner := dispatch.NewFakeWorkerRunner()
+	if mode == dispatch.ModeReal {
+		codexRunner = dispatch.NewExternalWorkerRunner(workercodex.New())
+		openCodeRunner = dispatch.NewExternalWorkerRunner(workeropencode.New())
+	}
 	svc := dispatch.Service{Repo: db}
 	result, err := svc.DispatchOnce(context.Background(), dispatch.OnceOptions{
 		WorkItemID:               opts.workItemID,
 		LeaseID:                  opts.leaseID,
 		Mode:                     mode,
 		ConfirmWorkerDispatch:    opts.confirmWorkerDispatch,
+		RunningInCI:              dispatchRunningInCI(),
 		ArtifactsDir:             artifactsDir,
 		RegistryRoot:             registryRoot,
 		SkillPolicy:              skillPolicy,
@@ -94,8 +103,8 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 		LearningApprovalReviewer: opts.learningApprovalReviewer,
 		LearningConfirmApply:     opts.learningConfirmApply,
 		EvidenceBuilder:          dispatch.NewEvidenceBuilder(artifactsDir),
-		CodexRunner:              dispatch.NewFakeWorkerRunner(),
-		OpenCodeRunner:           dispatch.NewFakeWorkerRunner(),
+		CodexRunner:              codexRunner,
+		OpenCodeRunner:           openCodeRunner,
 		PricingLoader:            dispatch.DefaultPricingLoader,
 		Now:                      time.Now().UTC(),
 	})
@@ -110,6 +119,15 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 		return 1
 	}
 	return 0
+}
+
+func dispatchRunningInCI() bool {
+	return envFlagEnabled("CI") || envFlagEnabled("GITHUB_ACTIONS")
+}
+
+func envFlagEnabled(name string) bool {
+	value := strings.ToLower(strings.TrimSpace(os.Getenv(name)))
+	return value != "" && value != "0" && value != "false" && value != "no"
 }
 
 type usageReportOptions struct {

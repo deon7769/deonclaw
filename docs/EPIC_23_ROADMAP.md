@@ -136,7 +136,7 @@ Add atomic checkout, leases, usage normalization, cost events, budget reservatio
 
 Detailed design: [BUDGETS_AND_COSTS.md](BUDGETS_AND_COSTS.md), [BUDGETED_DISPATCH.md](BUDGETED_DISPATCH.md).
 
-**Status:** **merged and operational on `main`** (PR #9) — 23.16.1 queue hardening (inbox→queued, task snapshots, lease renew, transactional release/recover, read-only doctor), 23.17 usage/pricing ledger, 23.18 atomic budget reservations, 23.19 budgeted fake dispatch + insight review queue, 23.19.1 dispatch hardening (auto-claim lease, mandatory budget policy, atomic usage+budget commit, skill snapshot materialization). CI: `make work-queue-smoke`, `make budgeted-dispatch-smoke`. `ModeReal` and `--confirm-worker-dispatch` are excluded from CI until `23.24–23.27`.
+**Status:** **merged and operational on `main`** (PR #9) — 23.16.1 queue hardening (inbox→queued, task snapshots, lease renew, transactional release/recover, read-only doctor), 23.17 usage/pricing ledger, 23.18 atomic budget reservations, 23.19 budgeted fake dispatch + insight review queue, 23.19.1 dispatch hardening (auto-claim lease, mandatory budget policy, atomic usage+budget commit, skill snapshot materialization). CI: `make work-queue-smoke`, `make budgeted-dispatch-smoke`. `ModeReal` remains blocked in CI while `23.24–23.27` hardens manual real dispatch.
 
 | Task | State |
 |------|--------|
@@ -163,6 +163,8 @@ Detailed design: [INSIGHT_LEARNING_LOOP.md](INSIGHT_LEARNING_LOOP.md).
 #### 23.24–23.27 — Real Codex/OpenCode Dispatch Adapter
 
 Wire `dispatch.ModeReal` to existing Codex/OpenCode runners behind lease, budget, task snapshot, and skill snapshot gates. Require `--confirm-worker-dispatch`; block real mode in CI. Preserve path policy, artifacts, validation commands, memory policy, lease renewal on long runs, usage capture (with estimate fallback), and basic cancellation/timeout.
+
+**Status:** **23.24 foundation implemented** — `ModeReal` no longer stops before operational gates. Without `--confirm-worker-dispatch`, dispatch returns a blocked `real_dispatch_requires_confirmation` result without starting a worker. In `CI`/`GITHUB_ACTIONS`, it returns `real_dispatch_blocked_in_ci` even with confirmation. Outside CI, manual dispatch reaches Codex/OpenCode worker adapters only after lease, budget reservation, task snapshot validation, and skill snapshot materialization. Fixture smokes remain fake-only; richer real-run artifact/event persistence, lease renewal for long runs, and cancellation/timeout hardening remain in `23.25–23.27`.
 
 #### 23.28–23.31 — `deonclawd` Long-Running Runtime
 
@@ -213,7 +215,7 @@ Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md) (original 23
 
 23.24–23.27 Real Dispatch Adapter
   ├── requires 23E + closed learning loop fixture path
-  └── required before deonclawd automatic dispatch
+  └── 23.24 manual confirmed adapter foundation done; artifact/event persistence, lease renewal, cancellation still next
 
 23.28–23.31 deonclawd
   ├── requires real dispatch adapter

@@ -151,8 +151,9 @@ Implemented:
 - normalized usage and model pricing ledger (`pricing validate/sync/list/show`, `usage record/show/report`, `internal/money`, `internal/usage`, `model_prices` + `usage_events` tables)
 - budget policies, windows, and atomic reservations (`budgets validate/sync/status/plan/reserve/commit/release/report`, `budgets override new|approve|inspect`, hard stops before worker start)
 - budgeted dispatch vertical slice (`work dispatch-once`, `work-templates validate/sync/list`, fake worker CI path, schedule→work materialization, insight_review queue, `make budgeted-dispatch-smoke`)
-- 23.19.1 dispatch hardening: auto-claim lease, mandatory budget policy, atomic usage+budget commit, lease/budget release on failure, evidence builder, insight review task snapshots, skill snapshot materialization, real mode explicitly blocked in CLI
+- 23.19.1 dispatch hardening: auto-claim lease, mandatory budget policy, atomic usage+budget commit, lease/budget release on failure, evidence builder, insight review task snapshots, skill snapshot materialization
 - 23.20-23.23 closed-learning-loop fixture legs: fake `insight_review` dispatch materializes `InsightReport`, `LearningProposal`, explicit `LearningProposalApproval`, governed apply preview/result, effectiveness bundle, and planned session-refresh snapshot artifacts from reviewer/approval/apply fixtures and insight policy; real skill registry apply remains gated
+- 23.24 real dispatch adapter foundation: manual `work dispatch-once --mode real --confirm-worker-dispatch` reaches Codex/OpenCode worker adapters only after lease, budget, task snapshot and skill snapshot gates; CI smokes remain fake-only and richer real-run artifact/event persistence is still next
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

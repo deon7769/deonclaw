@@ -67,7 +67,9 @@ Implemented vertical slices include:
 
 **23.20–23.23:** closed-learning-loop fixture path — dispatch evidence → `insight_review` → reviewer fixture → `InsightReport` + `LearningProposal` artifacts, governed `LearningProposalApproval`, explicit apply preview/result artifacts, automatic effectiveness records, and a planned session-refresh snapshot when approval and `--learning-confirm-apply` are supplied.
 
-**Next:** real Codex/OpenCode dispatch adapter (`23.24–23.27`) behind lease, budget, task snapshot and skill snapshot gates. Real skill registry apply from learning proposals remains gated behind a later explicit integration. See [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md).
+**23.24 in progress:** manual `work dispatch-once --mode real --confirm-worker-dispatch` now reaches Codex/OpenCode runner adapters only after lease, budget, task snapshot and skill snapshot gates. CI remains fake-only; richer real-run artifact/event persistence, lease renewal and cancellation hardening continue in `23.25–23.27`.
+
+**Next:** continue real Codex/OpenCode dispatch hardening (`23.25–23.27`). Real skill registry apply from learning proposals remains gated behind a later explicit integration. See [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md).
 
 ## What is deliberately not active yet
 

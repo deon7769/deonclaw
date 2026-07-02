@@ -43,10 +43,13 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 	base.Mode = mode
 	steps = append(steps, StepValidateOptions)
 
-	if mode == ModeReal {
-		steps = append(steps, StepExecuteWorker)
-		result := NewBlockedResult(opts, steps, BlockedRealModeUnsupported, "real dispatch adapter not wired in this sprint")
-		return result, fmt.Errorf("%s", BlockedRealModeUnsupported)
+	if mode == ModeReal && !opts.ConfirmWorkerDispatch {
+		result := NewBlockedResult(opts, steps, BlockedRealModeConfirmationRequired, "real dispatch requires --confirm-worker-dispatch")
+		return result, nil
+	}
+	if mode == ModeReal && opts.RunningInCI {
+		result := NewBlockedResult(opts, steps, BlockedRealModeCI, "real dispatch is blocked in CI")
+		return result, nil
 	}
 
 	workItem, err := s.Repo.WorkItem(ctx, opts.WorkItemID)
@@ -412,6 +415,10 @@ func (s Service) failDispatch(ctx context.Context, opts OnceOptions, steps []str
 	result.LeaseReleased = leaseReleased
 	result.BudgetReleased = budgetReleased
 	result.DispatchStarted = workerStarted
+	if workerStarted && opts.Mode == ModeReal {
+		result.ProviderCall = true
+		result.NetworkCall = true
+	}
 	return result, err
 }
 

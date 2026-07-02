@@ -12,11 +12,11 @@ deonctl work dispatch-once \
   --registry-root <dir> \
   --skill-policy <skill-policy.yaml> \
   [--lease <lease-id>] \
-  --mode fake \
+  --mode fake|real \
   [--confirm-worker-dispatch]
 ```
 
-Default mode is `fake`. **`--mode real` is blocked** in this sprint (`real_dispatch_not_wired`). Real worker integration is deferred.
+Default mode is `fake`. `--mode real` requires `--confirm-worker-dispatch`; without it dispatch returns `blocked` with `real_dispatch_requires_confirmation` and does not load/start a worker. CI and fixture smokes remain fake-only.
 
 `--lease` is optional for queued work: dispatch auto-claims exactly one lease atomically. Already-leased work without `--lease` returns `not_started` without starting a worker.
 
@@ -28,7 +28,7 @@ Default mode is `fake`. **`--mode real` is blocked** in this sprint (`real_dispa
 4. Budget preflight and atomic reservation
 5. Resolve session and materialize skill snapshot into workspace
 6. Create run, bind lease, mark work running
-7. Start fake worker (never before lease + budget reservation)
+7. Start worker (fake by default; real only with explicit confirmation, never before lease + budget reservation)
 8. **Atomic budget commit + usage event** in one transaction
 9. Release lease, build evidence bundle, queue `insight_review` with task snapshot
 
@@ -42,7 +42,7 @@ See [ADR_BUDGETED_DISPATCH_ORDERING.md](ADR_BUDGETED_DISPATCH_ORDERING.md).
 | `network_call` | false |
 | `secret_values_read` | false |
 | `automatic_learning_apply` | false |
-| `real_worker_execution` | blocked |
+| `real_worker_execution` | manual only with `--mode real --confirm-worker-dispatch`; blocked in `CI`/`GITHUB_ACTIONS` with `real_dispatch_blocked_in_ci` |
 
 CI runs `make budgeted-dispatch-smoke` with fake workers only.
 

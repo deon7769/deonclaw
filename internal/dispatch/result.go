@@ -41,6 +41,7 @@ type OnceResult struct {
 }
 
 func NewSuccessResult(opts OnceOptions, steps []string, runID string, status runs.RunStatus, meta SuccessMeta) OnceResult {
+	realDispatch := opts.Mode == ModeReal
 	return OnceResult{
 		Status:                "ok",
 		RunID:                 runID,
@@ -64,8 +65,8 @@ func NewSuccessResult(opts OnceOptions, steps []string, runID string, status run
 		ReviewWorkQueued:      meta.ReviewWorkQueued,
 		StepsCompleted:        steps,
 		RunStatus:             status,
-		ProviderCall:          false,
-		NetworkCall:           false,
+		ProviderCall:          realDispatch,
+		NetworkCall:           realDispatch,
 		SecretValuesRead:      false,
 	}
 }

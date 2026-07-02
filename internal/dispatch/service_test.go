@@ -218,7 +218,7 @@ func TestDispatchOnceAutoClaimAlreadyLeased(t *testing.T) {
 	}
 }
 
-func TestDispatchOnceRealModeBlocked(t *testing.T) {
+func TestDispatchOnceRealModeRequiresConfirmation(t *testing.T) {
 	ctx := context.Background()
 	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real.db"))
 	if err != nil {
@@ -227,13 +227,90 @@ func TestDispatchOnceRealModeBlocked(t *testing.T) {
 	defer db.Close()
 	opts := testDispatchOpts(db, t, agents.WorkItem{ID: "work_x"}, "", NewFakeWorkerRunner())
 	opts.Mode = ModeReal
-	opts.ConfirmWorkerDispatch = true
+	opts.ConfirmWorkerDispatch = false
 	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
-	if err == nil {
-		t.Fatal("expected real mode error")
+	if err != nil {
+		t.Fatalf("real mode without confirmation should return blocked result without error: %v", err)
 	}
-	if result.Status != "blocked" || result.WorkerStarted {
+	if result.Status != "blocked" || result.BlockedReason != BlockedRealModeConfirmationRequired || result.WorkerStarted {
 		t.Fatalf("got %+v", result)
+	}
+}
+
+func TestDispatchOnceRealModeBlockedInCI(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-ci.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	called := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		return FakeWorkerRun(ctx, opts)
+	})
+	opts := testDispatchOpts(db, t, agents.WorkItem{ID: "work_ci"}, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RunningInCI = true
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real mode in CI should return blocked result without error: %v", err)
+	}
+	if result.Status != "blocked" || result.BlockedReason != BlockedRealModeCI || result.WorkerStarted || called {
+		t.Fatalf("got %+v called=%v", result, called)
+	}
+}
+
+func TestDispatchOnceRealModeWithConfirmationUsesConfiguredRunner(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-confirmed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "real-agent", DisplayName: "Real", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "real-budget", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-real-success", Title: "Real success", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	called := false
+	var captured WorkerRunOptions
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		captured = opts
+		return FakeWorkerRun(ctx, opts)
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	if result.Status != "ok" || result.Mode != ModeReal || !result.WorkerStarted || !result.BudgetCommitted || !result.SkillSnapshotApplied {
+		t.Fatalf("real dispatch result = %+v", result)
+	}
+	if !result.ProviderCall || !result.NetworkCall {
+		t.Fatalf("real dispatch should expose provider/network call boundary: %+v", result)
+	}
+	if !called || captured.Mode != ModeReal || !captured.ConfirmReal || captured.TaskID != task.ID || captured.Worker != "codex" {
+		t.Fatalf("runner called=%v captured=%+v", called, captured)
 	}
 }
 
