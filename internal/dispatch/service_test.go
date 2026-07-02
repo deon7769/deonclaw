@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -24,6 +25,7 @@ func testDispatchOpts(db *testStoreAdapter, t *testing.T, item agents.WorkItem, 
 			return insights.EvidenceBundle{
 				EvidenceBundleID: "evb_test_" + runID,
 				SHA256:           "sha256-test",
+				Trigger:          insights.TriggerRunCompleted,
 				RunIDs:           []string{runID},
 			}, nil
 		},
@@ -409,6 +411,79 @@ func TestDispatchOnceInsightReviewFakeDispatch(t *testing.T) {
 	}
 	if reviewResult.Status != "ok" || !reviewResult.WorkerStarted {
 		t.Fatalf("review dispatch = %+v", reviewResult)
+	}
+	if reviewResult.LearningLoop != nil && reviewResult.LearningLoop.Materialized {
+		t.Fatalf("review without reviewer response should not materialize learning loop: %+v", reviewResult.LearningLoop)
+	}
+}
+
+func TestDispatchOnceInsightReviewMaterializesReportAndProposals(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "review-loop.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "backend-engineer", DisplayName: "Backend", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "backend-monthly", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-fake-success", Title: "Parent", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	parent, err := Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, item, "", NewFakeWorkerRunner()))
+	if err != nil || parent.Status != "ok" || parent.InsightReview == nil || parent.EvidenceBundle == nil {
+		t.Fatalf("parent dispatch = %+v err=%v", parent, err)
+	}
+	reviewItem, err := db.WorkItem(ctx, parent.InsightReview.WorkItemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(reviewItem.EvidencePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := insights.WriteEvidenceJSON(*parent.EvidenceBundle, reviewItem.EvidencePath); err != nil {
+		t.Fatal(err)
+	}
+	responsePath := filepath.Join(t.TempDir(), "reviewer-response.json")
+	if err := os.WriteFile(responsePath, []byte(`{"observations":["reviewed evidence"],"what_worked":["evidence exists"],"what_failed":[],"reusable_lessons":["keep evidence-linked proposals"],"uncertainties":[],"risk_notes":[],"proposals":[{"type":"documentation","target":"docs/INSIGHT_LEARNING_LOOP.md","reason":"Document fake insight review materialization.","proposed_change_summary":"Add fixture E2E behavior to the learning loop docs.","confidence":0.91}],"action_required":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewOpts := testDispatchOpts(db, t, reviewItem, "", NewFakeWorkerRunner())
+	reviewOpts.ReviewerResponsePath = responsePath
+	reviewOpts.InsightPolicy = insights.Policy{Enabled: true, AutoPropose: true, Reviewer: insights.ReviewerConfig{Preferred: insights.ReviewerCodex}}
+	reviewResult, err := Service{Repo: db}.DispatchOnce(ctx, reviewOpts)
+	if err != nil {
+		t.Fatalf("review dispatch error = %v", err)
+	}
+	if reviewResult.LearningLoop == nil || !reviewResult.LearningLoop.Materialized {
+		t.Fatalf("expected learning loop materialized, got %+v", reviewResult.LearningLoop)
+	}
+	report, err := insights.ReadReportJSON(reviewResult.LearningLoop.InsightReportPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if report.EvidenceBundleSHA256 != parent.EvidenceBundle.SHA256 || report.Reviewer != insights.ReviewerCodex {
+		t.Fatalf("report = %+v, parent evidence=%s", report, parent.EvidenceBundle.SHA256)
+	}
+	proposals, err := insights.ReadProposalBundleJSON(reviewResult.LearningLoop.ProposalBundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(proposals.Proposals) != 1 || proposals.Proposals[0].EvidenceBundleSHA256 != parent.EvidenceBundle.SHA256 {
+		t.Fatalf("proposal bundle = %+v", proposals)
 	}
 }
 

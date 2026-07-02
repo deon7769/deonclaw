@@ -111,6 +111,8 @@ type OnceOptions struct {
 	ArtifactsDir          string
 	RegistryRoot          string
 	SkillPolicy           skills.Policy
+	ReviewerResponsePath  string
+	InsightPolicy         insights.Policy
 	BudgetConfigLoader    BudgetConfigLoader
 	PricingLoader         PricingLoader
 	EvidenceBuilder       EvidenceBuilder

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/dispatch"
+	"github.com/deon7769/deonclaw/internal/insights"
 	"github.com/deon7769/deonclaw/internal/store"
 )
 
@@ -23,6 +24,8 @@ type workDispatchOnceOptions struct {
 	artifactsDir          string
 	registryRoot          string
 	skillPolicyPath       string
+	insightPolicyPath     string
+	reviewerResponsePath  string
 }
 
 func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr io.Writer) int {
@@ -55,6 +58,22 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 		fmt.Fprintf(stderr, "work dispatch-once failed: --registry-root is required\n")
 		return 1
 	}
+	insightPolicy := insights.Policy{}
+	if strings.TrimSpace(opts.insightPolicyPath) != "" {
+		cfg, err := insights.LoadPolicy(opts.insightPolicyPath)
+		if err != nil {
+			fmt.Fprintf(stderr, "work dispatch-once failed: insight policy: %v\n", err)
+			return 1
+		}
+		if err := insights.ValidatePolicy(cfg); err != nil {
+			fmt.Fprintf(stderr, "work dispatch-once failed: insight policy: %v\n", err)
+			return 1
+		}
+		insightPolicy = cfg.InsightPolicy
+	} else if strings.TrimSpace(opts.reviewerResponsePath) != "" {
+		fmt.Fprintf(stderr, "work dispatch-once failed: --insight-policy is required with --reviewer-response\n")
+		return 1
+	}
 	svc := dispatch.Service{Repo: db}
 	result, err := svc.DispatchOnce(context.Background(), dispatch.OnceOptions{
 		WorkItemID:            opts.workItemID,
@@ -64,6 +83,8 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 		ArtifactsDir:          artifactsDir,
 		RegistryRoot:          registryRoot,
 		SkillPolicy:           skillPolicy,
+		ReviewerResponsePath:  opts.reviewerResponsePath,
+		InsightPolicy:         insightPolicy,
 		EvidenceBuilder:       dispatch.NewEvidenceBuilder(artifactsDir),
 		CodexRunner:           dispatch.NewFakeWorkerRunner(),
 		OpenCodeRunner:        dispatch.NewFakeWorkerRunner(),
@@ -240,10 +261,13 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 	if err != nil {
 		return workDispatchOnceOptions{}, err
 	}
+	insightPolicyPath, _ := parseOptionalFlag(args, "--insight-policy")
+	reviewerResponsePath, _ := parseOptionalFlag(args, "--reviewer-response")
 	return workDispatchOnceOptions{
 		storePath: storePath, workItemID: workItemID, leaseID: leaseID, mode: mode,
 		confirmWorkerDispatch: confirm, artifactsDir: artifactsDir, registryRoot: registryRoot,
-		skillPolicyPath: skillPolicyPath,
+		skillPolicyPath: skillPolicyPath, insightPolicyPath: insightPolicyPath,
+		reviewerResponsePath: reviewerResponsePath,
 	}, nil
 }
 

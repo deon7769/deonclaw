@@ -33,6 +33,7 @@ type OnceResult struct {
 	BudgetBlocked         *BudgetBlockedContract   `json:"budget_blocked,omitempty"`
 	EvidenceBundle        *insights.EvidenceBundle `json:"evidence_bundle,omitempty"`
 	InsightReview         *InsightReviewResult     `json:"insight_review,omitempty"`
+	LearningLoop          *LearningLoopResult      `json:"learning_loop,omitempty"`
 	Error                 string                   `json:"error,omitempty"`
 	ProviderCall          bool                     `json:"provider_call"`
 	NetworkCall           bool                     `json:"network_call"`

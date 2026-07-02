@@ -154,6 +154,8 @@ Sprint numbers below supersede the original 23F/23G labels in [OPENCLAW_MIGRATIO
 
 Transform `insight_review` into a reusable fake E2E path: reviewer response fixture in the queue, automatic `InsightReport` and `LearningProposal` materialization, operator approval, approved skill registry apply, new session snapshot on the revision, and automatic effectiveness record.
 
+**Status:** **23.20 implemented in the budgeted-dispatch fixture path** — fake `insight_review` dispatch can load an explicit reviewer response fixture through `work dispatch-once --insight-policy ... --reviewer-response ...` and materialize `insight-report.json` plus `learning-proposals.json` artifacts linked to the parent evidence bundle. Approval, skill apply, session refresh, and effectiveness remain in `23.21–23.23`.
+
 Detailed design: [INSIGHT_LEARNING_LOOP.md](INSIGHT_LEARNING_LOOP.md).
 
 **Ready when:** run → evidence → `insight_review` → skill proposal → approve → install → session loads skill → effectiveness recorded.

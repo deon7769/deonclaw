@@ -1,6 +1,6 @@
 # Budgeted dispatch fixture
 
-CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`), including **23.19.1** hardening checks.
+CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`), including **23.19.1** hardening checks and the **23.20** closed-learning-loop fixture leg.
 
 ## What it validates
 
@@ -10,6 +10,7 @@ CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`), including 
 - mandatory budget reservation/commit before and after worker
 - skill snapshot materialization (empty registry OK)
 - evidence bundle artifact + insight review queue
+- fake `insight_review` dispatch materializes `insight-report.json` and `learning-proposals.json` from an explicit reviewer fixture
 - `provider_call: false`, `network_call: false`
 
 ## Commands
@@ -31,6 +32,17 @@ deonctl work dispatch-once \
   --artifacts-dir <tmpdir>/artifacts \
   --registry-root <tmpdir>/skills-registry \
   --skill-policy ../skill-policy.yaml
+
+# For the queued insight_review work item:
+deonctl work dispatch-once \
+  --store <db> \
+  --work-item <review-work-id> \
+  --mode fake \
+  --artifacts-dir <tmpdir>/artifacts/review \
+  --registry-root <tmpdir>/skills-registry \
+  --skill-policy ../skill-policy.yaml \
+  --insight-policy ../insight-policy.yaml \
+  --reviewer-response ../insight-reviewer-response-fixture.json
 ```
 
 `--mode real` is blocked in this sprint.
