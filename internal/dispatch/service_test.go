@@ -487,7 +487,7 @@ func TestDispatchOnceInsightReviewMaterializesReportAndProposals(t *testing.T) {
 	}
 }
 
-func TestDispatchOnceInsightReviewWritesExplicitApprovalArtifact(t *testing.T) {
+func TestDispatchOnceInsightReviewWritesApprovalAndApplyArtifacts(t *testing.T) {
 	ctx := context.Background()
 	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "review-approval.db"))
 	if err != nil {
@@ -535,8 +535,9 @@ func TestDispatchOnceInsightReviewWritesExplicitApprovalArtifact(t *testing.T) {
 	reviewOpts.ReviewerResponsePath = responsePath
 	reviewOpts.InsightPolicy = insights.Policy{Enabled: true, AutoPropose: true, Reviewer: insights.ReviewerConfig{Preferred: insights.ReviewerCodex}}
 	reviewOpts.LearningApprovalDecision = insights.ApprovalDecisionApproved
-	reviewOpts.LearningApprovalReason = "Operator approved fixture proposal for 23.21 smoke."
+	reviewOpts.LearningApprovalReason = "Operator approved fixture proposal for 23.22 smoke."
 	reviewOpts.LearningApprovalReviewer = insights.ReviewerOpenCode
+	reviewOpts.LearningConfirmApply = true
 	reviewResult, err := Service{Repo: db}.DispatchOnce(ctx, reviewOpts)
 	if err != nil {
 		t.Fatalf("review dispatch error = %v", err)
@@ -563,6 +564,19 @@ func TestDispatchOnceInsightReviewWritesExplicitApprovalArtifact(t *testing.T) {
 	}
 	if err := insights.ValidateApprovalAgainstProposal(approval, proposals.Proposals[0]); err != nil {
 		t.Fatalf("approval should bind to proposal: %v", err)
+	}
+	if reviewResult.LearningLoop.ApplyCount != 1 {
+		t.Fatalf("expected one apply artifact, got %+v", reviewResult.LearningLoop)
+	}
+	if len(reviewResult.LearningLoop.ApplyResultPaths) != 1 || len(reviewResult.LearningLoop.ApplyPreviewPaths) != 1 {
+		t.Fatalf("apply paths = result=%+v preview=%+v", reviewResult.LearningLoop.ApplyResultPaths, reviewResult.LearningLoop.ApplyPreviewPaths)
+	}
+	applyResult, err := insights.ReadApplyExecuteJSON(reviewResult.LearningLoop.ApplyResultPaths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !applyResult.Executed || applyResult.ProposalID != proposals.Proposals[0].ProposalID || applyResult.AppliedArtifact != reviewResult.LearningLoop.ApplyPreviewPaths[0] {
+		t.Fatalf("apply result = %+v", applyResult)
 	}
 }
 

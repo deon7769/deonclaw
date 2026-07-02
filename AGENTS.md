@@ -152,7 +152,7 @@ Implemented:
 - budget policies, windows, and atomic reservations (`budgets validate/sync/status/plan/reserve/commit/release/report`, `budgets override new|approve|inspect`, hard stops before worker start)
 - budgeted dispatch vertical slice (`work dispatch-once`, `work-templates validate/sync/list`, fake worker CI path, schedule→work materialization, insight_review queue, `make budgeted-dispatch-smoke`)
 - 23.19.1 dispatch hardening: auto-claim lease, mandatory budget policy, atomic usage+budget commit, lease/budget release on failure, evidence builder, insight review task snapshots, skill snapshot materialization, real mode explicitly blocked in CLI
-- 23.20-23.21 closed-learning-loop fixture legs: fake `insight_review` dispatch materializes `InsightReport`, `LearningProposal`, and explicit `LearningProposalApproval` artifacts from reviewer/approval fixtures and insight policy; skill apply/session/effectiveness remain next
+- 23.20-23.22 closed-learning-loop fixture legs: fake `insight_review` dispatch materializes `InsightReport`, `LearningProposal`, explicit `LearningProposalApproval`, and governed apply preview/result artifacts from reviewer/approval/apply fixtures and insight policy; session/effectiveness remain next, while real skill registry apply remains gated
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact

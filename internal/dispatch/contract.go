@@ -116,6 +116,7 @@ type OnceOptions struct {
 	LearningApprovalDecision string
 	LearningApprovalReason   string
 	LearningApprovalReviewer string
+	LearningConfirmApply     bool
 	BudgetConfigLoader       BudgetConfigLoader
 	PricingLoader            PricingLoader
 	EvidenceBuilder          EvidenceBuilder

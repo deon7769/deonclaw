@@ -21,6 +21,9 @@ type LearningLoopResult struct {
 	ProposalCount        int      `json:"proposal_count,omitempty"`
 	ApprovalPaths        []string `json:"approval_paths,omitempty"`
 	ApprovalCount        int      `json:"approval_count,omitempty"`
+	ApplyResultPaths     []string `json:"apply_result_paths,omitempty"`
+	ApplyPreviewPaths    []string `json:"apply_preview_paths,omitempty"`
+	ApplyCount           int      `json:"apply_count,omitempty"`
 	EvidenceBundleID     string   `json:"evidence_bundle_id,omitempty"`
 	EvidenceBundleSHA256 string   `json:"evidence_bundle_sha256,omitempty"`
 	Reviewer             string   `json:"reviewer,omitempty"`
@@ -34,6 +37,7 @@ type InsightReviewLearningOptions struct {
 	ApprovalDecision     string
 	ApprovalReason       string
 	ApprovalReviewer     string
+	ConfirmApply         bool
 	ArtifactsDir         string
 	RunID                string
 	Now                  time.Time
@@ -130,6 +134,18 @@ func MaterializeInsightReviewLearning(opts InsightReviewLearningOptions) (Learni
 	}
 	result.ApprovalPaths = approvalPaths
 	result.ApprovalCount = len(approvalPaths)
+
+	applyResultPaths, applyPreviewPaths, err := writeLearningApplyResults(proposalBundle, approvalPaths, LearningApplyOptions{
+		ConfirmApply: opts.ConfirmApply,
+		OutDir:       outDir,
+		Now:          now,
+	})
+	if err != nil {
+		return LearningLoopResult{}, err
+	}
+	result.ApplyResultPaths = applyResultPaths
+	result.ApplyPreviewPaths = applyPreviewPaths
+	result.ApplyCount = len(applyResultPaths)
 	return result, nil
 }
 
@@ -172,6 +188,57 @@ func writeLearningApprovals(bundle insights.LearningProposalBundle, opts Learnin
 		paths = append(paths, path)
 	}
 	return paths, nil
+}
+
+type LearningApplyOptions struct {
+	ConfirmApply bool
+	OutDir       string
+	Now          time.Time
+}
+
+func writeLearningApplyResults(bundle insights.LearningProposalBundle, approvalPaths []string, opts LearningApplyOptions) ([]string, []string, error) {
+	if !opts.ConfirmApply {
+		return nil, nil, nil
+	}
+	if len(approvalPaths) == 0 {
+		return nil, nil, fmt.Errorf("learning apply requires approval artifacts")
+	}
+	approvals := make(map[string]insights.LearningProposalApproval, len(approvalPaths))
+	for _, approvalPath := range approvalPaths {
+		approval, err := insights.ReadApprovalJSON(approvalPath)
+		if err != nil {
+			return nil, nil, err
+		}
+		approvals[approval.ProposalID] = approval
+	}
+
+	resultPaths := make([]string, 0, len(bundle.Proposals))
+	previewPaths := make([]string, 0, len(bundle.Proposals))
+	for _, proposal := range bundle.Proposals {
+		approval, ok := approvals[proposal.ProposalID]
+		if !ok {
+			return nil, nil, fmt.Errorf("learning apply approval for proposal %q is missing", proposal.ProposalID)
+		}
+		previewPath := filepath.Join(opts.OutDir, "learning-apply-preview-"+proposal.ProposalID+".md")
+		resultPath := filepath.Join(opts.OutDir, "learning-apply-result-"+proposal.ProposalID+".json")
+		applyResult, err := insights.ApplyExecute(insights.ApplyExecuteOptions{
+			ApplyOptions:      insights.ApplyOptions{Proposal: proposal, Approval: approval, Now: opts.Now},
+			PreviewOutputPath: previewPath,
+			ConfirmApply:      true,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		if err := insights.WriteApplyExecuteJSON(applyResult, resultPath); err != nil {
+			return nil, nil, err
+		}
+		if !applyResult.Executed {
+			return nil, nil, fmt.Errorf("learning apply blocked for proposal %q: %s", proposal.ProposalID, applyResult.BlockedReason)
+		}
+		resultPaths = append(resultPaths, resultPath)
+		previewPaths = append(previewPaths, previewPath)
+	}
+	return resultPaths, previewPaths, nil
 }
 
 func resolveInsightReviewer(policy insights.Policy, fallback string) string {

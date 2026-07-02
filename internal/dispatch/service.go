@@ -251,6 +251,7 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 			ApprovalDecision:     opts.LearningApprovalDecision,
 			ApprovalReason:       opts.LearningApprovalReason,
 			ApprovalReviewer:     opts.LearningApprovalReviewer,
+			ConfirmApply:         opts.LearningConfirmApply,
 			ArtifactsDir:         opts.ArtifactsDir,
 			RunID:                runID,
 			Now:                  now,
