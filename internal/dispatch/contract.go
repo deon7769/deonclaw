@@ -103,22 +103,25 @@ type PricingLoader func(ctx context.Context, repo Repository, modelProfile strin
 type EvidenceBuilder func(ctx context.Context, repo Repository, runID string, now time.Time) (insights.EvidenceBundle, error)
 
 type OnceOptions struct {
-	WorkItemID            string
-	LeaseID               string
-	LeaseTTL              time.Duration
-	Mode                  string
-	ConfirmWorkerDispatch bool
-	ArtifactsDir          string
-	RegistryRoot          string
-	SkillPolicy           skills.Policy
-	ReviewerResponsePath  string
-	InsightPolicy         insights.Policy
-	BudgetConfigLoader    BudgetConfigLoader
-	PricingLoader         PricingLoader
-	EvidenceBuilder       EvidenceBuilder
-	CodexRunner           WorkerRunner
-	OpenCodeRunner        WorkerRunner
-	Now                   time.Time
+	WorkItemID               string
+	LeaseID                  string
+	LeaseTTL                 time.Duration
+	Mode                     string
+	ConfirmWorkerDispatch    bool
+	ArtifactsDir             string
+	RegistryRoot             string
+	SkillPolicy              skills.Policy
+	ReviewerResponsePath     string
+	InsightPolicy            insights.Policy
+	LearningApprovalDecision string
+	LearningApprovalReason   string
+	LearningApprovalReviewer string
+	BudgetConfigLoader       BudgetConfigLoader
+	PricingLoader            PricingLoader
+	EvidenceBuilder          EvidenceBuilder
+	CodexRunner              WorkerRunner
+	OpenCodeRunner           WorkerRunner
+	Now                      time.Time
 }
 
 type BudgetBlockedContract struct {

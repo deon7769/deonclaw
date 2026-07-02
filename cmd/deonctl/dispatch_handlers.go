@@ -16,16 +16,19 @@ import (
 )
 
 type workDispatchOnceOptions struct {
-	storePath             string
-	workItemID            string
-	leaseID               string
-	mode                  string
-	confirmWorkerDispatch bool
-	artifactsDir          string
-	registryRoot          string
-	skillPolicyPath       string
-	insightPolicyPath     string
-	reviewerResponsePath  string
+	storePath                string
+	workItemID               string
+	leaseID                  string
+	mode                     string
+	confirmWorkerDispatch    bool
+	artifactsDir             string
+	registryRoot             string
+	skillPolicyPath          string
+	insightPolicyPath        string
+	reviewerResponsePath     string
+	learningApprovalDecision string
+	learningApprovalReason   string
+	learningApprovalReviewer string
 }
 
 func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr io.Writer) int {
@@ -76,20 +79,23 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 	}
 	svc := dispatch.Service{Repo: db}
 	result, err := svc.DispatchOnce(context.Background(), dispatch.OnceOptions{
-		WorkItemID:            opts.workItemID,
-		LeaseID:               opts.leaseID,
-		Mode:                  mode,
-		ConfirmWorkerDispatch: opts.confirmWorkerDispatch,
-		ArtifactsDir:          artifactsDir,
-		RegistryRoot:          registryRoot,
-		SkillPolicy:           skillPolicy,
-		ReviewerResponsePath:  opts.reviewerResponsePath,
-		InsightPolicy:         insightPolicy,
-		EvidenceBuilder:       dispatch.NewEvidenceBuilder(artifactsDir),
-		CodexRunner:           dispatch.NewFakeWorkerRunner(),
-		OpenCodeRunner:        dispatch.NewFakeWorkerRunner(),
-		PricingLoader:         dispatch.DefaultPricingLoader,
-		Now:                   time.Now().UTC(),
+		WorkItemID:               opts.workItemID,
+		LeaseID:                  opts.leaseID,
+		Mode:                     mode,
+		ConfirmWorkerDispatch:    opts.confirmWorkerDispatch,
+		ArtifactsDir:             artifactsDir,
+		RegistryRoot:             registryRoot,
+		SkillPolicy:              skillPolicy,
+		ReviewerResponsePath:     opts.reviewerResponsePath,
+		InsightPolicy:            insightPolicy,
+		LearningApprovalDecision: opts.learningApprovalDecision,
+		LearningApprovalReason:   opts.learningApprovalReason,
+		LearningApprovalReviewer: opts.learningApprovalReviewer,
+		EvidenceBuilder:          dispatch.NewEvidenceBuilder(artifactsDir),
+		CodexRunner:              dispatch.NewFakeWorkerRunner(),
+		OpenCodeRunner:           dispatch.NewFakeWorkerRunner(),
+		PricingLoader:            dispatch.DefaultPricingLoader,
+		Now:                      time.Now().UTC(),
 	})
 	enc := json.NewEncoder(stdout)
 	enc.SetIndent("", "  ")
@@ -263,11 +269,29 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 	}
 	insightPolicyPath, _ := parseOptionalFlag(args, "--insight-policy")
 	reviewerResponsePath, _ := parseOptionalFlag(args, "--reviewer-response")
+	learningApprovalDecision, approvalDecisionProvided := parseOptionalFlag(args, "--learning-approval-decision")
+	learningApprovalReason, approvalReasonProvided := parseOptionalFlag(args, "--learning-approval-reason")
+	learningApprovalReviewer, approvalReviewerProvided := parseOptionalFlag(args, "--learning-approval-reviewer")
+	if approvalDecisionProvided && strings.TrimSpace(learningApprovalDecision) == "" {
+		return workDispatchOnceOptions{}, fmt.Errorf("missing value for --learning-approval-decision")
+	}
+	if approvalReasonProvided && strings.TrimSpace(learningApprovalReason) == "" {
+		return workDispatchOnceOptions{}, fmt.Errorf("missing value for --learning-approval-reason")
+	}
+	if approvalReviewerProvided && strings.TrimSpace(learningApprovalReviewer) == "" {
+		return workDispatchOnceOptions{}, fmt.Errorf("missing value for --learning-approval-reviewer")
+	}
+	if (strings.TrimSpace(learningApprovalDecision) == "") != (strings.TrimSpace(learningApprovalReason) == "") {
+		return workDispatchOnceOptions{}, fmt.Errorf("--learning-approval-decision and --learning-approval-reason are both required")
+	}
 	return workDispatchOnceOptions{
 		storePath: storePath, workItemID: workItemID, leaseID: leaseID, mode: mode,
 		confirmWorkerDispatch: confirm, artifactsDir: artifactsDir, registryRoot: registryRoot,
 		skillPolicyPath: skillPolicyPath, insightPolicyPath: insightPolicyPath,
-		reviewerResponsePath: reviewerResponsePath,
+		reviewerResponsePath:     reviewerResponsePath,
+		learningApprovalDecision: learningApprovalDecision,
+		learningApprovalReason:   learningApprovalReason,
+		learningApprovalReviewer: learningApprovalReviewer,
 	}, nil
 }
 

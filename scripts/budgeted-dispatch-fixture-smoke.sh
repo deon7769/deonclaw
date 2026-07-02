@@ -72,13 +72,31 @@ REVIEW_JSON="$("$CLI" work dispatch-once \
   --registry-root "$REGISTRY" \
   --skill-policy "$SKILL_POLICY" \
   --insight-policy "$INSIGHT_POLICY" \
-  --reviewer-response "$REVIEWER_RESPONSE")"
+  --reviewer-response "$REVIEWER_RESPONSE" \
+  --learning-approval-decision approved \
+  --learning-approval-reason "Operator approved 23.21 fixture proposal." \
+  --learning-approval-reviewer opencode)"
 echo "$REVIEW_JSON"
 echo "$REVIEW_JSON" | grep -q '"status": "ok"' || { echo "review dispatch status not ok" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"worker_started": true' || { echo "review worker not started" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"learning_loop": {' || { echo "learning loop result missing" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"materialized": true' || { echo "learning loop not materialized" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"proposal_count": 1' || { echo "learning proposal not materialized" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"approval_count": 1' || { echo "learning approval not materialized" >&2; exit 1; }
+APPROVAL_REVIEWER="$(REVIEW_JSON="$REVIEW_JSON" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+doc = json.loads(os.environ["REVIEW_JSON"])
+paths = doc.get("learning_loop", {}).get("approval_paths", [])
+if len(paths) != 1:
+    raise SystemExit("approval path missing")
+approval = json.loads(Path(paths[0]).read_text())
+print(approval.get("reviewer", ""))
+PY
+)"
+[[ "$APPROVAL_REVIEWER" == "opencode" ]] || { echo "learning approval reviewer not materialized" >&2; exit 1; }
 
 echo "==> package tests"
 go test ./internal/dispatch -run 'TestDispatchOnce' -count=1
