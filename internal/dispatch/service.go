@@ -241,6 +241,25 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 	}
 	steps = append(steps, StepExecuteWorker)
 
+	var learningLoop *LearningLoopResult
+	if workItem.Kind == agents.WorkItemKindInsightReview {
+		materialized, err := MaterializeInsightReviewLearning(InsightReviewLearningOptions{
+			WorkItem:             workItem,
+			Reviewer:             agent.DefaultWorker,
+			ReviewerResponsePath: opts.ReviewerResponsePath,
+			Policy:               opts.InsightPolicy,
+			ArtifactsDir:         opts.ArtifactsDir,
+			RunID:                runID,
+			Now:                  now,
+		})
+		if err != nil {
+			return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, err)
+		}
+		if materialized.Materialized || materialized.Skipped {
+			learningLoop = &materialized
+		}
+	}
+
 	normalized, err := usage.NormalizeWorkerMetadata(usage.NormalizeInput{
 		Metadata: workerResult.UsageMeta, Worker: workerName, ModelProfile: agent.ModelProfile,
 	})
@@ -348,6 +367,7 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 	})
 	result.EvidenceBundle = evidence
 	result.InsightReview = review
+	result.LearningLoop = learningLoop
 	result.DispatchStarted = true
 	result.LeaseAcquired = true
 	result.LeaseRequired = true

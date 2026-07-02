@@ -14,6 +14,8 @@ TASK="$FIXTURE/task-fake-success.yaml"
 ARTIFACTS="$TMP/artifacts"
 REGISTRY="$TMP/skills-registry"
 SKILL_POLICY="configs/examples/skill-policy.yaml"
+INSIGHT_POLICY="configs/examples/insight-policy.yaml"
+REVIEWER_RESPONSE="configs/examples/insight-reviewer-response-fixture.json"
 
 echo "==> build deonctl"
 go build -o "$CLI" ./cmd/deonctl
@@ -68,10 +70,15 @@ REVIEW_JSON="$("$CLI" work dispatch-once \
   --mode fake \
   --artifacts-dir "$ARTIFACTS/review" \
   --registry-root "$REGISTRY" \
-  --skill-policy "$SKILL_POLICY")"
+  --skill-policy "$SKILL_POLICY" \
+  --insight-policy "$INSIGHT_POLICY" \
+  --reviewer-response "$REVIEWER_RESPONSE")"
 echo "$REVIEW_JSON"
 echo "$REVIEW_JSON" | grep -q '"status": "ok"' || { echo "review dispatch status not ok" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"worker_started": true' || { echo "review worker not started" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"learning_loop": {' || { echo "learning loop result missing" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"materialized": true' || { echo "learning loop not materialized" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"proposal_count": 1' || { echo "learning proposal not materialized" >&2; exit 1; }
 
 echo "==> package tests"
 go test ./internal/dispatch -run 'TestDispatchOnce' -count=1
