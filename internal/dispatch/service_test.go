@@ -487,6 +487,85 @@ func TestDispatchOnceInsightReviewMaterializesReportAndProposals(t *testing.T) {
 	}
 }
 
+func TestDispatchOnceInsightReviewWritesExplicitApprovalArtifact(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "review-approval.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "backend-engineer", DisplayName: "Backend", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "backend-monthly", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-fake-success", Title: "Parent", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	parent, err := Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, item, "", NewFakeWorkerRunner()))
+	if err != nil || parent.Status != "ok" || parent.InsightReview == nil || parent.EvidenceBundle == nil {
+		t.Fatalf("parent dispatch = %+v err=%v", parent, err)
+	}
+	reviewItem, err := db.WorkItem(ctx, parent.InsightReview.WorkItemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(reviewItem.EvidencePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := insights.WriteEvidenceJSON(*parent.EvidenceBundle, reviewItem.EvidencePath); err != nil {
+		t.Fatal(err)
+	}
+	responsePath := filepath.Join(t.TempDir(), "reviewer-response.json")
+	if err := os.WriteFile(responsePath, []byte(`{"observations":["reviewed evidence"],"what_worked":["evidence exists"],"what_failed":[],"reusable_lessons":["keep evidence-linked proposals"],"uncertainties":[],"risk_notes":[],"proposals":[{"type":"documentation","target":"docs/INSIGHT_LEARNING_LOOP.md","reason":"Document approval fixture behavior.","proposed_change_summary":"Add explicit approval artifact to the fake learning loop fixture.","confidence":0.93}],"action_required":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewOpts := testDispatchOpts(db, t, reviewItem, "", NewFakeWorkerRunner())
+	reviewOpts.ReviewerResponsePath = responsePath
+	reviewOpts.InsightPolicy = insights.Policy{Enabled: true, AutoPropose: true, Reviewer: insights.ReviewerConfig{Preferred: insights.ReviewerCodex}}
+	reviewOpts.LearningApprovalDecision = insights.ApprovalDecisionApproved
+	reviewOpts.LearningApprovalReason = "Operator approved fixture proposal for 23.21 smoke."
+	reviewOpts.LearningApprovalReviewer = insights.ReviewerOpenCode
+	reviewResult, err := Service{Repo: db}.DispatchOnce(ctx, reviewOpts)
+	if err != nil {
+		t.Fatalf("review dispatch error = %v", err)
+	}
+	if reviewResult.LearningLoop == nil || reviewResult.LearningLoop.ApprovalCount != 1 {
+		t.Fatalf("expected one approval artifact, got %+v", reviewResult.LearningLoop)
+	}
+	if len(reviewResult.LearningLoop.ApprovalPaths) != 1 {
+		t.Fatalf("approval paths = %+v", reviewResult.LearningLoop.ApprovalPaths)
+	}
+	proposals, err := insights.ReadProposalBundleJSON(reviewResult.LearningLoop.ProposalBundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := insights.ReadApprovalJSON(reviewResult.LearningLoop.ApprovalPaths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.Decision != insights.ApprovalDecisionApproved || approval.ProposalID != proposals.Proposals[0].ProposalID {
+		t.Fatalf("approval = %+v proposal = %+v", approval, proposals.Proposals[0])
+	}
+	if approval.Reviewer != insights.ReviewerOpenCode {
+		t.Fatalf("approval reviewer = %q, want %q", approval.Reviewer, insights.ReviewerOpenCode)
+	}
+	if err := insights.ValidateApprovalAgainstProposal(approval, proposals.Proposals[0]); err != nil {
+		t.Fatalf("approval should bind to proposal: %v", err)
+	}
+}
+
 func TestDispatchRunnerErrorReleasesLease(t *testing.T) {
 	ctx := context.Background()
 	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "fail.db"))

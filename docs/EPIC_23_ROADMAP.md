@@ -154,7 +154,7 @@ Sprint numbers below supersede the original 23F/23G labels in [OPENCLAW_MIGRATIO
 
 Transform `insight_review` into a reusable fake E2E path: reviewer response fixture in the queue, automatic `InsightReport` and `LearningProposal` materialization, operator approval, approved skill registry apply, new session snapshot on the revision, and automatic effectiveness record.
 
-**Status:** **23.20 implemented in the budgeted-dispatch fixture path** — fake `insight_review` dispatch can load an explicit reviewer response fixture through `work dispatch-once --insight-policy ... --reviewer-response ...` and materialize `insight-report.json` plus `learning-proposals.json` artifacts linked to the parent evidence bundle. Approval, skill apply, session refresh, and effectiveness remain in `23.21–23.23`.
+**Status:** **23.20-23.21 implemented in the budgeted-dispatch fixture path** — fake `insight_review` dispatch can load an explicit reviewer response fixture through `work dispatch-once --insight-policy ... --reviewer-response ...` and materialize `insight-report.json` plus `learning-proposals.json` artifacts linked to the parent evidence bundle. When `--learning-approval-decision ... --learning-approval-reason ...` are supplied, it also writes governed `learning-approval-<proposal>.json` artifacts bound to each proposal. Skill apply, session refresh, and effectiveness remain in `23.22–23.23`.
 
 Detailed design: [INSIGHT_LEARNING_LOOP.md](INSIGHT_LEARNING_LOOP.md).
 
@@ -209,7 +209,7 @@ Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md) (original 23
   └── required before real dispatch and unattended execution
 
 23.20–23.23 Closed Learning Loop
-  └── fake E2E before real reviewer workers
+  └── fake E2E before real reviewer workers; report/proposal/approval artifacts done
 
 23.24–23.27 Real Dispatch Adapter
   ├── requires 23E + closed learning loop fixture path
