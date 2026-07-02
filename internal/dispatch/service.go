@@ -245,6 +245,10 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 	if workItem.Kind == agents.WorkItemKindInsightReview {
 		materialized, err := MaterializeInsightReviewLearning(InsightReviewLearningOptions{
 			WorkItem:             workItem,
+			Agent:                agent,
+			WorkspacePath:        task.Workspace.Path,
+			RegistryRoot:         opts.RegistryRoot,
+			SkillPolicy:          opts.SkillPolicy,
 			Reviewer:             agent.DefaultWorker,
 			ReviewerResponsePath: opts.ReviewerResponsePath,
 			Policy:               opts.InsightPolicy,

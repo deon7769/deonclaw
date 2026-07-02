@@ -1,6 +1,6 @@
 # Budgeted dispatch fixture
 
-CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`), including **23.19.1** hardening checks and the **23.20-23.22** closed-learning-loop fixture legs.
+CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`), including **23.19.1** hardening checks and the **23.20-23.23** closed-learning-loop fixture legs.
 
 ## What it validates
 
@@ -10,7 +10,7 @@ CI-only fake dispatch smoke for Epic 23E (`budgeted-dispatch-smoke`), including 
 - mandatory budget reservation/commit before and after worker
 - skill snapshot materialization (empty registry OK)
 - evidence bundle artifact + insight review queue
-- fake `insight_review` dispatch materializes `insight-report.json`, `learning-proposals.json`, governed `learning-approval-*.json`, and governed `learning-apply-preview-*.md` / `learning-apply-result-*.json` artifacts from explicit reviewer/approval/apply fixtures
+- fake `insight_review` dispatch materializes `insight-report.json`, `learning-proposals.json`, governed `learning-approval-*.json`, governed `learning-apply-preview-*.md` / `learning-apply-result-*.json`, `learning-effectiveness-*.json`, `learning-session-refresh.json`, and `learning-session-snapshot-*.json` artifacts from explicit reviewer/approval/apply fixtures
 - `provider_call: false`, `network_call: false`
 
 ## Commands
@@ -44,7 +44,7 @@ deonctl work dispatch-once \
   --insight-policy ../insight-policy.yaml \
   --reviewer-response ../insight-reviewer-response-fixture.json \
   --learning-approval-decision approved \
-  --learning-approval-reason "Operator approved 23.22 fixture proposal." \
+  --learning-approval-reason "Operator approved 23.23 fixture proposal." \
   --learning-approval-reviewer opencode \
   --learning-confirm-apply
 ```

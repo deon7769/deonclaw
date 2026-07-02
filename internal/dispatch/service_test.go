@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -10,6 +11,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/agents"
 	"github.com/deon7769/deonclaw/internal/budget"
 	"github.com/deon7769/deonclaw/internal/insights"
+	"github.com/deon7769/deonclaw/internal/skills"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/usage"
 	"github.com/deon7769/deonclaw/internal/workqueue"
@@ -532,6 +534,7 @@ func TestDispatchOnceInsightReviewWritesApprovalAndApplyArtifacts(t *testing.T) 
 		t.Fatal(err)
 	}
 	reviewOpts := testDispatchOpts(db, t, reviewItem, "", NewFakeWorkerRunner())
+	reviewOpts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
 	reviewOpts.ReviewerResponsePath = responsePath
 	reviewOpts.InsightPolicy = insights.Policy{Enabled: true, AutoPropose: true, Reviewer: insights.ReviewerConfig{Preferred: insights.ReviewerCodex}}
 	reviewOpts.LearningApprovalDecision = insights.ApprovalDecisionApproved
@@ -577,6 +580,49 @@ func TestDispatchOnceInsightReviewWritesApprovalAndApplyArtifacts(t *testing.T) 
 	}
 	if !applyResult.Executed || applyResult.ProposalID != proposals.Proposals[0].ProposalID || applyResult.AppliedArtifact != reviewResult.LearningLoop.ApplyPreviewPaths[0] {
 		t.Fatalf("apply result = %+v", applyResult)
+	}
+	if reviewResult.LearningLoop.EffectivenessCount != 1 || len(reviewResult.LearningLoop.EffectivenessPaths) != 1 {
+		t.Fatalf("effectiveness artifacts = %+v", reviewResult.LearningLoop)
+	}
+	effectiveness, err := insights.ReadEffectivenessBundleJSON(reviewResult.LearningLoop.EffectivenessPaths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(effectiveness.Records) != 1 || effectiveness.Records[0].ProposalID != proposals.Proposals[0].ProposalID || effectiveness.Records[0].RunID != reviewResult.RunID {
+		t.Fatalf("effectiveness = %+v", effectiveness)
+	}
+	if reviewResult.LearningLoop.SessionRefreshPath == "" || reviewResult.LearningLoop.SessionSnapshotPath == "" {
+		t.Fatalf("session refresh artifacts missing: %+v", reviewResult.LearningLoop)
+	}
+	snapshot, err := skills.ReadSnapshotJSON(reviewResult.LearningLoop.SessionSnapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.AgentID != agent.ID || snapshot.SessionID == "" || snapshot.SHA256 != reviewResult.LearningLoop.SessionSnapshotSHA256 {
+		t.Fatalf("session snapshot = %+v learning_loop=%+v", snapshot, reviewResult.LearningLoop)
+	}
+	refreshData, err := os.ReadFile(reviewResult.LearningLoop.SessionRefreshPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refresh LearningSessionRefreshArtifact
+	if err := json.Unmarshal(refreshData, &refresh); err != nil {
+		t.Fatal(err)
+	}
+	if refresh.Status != "planned" || refresh.SessionID != snapshot.SessionID || refresh.SkillSnapshotPath != reviewResult.LearningLoop.SessionSnapshotPath || refresh.SkillSnapshotSHA256 != snapshot.SHA256 {
+		t.Fatalf("session refresh = %+v snapshot=%+v", refresh, snapshot)
+	}
+	if len(refresh.ProposalIDs) != 1 || refresh.ProposalIDs[0] != proposals.Proposals[0].ProposalID || len(refresh.ApplyResultPaths) != 1 || refresh.ApplyResultPaths[0] != reviewResult.LearningLoop.ApplyResultPaths[0] {
+		t.Fatalf("session refresh links = %+v", refresh)
+	}
+	sessions, err := db.ListSessionsByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if session.ID == refresh.SessionID {
+			t.Fatalf("learning refresh session should be planned-only, found persisted session %+v", session)
+		}
 	}
 }
 

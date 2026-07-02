@@ -65,9 +65,9 @@ Implemented vertical slices include:
 
 **Epic 23.16–23.19.1** (work queue, leases, budgets, and budgeted fake dispatch) is **merged and operational on `main`**. CI smokes: `make work-queue-smoke`, `make budgeted-dispatch-smoke`, `make proactive-runtime-smoke`, `make provider-call-chain-smoke`.
 
-**23.20–23.22:** first closed-learning-loop fixture legs — dispatch evidence → `insight_review` → reviewer fixture → `InsightReport` + `LearningProposal` artifacts, governed `LearningProposalApproval`, and explicit apply preview/result artifacts when approval and `--learning-confirm-apply` are supplied.
+**23.20–23.23:** closed-learning-loop fixture path — dispatch evidence → `insight_review` → reviewer fixture → `InsightReport` + `LearningProposal` artifacts, governed `LearningProposalApproval`, explicit apply preview/result artifacts, automatic effectiveness records, and a planned session-refresh snapshot when approval and `--learning-confirm-apply` are supplied.
 
-**Next:** closed learning loop continuation (`23.23`) — session snapshot refresh and effectiveness; real skill registry apply remains gated behind a later explicit integration. See [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md).
+**Next:** real Codex/OpenCode dispatch adapter (`23.24–23.27`) behind lease, budget, task snapshot and skill snapshot gates. Real skill registry apply from learning proposals remains gated behind a later explicit integration. See [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md).
 
 ## What is deliberately not active yet
 

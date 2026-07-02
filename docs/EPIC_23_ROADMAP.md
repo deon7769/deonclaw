@@ -152,13 +152,13 @@ Sprint numbers below supersede the original 23F/23G labels in [OPENCLAW_MIGRATIO
 
 #### 23.20–23.23 — Closed Learning Loop Operationalization
 
-Transform `insight_review` into a reusable fake E2E path: reviewer response fixture in the queue, automatic `InsightReport` and `LearningProposal` materialization, operator approval, approved skill registry apply, new session snapshot on the revision, and automatic effectiveness record.
+Transform `insight_review` into a reusable fake E2E path: reviewer response fixture in the queue, automatic `InsightReport` and `LearningProposal` materialization, operator approval, governed apply preview/result artifacts, a planned session-refresh snapshot, and automatic effectiveness records.
 
-**Status:** **23.20-23.22 implemented in the budgeted-dispatch fixture path** — fake `insight_review` dispatch can load an explicit reviewer response fixture through `work dispatch-once --insight-policy ... --reviewer-response ...` and materialize `insight-report.json` plus `learning-proposals.json` artifacts linked to the parent evidence bundle. When `--learning-approval-decision ... --learning-approval-reason ...` are supplied, it also writes governed `learning-approval-<proposal>.json` artifacts bound to each proposal. When `--learning-confirm-apply` is supplied with that approval, it writes `learning-apply-preview-<proposal>.md` and `learning-apply-result-<proposal>.json` artifacts without mutating canonical targets. Session refresh and effectiveness remain in `23.23`; real skill registry apply remains gated behind later integration.
+**Status:** **23.20-23.23 implemented in the budgeted-dispatch fixture path** — fake `insight_review` dispatch can load an explicit reviewer response fixture through `work dispatch-once --insight-policy ... --reviewer-response ...` and materialize `insight-report.json` plus `learning-proposals.json` artifacts linked to the parent evidence bundle. When `--learning-approval-decision ... --learning-approval-reason ...` are supplied, it also writes governed `learning-approval-<proposal>.json` artifacts bound to each proposal. When `--learning-confirm-apply` is supplied with that approval, it writes `learning-apply-preview-<proposal>.md`, `learning-apply-result-<proposal>.json`, `learning-effectiveness-<proposal>.json`, `learning-session-refresh.json`, and `learning-session-snapshot-<session>.json` artifacts without mutating canonical learning targets. Real skill registry apply remains gated behind later integration.
 
 Detailed design: [INSIGHT_LEARNING_LOOP.md](INSIGHT_LEARNING_LOOP.md).
 
-**Ready when:** run → evidence → `insight_review` → skill proposal → approve → install → session loads skill → effectiveness recorded.
+**Ready when:** run → evidence → `insight_review` → proposal → approve → apply preview/result → planned session refresh → effectiveness recorded.
 
 #### 23.24–23.27 — Real Codex/OpenCode Dispatch Adapter
 
@@ -209,7 +209,7 @@ Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md) (original 23
   └── required before real dispatch and unattended execution
 
 23.20–23.23 Closed Learning Loop
-  └── fake E2E before real reviewer workers; report/proposal/approval/apply-preview artifacts done
+  └── fake E2E before real reviewer workers; report/proposal/approval/apply-preview/effectiveness/session-refresh artifacts done
 
 23.24–23.27 Real Dispatch Adapter
   ├── requires 23E + closed learning loop fixture path
