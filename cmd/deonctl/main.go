@@ -172,7 +172,7 @@ Usage:
   deonctl work leases renew --store <deonclaw.db> --lease <lease-id> [--ttl-seconds <n>]
   deonctl work recover --store <deonclaw.db>
   deonctl work doctor --store <deonclaw.db>
-  deonctl work dispatch-once --store <deonclaw.db> --work-item <id> [--lease <lease-id>] --artifacts-dir <dir> --registry-root <dir> --skill-policy <skill-policy.yaml> [--insight-policy <insight-policy.yaml> --reviewer-response <reviewer-response.json>] [--learning-approval-decision approved|rejected --learning-approval-reason <text> [--learning-approval-reviewer codex|opencode] [--learning-confirm-apply]] [--mode fake|real] [--confirm-worker-dispatch]
+  deonctl work dispatch-once --store <deonclaw.db> --work-item <id> [--lease <lease-id>] --artifacts-dir <dir> --registry-root <dir> --skill-policy <skill-policy.yaml> [--insight-policy <insight-policy.yaml> --reviewer-response <reviewer-response.json>] [--learning-approval-decision approved|rejected --learning-approval-reason <text> [--learning-approval-reviewer codex|opencode] [--learning-confirm-apply]] [--mode fake|real] [--confirm-worker-dispatch] [--timeout-seconds <seconds>] [--lease-ttl-seconds <seconds>]
   deonctl pricing validate --config <model-prices.yaml>
   deonctl pricing sync --config <model-prices.yaml> --store <deonclaw.db>
   deonctl pricing list --store <deonclaw.db>

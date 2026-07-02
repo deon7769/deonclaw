@@ -44,6 +44,7 @@ const (
 	StepPersistWorkerOutputs = "16a_persist_worker_outputs"
 	StepNormalizeUsage       = "17_normalize_usage"
 	StepCalculateCost        = "18_calculate_cost"
+	StepVerifyLeaseForCommit = "18a_verify_lease_for_commit"
 	StepCommitBudget         = "19_commit_budget"
 	StepPersistUsage         = "20_persist_usage"
 	StepFinalizeRun          = "21_finalize_run"
@@ -61,6 +62,7 @@ type Repository interface {
 	ClaimWorkItem(ctx context.Context, agentID string, workItemID string, ttl time.Duration, now time.Time) (workqueue.ClaimResult, error)
 	Lease(ctx context.Context, id string) (workqueue.Lease, error)
 	SaveLease(ctx context.Context, lease workqueue.Lease) error
+	RenewLease(ctx context.Context, leaseID string, ttl time.Duration, now time.Time) (workqueue.Lease, error)
 	ReleaseLease(ctx context.Context, leaseID string, reason string, requeue bool, now time.Time) error
 	ListLeases(ctx context.Context) ([]workqueue.Lease, error)
 	SaveSession(ctx context.Context, session agents.Session) error
@@ -115,6 +117,8 @@ type OnceOptions struct {
 	WorkItemID               string
 	LeaseID                  string
 	LeaseTTL                 time.Duration
+	LeaseRenewInterval       time.Duration
+	WorkerTimeout            time.Duration
 	Mode                     string
 	ConfirmWorkerDispatch    bool
 	RunningInCI              bool

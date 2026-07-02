@@ -2,6 +2,7 @@ package dispatch
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -228,14 +229,39 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 	if mode == ModeFake && runner == nil {
 		runner = NewFakeWorkerRunner()
 	}
-	workerResult, err := runner.Run(ctx, WorkerRunOptions{
+	workerCtx := ctx
+	stopWorker := func() {}
+	stopLeaseRenewal := func() error { return nil }
+	if mode == ModeReal {
+		workerCtx, stopWorker = context.WithCancel(ctx)
+		if opts.WorkerTimeout > 0 {
+			timeoutCtx, timeoutCancel := context.WithTimeout(workerCtx, opts.WorkerTimeout)
+			parentCancel := stopWorker
+			workerCtx = timeoutCtx
+			stopWorker = func() {
+				timeoutCancel()
+				parentCancel()
+			}
+		}
+		stopLeaseRenewal = startLeaseRenewal(workerCtx, s.Repo, lease, opts.LeaseTTL, opts.LeaseRenewInterval, stopWorker)
+	}
+	workerResult, err := runner.Run(workerCtx, WorkerRunOptions{
 		TaskJSON: snapshot.TaskJSON, TaskID: task.ID, Worker: workerName,
 		ModelProfile: agent.ModelProfile, RunID: runID, Mode: mode, ConfirmReal: opts.ConfirmWorkerDispatch,
 	})
+	stopWorker()
+	if renewErr := stopLeaseRenewal(); renewErr != nil {
+		if err == nil || errors.Is(err, context.Canceled) {
+			err = renewErr
+		}
+	}
 	outputs, outputErr := persistWorkerOutputs(ctx, s.Repo, opts.ArtifactsDir, runID, workerResult, now)
 	if err != nil {
 		if outputErr != nil {
 			err = fmt.Errorf("%w; persist worker outputs: %v", err, outputErr)
+		}
+		if isWorkerCancellation(err) {
+			return s.cancelDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, err)
 		}
 		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, err)
 	}
@@ -248,6 +274,13 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 			msg = "worker returned failed status"
 		}
 		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, fmt.Errorf("%s", msg))
+	}
+	if workerResult.Status == runs.StatusCancelled {
+		msg := workerResult.ErrorMessage
+		if strings.TrimSpace(msg) == "" {
+			msg = "worker returned cancelled status"
+		}
+		return s.cancelDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, fmt.Errorf("%s", msg))
 	}
 	steps = append(steps, StepExecuteWorker)
 	if outputs.Artifacts > 0 || outputs.Events > 0 {
@@ -314,6 +347,13 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 	}
 	steps = append(steps, StepCalculateCost)
 
+	if mode == ModeReal {
+		if err := verifyLeaseForCommit(ctx, s.Repo, lease.ID, workItem.ID, agent.ID, runID, time.Now().UTC()); err != nil {
+			return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, err)
+		}
+		steps = append(steps, StepVerifyLeaseForCommit)
+	}
+
 	budgetCommitted := false
 	if reservation.ID != "" {
 		if _, err := s.Repo.CommitReservationWithUsage(ctx, reservation.ID, usageEvent, actualMicroUSD, now); err != nil {
@@ -349,7 +389,7 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 	}
 	workItem.UpdatedAt = finished.Format(time.RFC3339Nano)
 	_ = s.Repo.SaveWorkItem(ctx, workItem)
-	_ = ReleaseActiveLease(ctx, s.Repo, lease, "dispatch complete", false, finished)
+	_ = ReleaseCompletedLease(ctx, s.Repo, lease, "dispatch complete", finished)
 	steps = append(steps, StepFinalizeRun)
 
 	var evidence *insights.EvidenceBundle
@@ -420,6 +460,10 @@ func (s Service) failDispatch(ctx context.Context, opts OnceOptions, steps []str
 	_ = s.Repo.SaveWorkItem(ctx, workItem)
 	result := NewErrorResult(opts, steps, err)
 	result.LeaseID = lease.ID
+	if run != nil {
+		result.RunID = run.ID
+		result.RunStatus = runs.StatusFailed
+	}
 	result.LeaseAcquired = lease.ID != ""
 	result.WorkerStarted = workerStarted
 	result.LeaseReleased = leaseReleased
@@ -430,6 +474,130 @@ func (s Service) failDispatch(ctx context.Context, opts OnceOptions, steps []str
 		result.NetworkCall = true
 	}
 	return result, err
+}
+
+func (s Service) cancelDispatch(ctx context.Context, opts OnceOptions, steps []string, run *runs.Run, workItem agents.WorkItem, lease workqueue.Lease, reservation budget.Reservation, workerStarted bool, now time.Time, err error) (OnceResult, error) {
+	budgetReleased := false
+	if reservation.ID != "" {
+		_, _ = s.Repo.ReleaseReservation(ctx, reservation.ID, err.Error(), now)
+		budgetReleased = true
+	}
+	leaseReleased := false
+	if strings.TrimSpace(lease.ID) != "" {
+		if releaseErr := ReleaseActiveLease(ctx, s.Repo, lease, "dispatch_cancelled:"+err.Error(), false, now); releaseErr == nil {
+			leaseReleased = true
+		}
+	}
+	if run != nil && strings.TrimSpace(run.ID) != "" {
+		finished := now
+		run.Status = runs.StatusCancelled
+		run.UpdatedAt = finished
+		run.FinishedAt = &finished
+		run.DispatchMeta.BlockedReason = err.Error()
+		_ = s.Repo.SaveRun(ctx, run)
+	}
+	workItem.Status = agents.WorkItemStatusCancelled
+	workItem.UpdatedAt = now.Format(time.RFC3339Nano)
+	_ = s.Repo.SaveWorkItem(ctx, workItem)
+
+	result := NewCancelledResult(opts, steps, err)
+	result.LeaseID = lease.ID
+	result.ReservationID = reservation.ID
+	if run != nil {
+		result.RunID = run.ID
+	}
+	result.LeaseAcquired = lease.ID != ""
+	result.WorkerStarted = workerStarted
+	result.LeaseReleased = leaseReleased
+	result.BudgetReserved = reservation.ID != ""
+	result.BudgetReleased = budgetReleased
+	result.WorkStatus = workItem.Status
+	if leaseReleased {
+		result.LeaseStatus = workqueue.LeaseStatusReleased
+	}
+	if workerStarted && opts.Mode == ModeReal {
+		result.ProviderCall = true
+		result.NetworkCall = true
+	}
+	return result, err
+}
+
+func startLeaseRenewal(ctx context.Context, repo Repository, lease workqueue.Lease, ttl time.Duration, interval time.Duration, cancelWorker context.CancelFunc) func() error {
+	if strings.TrimSpace(lease.ID) == "" {
+		return func() error { return nil }
+	}
+	if interval <= 0 {
+		interval = defaultLeaseRenewInterval(ttl)
+	}
+	renewCtx, stop := context.WithCancel(ctx)
+	done := make(chan error, 1)
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-renewCtx.Done():
+				done <- nil
+				return
+			case <-ticker.C:
+				if _, err := repo.RenewLease(renewCtx, lease.ID, ttl, time.Now().UTC()); err != nil {
+					if renewCtx.Err() != nil {
+						done <- nil
+						return
+					}
+					cancelWorker()
+					done <- fmt.Errorf("renew lease %q: %w", lease.ID, err)
+					return
+				}
+			}
+		}
+	}()
+	return func() error {
+		stop()
+		return <-done
+	}
+}
+
+func defaultLeaseRenewInterval(ttl time.Duration) time.Duration {
+	if ttl <= 0 {
+		ttl = workqueue.DefaultLeaseTTLSeconds * time.Second
+	}
+	interval := ttl / 3
+	if interval <= 0 {
+		return time.Second
+	}
+	return interval
+}
+
+func verifyLeaseForCommit(ctx context.Context, repo Repository, leaseID string, workItemID string, agentID string, runID string, now time.Time) error {
+	lease, err := repo.Lease(ctx, leaseID)
+	if err != nil {
+		return err
+	}
+	if lease.Status != workqueue.LeaseStatusActive {
+		return fmt.Errorf("lease %q status %q is not active before budget commit", lease.ID, lease.Status)
+	}
+	if lease.WorkItemID != workItemID {
+		return fmt.Errorf("lease %q belongs to work item %q, not %q", lease.ID, lease.WorkItemID, workItemID)
+	}
+	if lease.AgentID != agentID {
+		return fmt.Errorf("lease %q agent %q does not match %q", lease.ID, lease.AgentID, agentID)
+	}
+	if lease.RunID != runID {
+		return fmt.Errorf("lease %q run %q does not match %q", lease.ID, lease.RunID, runID)
+	}
+	expiresAt, err := time.Parse(time.RFC3339Nano, lease.ExpiresAt)
+	if err != nil {
+		return fmt.Errorf("parse lease expires_at: %w", err)
+	}
+	if now.After(expiresAt) {
+		return fmt.Errorf("lease %q expired before budget commit", lease.ID)
+	}
+	return nil
+}
+
+func isWorkerCancellation(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }
 
 func DefaultPricingLoader(ctx context.Context, repo Repository, modelProfile string, at time.Time) (usage.ModelPrice, error) {

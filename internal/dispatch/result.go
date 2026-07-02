@@ -148,3 +148,20 @@ func NewErrorResult(opts OnceOptions, steps []string, err error) OnceResult {
 		NetworkCall:     false,
 	}
 }
+
+func NewCancelledResult(opts OnceOptions, steps []string, err error) OnceResult {
+	realDispatch := opts.Mode == ModeReal
+	return OnceResult{
+		Status:          "cancelled",
+		WorkItemID:      opts.WorkItemID,
+		Mode:            opts.Mode,
+		LeaseRequired:   true,
+		DispatchStarted: true,
+		WorkerStarted:   true,
+		StepsCompleted:  steps,
+		RunStatus:       runs.StatusCancelled,
+		Error:           err.Error(),
+		ProviderCall:    realDispatch,
+		NetworkCall:     realDispatch,
+	}
+}

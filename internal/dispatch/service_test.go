@@ -3,8 +3,10 @@ package dispatch
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,6 +75,35 @@ func seedQueuedWork(t *testing.T, db *testStoreAdapter, agent agents.Agent, poli
 	return item
 }
 
+func seedRealDispatchWork(t *testing.T, db *testStoreAdapter, agentID string, taskID string) (agents.Agent, agents.WorkItem) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: agentID, DisplayName: "Real", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	if err := db.SaveAgent(ctx, agent); err != nil {
+		t.Fatalf("SaveAgent() error = %v", err)
+	}
+	policy := budget.Policy{
+		ID: "budget-" + agentID, Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	if err := db.SyncBudgetPolicies(ctx, []budget.Policy{policy}); err != nil {
+		t.Fatalf("SyncBudgetPolicies() error = %v", err)
+	}
+	task := tasks.Task{
+		ID: taskID, Title: "Real dispatch", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	return agent, item
+}
+
 func TestDispatchOnceFakeSuccess(t *testing.T) {
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "dispatch.db")
@@ -131,6 +162,13 @@ func TestDispatchOnceFakeSuccess(t *testing.T) {
 	}
 	if result.InsightReview == nil || !result.InsightReview.Queued {
 		t.Fatalf("expected insight review work item, got %+v", result.InsightReview)
+	}
+	storedItem, err := db.WorkItem(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("WorkItem() error = %v", err)
+	}
+	if storedItem.Status != agents.WorkItemStatusSucceeded {
+		t.Fatalf("stored work item status = %q, want succeeded", storedItem.Status)
 	}
 }
 
@@ -396,6 +434,119 @@ func TestDispatchOnceRealModePersistsWorkerArtifactsAndEvents(t *testing.T) {
 	}
 }
 
+func TestDispatchOnceRealModeRenewsLeaseDuringWorkerRun(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-renew.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, item := seedRealDispatchWork(t, db, "real-renew-agent", "task-real-renew")
+
+	runner := workerFunc(func(runCtx context.Context, runOpts WorkerRunOptions) (WorkerRunResult, error) {
+		deadline := time.NewTimer(500 * time.Millisecond)
+		defer deadline.Stop()
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-runCtx.Done():
+				return WorkerRunResult{}, runCtx.Err()
+			case <-deadline.C:
+				return WorkerRunResult{}, errors.New("lease heartbeat was not renewed")
+			case <-ticker.C:
+				leases, err := db.ListLeases(ctx)
+				if err != nil {
+					return WorkerRunResult{}, err
+				}
+				for _, lease := range leases {
+					if lease.WorkItemID == item.ID && lease.RunID == runOpts.RunID && lease.Status == workqueue.LeaseStatusActive && lease.HeartbeatAt != "" && lease.HeartbeatAt != lease.CreatedAt {
+						return WorkerRunResult{Status: runs.StatusSucceeded, DurationMS: 50}, nil
+					}
+				}
+			}
+		}
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.LeaseTTL = 5 * time.Second
+	opts.LeaseRenewInterval = 10 * time.Millisecond
+
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	if result.Status != "ok" || result.RunStatus != runs.StatusSucceeded {
+		t.Fatalf("real dispatch result = %+v", result)
+	}
+	lease, err := db.Lease(ctx, result.LeaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.HeartbeatAt == "" || lease.HeartbeatAt == lease.CreatedAt {
+		t.Fatalf("lease heartbeat was not renewed: %+v", lease)
+	}
+}
+
+func TestDispatchOnceRealModeTimeoutCancelsWorkerAndReleasesLease(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-timeout.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, item := seedRealDispatchWork(t, db, "real-timeout-agent", "task-real-timeout")
+
+	started := false
+	runner := workerFunc(func(runCtx context.Context, runOpts WorkerRunOptions) (WorkerRunResult, error) {
+		started = true
+		<-runCtx.Done()
+		return WorkerRunResult{}, runCtx.Err()
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.LeaseTTL = 5 * time.Second
+	opts.LeaseRenewInterval = 5 * time.Millisecond
+	opts.WorkerTimeout = 20 * time.Millisecond
+
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err == nil {
+		t.Fatalf("expected timeout error, got result=%+v", result)
+	}
+	if !started || !result.WorkerStarted || !result.ProviderCall || !result.NetworkCall {
+		t.Fatalf("worker/provider boundaries not recorded: started=%v result=%+v", started, result)
+	}
+	if result.Status != "cancelled" || result.RunStatus != runs.StatusCancelled || !result.LeaseReleased || !result.BudgetReleased {
+		t.Fatalf("timeout result = %+v err=%v", result, err)
+	}
+	run, err := db.Run(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != runs.StatusCancelled {
+		t.Fatalf("run status = %q, want cancelled", run.Status)
+	}
+	workItem, err := db.WorkItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workItem.Status != agents.WorkItemStatusCancelled {
+		t.Fatalf("work item status = %q, want cancelled", workItem.Status)
+	}
+	lease, err := db.Lease(ctx, result.LeaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.Status == workqueue.LeaseStatusActive {
+		t.Fatalf("lease still active after timeout: %+v", lease)
+	}
+}
+
 func TestDispatchOnceNoBudgetPolicyBlocks(t *testing.T) {
 	ctx := context.Background()
 	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "nobudget.db"))
@@ -518,6 +669,51 @@ func TestDispatchOnceLeaseWrongWorkItemFails(t *testing.T) {
 	}
 	if called {
 		t.Fatal("worker must not run with lease for another work item")
+	}
+}
+
+func TestDispatchOnceExplicitExpiredLeaseFails(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "expired-lease.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "agent-expired", DisplayName: "Expired", Role: "engineer", DefaultWorker: "codex",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "p-expired", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly, Timezone: "UTC",
+		HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000, MaxSingleRunMicroUSD: 3_000_000,
+		ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-expired-lease", Title: "Expired lease", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	claimTime := now.Add(-time.Hour)
+	claim, err := db.ClaimWorkItem(ctx, agent.ID, item.ID, time.Millisecond, claimTime)
+	if err != nil || !claim.Claimed {
+		t.Fatalf("ClaimWorkItem() = %+v err=%v", claim, err)
+	}
+
+	called := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		return FakeWorkerRun(ctx, opts)
+	})
+	_, err = Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, item, claim.Lease.ID, runner))
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("DispatchOnce() error = %v, want expired lease", err)
+	}
+	if called {
+		t.Fatal("worker must not run with an expired explicit lease")
 	}
 }
 

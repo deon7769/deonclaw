@@ -13,12 +13,16 @@ deonctl work dispatch-once \
   --skill-policy <skill-policy.yaml> \
   [--lease <lease-id>] \
   --mode fake|real \
-  [--confirm-worker-dispatch]
+  [--confirm-worker-dispatch] \
+  [--timeout-seconds <seconds>] \
+  [--lease-ttl-seconds <seconds>]
 ```
 
 Default mode is `fake`. `--mode real` requires `--confirm-worker-dispatch`; without it dispatch returns `blocked` with `real_dispatch_requires_confirmation` and does not load/start a worker. CI and fixture smokes remain fake-only.
 
-`--lease` is optional for queued work: dispatch auto-claims exactly one lease atomically. Already-leased work without `--lease` returns `not_started` without starting a worker.
+`--lease` is optional for queued work: dispatch auto-claims exactly one lease atomically. Already-leased work without `--lease` returns `not_started` without starting a worker. Explicit leases must still be active, match the work item and agent, and not be expired.
+
+For real dispatch, `--lease-ttl-seconds` controls the initial lease TTL and renewal TTL, and `--timeout-seconds` cancels the worker context if it runs too long. Real dispatch renews the active lease while the worker is running and revalidates lease ownership before committing budget/usage.
 
 ## Ordering (23.19.1)
 
@@ -30,8 +34,9 @@ Default mode is `fake`. `--mode real` requires `--confirm-worker-dispatch`; with
 6. Create run, bind lease, mark work running
 7. Start worker (fake by default; real only with explicit confirmation, never before lease + budget reservation)
 8. Persist worker events/artifacts under the dispatch run when the worker returns them
-9. **Atomic budget commit + usage event** in one transaction
-10. Release lease, build evidence bundle, queue `insight_review` with task snapshot
+9. In real mode, renew the lease while the worker runs and verify the same active lease still owns the run before commit
+10. **Atomic budget commit + usage event** in one transaction
+11. Release lease, build evidence bundle, queue `insight_review` with task snapshot
 
 See [ADR_BUDGETED_DISPATCH_ORDERING.md](ADR_BUDGETED_DISPATCH_ORDERING.md).
 

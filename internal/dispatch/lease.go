@@ -25,6 +25,13 @@ func AcquireLease(ctx context.Context, repo Repository, agent agents.Agent, work
 		if lease.AgentID != agent.ID {
 			return workqueue.Lease{}, false, fmt.Errorf("lease %q agent %q does not match %q", lease.ID, lease.AgentID, agent.ID)
 		}
+		expiresAt, err := time.Parse(time.RFC3339Nano, lease.ExpiresAt)
+		if err != nil {
+			return workqueue.Lease{}, false, fmt.Errorf("parse lease %q expires_at: %w", lease.ID, err)
+		}
+		if now.After(expiresAt) {
+			return workqueue.Lease{}, false, fmt.Errorf("lease %q expired at %s", lease.ID, lease.ExpiresAt)
+		}
 		return lease, true, nil
 	}
 	if workItem.Status != agents.WorkItemStatusQueued {
@@ -51,4 +58,27 @@ func ReleaseActiveLease(ctx context.Context, repo Repository, lease workqueue.Le
 		return nil
 	}
 	return repo.ReleaseLease(ctx, lease.ID, reason, requeue, now)
+}
+
+func ReleaseCompletedLease(ctx context.Context, repo Repository, lease workqueue.Lease, reason string, now time.Time) error {
+	if strings.TrimSpace(lease.ID) == "" {
+		return nil
+	}
+	current, err := repo.Lease(ctx, lease.ID)
+	if err != nil {
+		return err
+	}
+	lease = current
+	if lease.Status != workqueue.LeaseStatusActive {
+		return nil
+	}
+	released := workqueue.ReleaseLease(lease, reason, now)
+	if err := repo.SaveLease(ctx, released); err != nil {
+		return err
+	}
+	stamp := now.UTC().Format(time.RFC3339Nano)
+	return repo.AppendWorkQueueEvent(ctx, workqueue.QueueEvent{
+		ID: "wqe_release_" + lease.ID, WorkItemID: lease.WorkItemID, EventType: workqueue.EventReleased,
+		Payload: fmt.Sprintf(`{"lease_id":%q,"reason":%q,"requeue":false}`, lease.ID, reason), CreatedAt: stamp,
+	})
 }

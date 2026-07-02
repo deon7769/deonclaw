@@ -23,6 +23,8 @@ type workDispatchOnceOptions struct {
 	leaseID                  string
 	mode                     string
 	confirmWorkerDispatch    bool
+	timeoutSeconds           int
+	leaseTTLSeconds          int
 	artifactsDir             string
 	registryRoot             string
 	skillPolicyPath          string
@@ -92,6 +94,8 @@ func runWorkDispatchOnce(opts workDispatchOnceOptions, stdout io.Writer, stderr 
 		LeaseID:                  opts.leaseID,
 		Mode:                     mode,
 		ConfirmWorkerDispatch:    opts.confirmWorkerDispatch,
+		LeaseTTL:                 time.Duration(opts.leaseTTLSeconds) * time.Second,
+		WorkerTimeout:            time.Duration(opts.timeoutSeconds) * time.Second,
 		RunningInCI:              dispatchRunningInCI(),
 		ArtifactsDir:             artifactsDir,
 		RegistryRoot:             registryRoot,
@@ -275,6 +279,14 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 	leaseID, _ := parseOptionalFlag(args, "--lease")
 	mode, _ := parseOptionalFlag(args, "--mode")
 	_, confirm := parseOptionalFlag(args, "--confirm-worker-dispatch")
+	timeoutSeconds, err := parseOptionalPositiveSecondsFlag(args, "--timeout-seconds")
+	if err != nil {
+		return workDispatchOnceOptions{}, err
+	}
+	leaseTTLSeconds, err := parseOptionalPositiveSecondsFlag(args, "--lease-ttl-seconds")
+	if err != nil {
+		return workDispatchOnceOptions{}, err
+	}
 	artifactsDir, err := parseConfigFlag(args, "--artifacts-dir")
 	if err != nil {
 		return workDispatchOnceOptions{}, err
@@ -310,7 +322,8 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 	}
 	return workDispatchOnceOptions{
 		storePath: storePath, workItemID: workItemID, leaseID: leaseID, mode: mode,
-		confirmWorkerDispatch: confirm, artifactsDir: artifactsDir, registryRoot: registryRoot,
+		confirmWorkerDispatch: confirm, timeoutSeconds: timeoutSeconds, leaseTTLSeconds: leaseTTLSeconds,
+		artifactsDir: artifactsDir, registryRoot: registryRoot,
 		skillPolicyPath: skillPolicyPath, insightPolicyPath: insightPolicyPath,
 		reviewerResponsePath:     reviewerResponsePath,
 		learningApprovalDecision: learningApprovalDecision,
@@ -318,6 +331,23 @@ func parseWorkDispatchOnceOptions(args []string) (workDispatchOnceOptions, error
 		learningApprovalReviewer: learningApprovalReviewer,
 		learningConfirmApply:     learningConfirmApply,
 	}, nil
+}
+
+func parseOptionalPositiveSecondsFlag(args []string, flag string) (int, error) {
+	for i := 0; i < len(args); i++ {
+		if args[i] != flag {
+			continue
+		}
+		if i+1 >= len(args) || strings.TrimSpace(args[i+1]) == "" {
+			return 0, fmt.Errorf("missing value for %s", flag)
+		}
+		value, err := strconv.Atoi(args[i+1])
+		if err != nil || value <= 0 {
+			return 0, fmt.Errorf("%s must be a positive integer", flag)
+		}
+		return value, nil
+	}
+	return 0, nil
 }
 
 func parseOptionalFlag(args []string, flag string) (string, bool) {
