@@ -31,15 +31,14 @@ At the start of Epic 23, DeonClaw already provides:
 - a complete provider-dispatch design and preimplementation gate;
 - CI and end-to-end fixtures for the provider-call chain.
 
+As of **23.19.1 on `main`**, the operational foundation includes persistent agents and sessions, proactive runtime (`daemon run-once`, schedules, wakeups, heartbeat dry-run), work queue with leases, usage/pricing ledger, atomic budget reservations, and budgeted fake dispatch with insight-review queueing.
+
 The principal missing capabilities are:
 
-- persistent agents and sessions;
-- daemon/runtime ownership;
-- cron, heartbeat, hooks, and wakeup queues;
-- work assignment, delegation, dependencies, and execution leases;
-- cost accounting and budget hard stops;
-- self-evaluation and learning from runs;
-- portable skill installation and session snapshots;
+- closed learning loop through dispatch (reviewer fixture → report → proposal → skill apply → session → effectiveness);
+- real worker dispatch behind lease, budget, and session gates;
+- long-running `deonclawd` with automatic schedule → work → dispatch;
+- OpenClaw migration shadow and cutover;
 - active retrieval and automatic MCP/tool orchestration;
 - generic Git/browser actions and an operator UI/API.
 
@@ -120,7 +119,7 @@ Introduce `deond`, durable schedules, wakeups, cron, heartbeats, active hours, e
 
 Detailed design: [PROACTIVE_RUNTIME.md](PROACTIVE_RUNTIME.md).
 
-**Status:** foundation shipped on `main` (`5224005`). Hardening slice `23.15.1–23.15.4` on branch `cursor/proactive-runtime-hardening-23-15`:
+**Status:** **merged and operational on `main`** (PR #8). Foundation `5224005` plus hardening `23.15.1–23.15.4`:
 
 | Slice | Scope |
 |-------|--------|
@@ -129,35 +128,61 @@ Detailed design: [PROACTIVE_RUNTIME.md](PROACTIVE_RUNTIME.md).
 | 23.15.3 | Skill approval before active, snapshot hash/revision validation, path containment, delegation path subset + privilege guard |
 | 23.15.4 | `make proactive-runtime-smoke` in CI, docs/AGENTS reconciliation |
 
-**Next:** 23E work queue, leases, budgets.
+Long-running `deonclawd` process and automatic dispatch from wakeups remain deferred to `23.28–23.31`.
 
-### 23E — Work Queue, Costs, and Budgets (`23.16–23.19`)
+### 23E — Work Queue, Costs, and Budgets (`23.16–23.19.1`)
 
 Add atomic checkout, leases, usage normalization, cost events, budget reservations, warning thresholds, hard stops, and budget-aware routing.
 
-Detailed design: [BUDGETS_AND_COSTS.md](BUDGETS_AND_COSTS.md).
+Detailed design: [BUDGETS_AND_COSTS.md](BUDGETS_AND_COSTS.md), [BUDGETED_DISPATCH.md](BUDGETED_DISPATCH.md).
 
-**Status:** **operational** on `cursor/work-queue-leases-23-16` — 23.16.1 queue hardening (inbox→queued, task snapshots, lease renew, transactional release/recover, read-only doctor), 23.17 usage/pricing ledger, 23.18 atomic budget reservations, 23.19 budgeted fake dispatch + insight review queue. CI: `make work-queue-smoke`, `make budgeted-dispatch-smoke`. Real worker dispatch requires `--confirm-worker-dispatch` and is excluded from CI.
+**Status:** **merged and operational on `main`** (PR #9) — 23.16.1 queue hardening (inbox→queued, task snapshots, lease renew, transactional release/recover, read-only doctor), 23.17 usage/pricing ledger, 23.18 atomic budget reservations, 23.19 budgeted fake dispatch + insight review queue, 23.19.1 dispatch hardening (auto-claim lease, mandatory budget policy, atomic usage+budget commit, skill snapshot materialization). CI: `make work-queue-smoke`, `make budgeted-dispatch-smoke`. `ModeReal` and `--confirm-worker-dispatch` are excluded from CI until `23.24–23.27`.
 
 | Task | State |
 |------|--------|
-| 23A insight kernel | foundation → **integrated** (reviewer queue, proposals) |
+| 23A insight kernel | foundation → **integrated** (reviewer queue, manual proposal CLI) |
 | 23B skill registry | foundation → **integrated** (dispatch skill auto-loading) |
 | 23C persistent agents | **integrated** (queue dispatch linkage) |
-| 23D proactive runtime | foundation → **integrated** (schedule → work item) |
-| 23E budgeted dispatch | **operational** (fixture smoke green) |
+| 23D proactive runtime | **merged** (`run-once` foundation; long-running deferred) |
+| 23E budgeted dispatch | **merged and operational** (fixture smokes green on `main`) |
 
-### 23F — OpenClaw Migration (`23.20–23.23`)
+### Post-23E execution order (reconciled)
 
-Provide inspect, plan, apply, verify, shadow, cutover, and rollback flows for OpenClaw agents, skills, memory, cron, heartbeat, and session metadata.
+Sprint numbers below supersede the original 23F/23G labels in [OPENCLAW_MIGRATION.md](OPENCLAW_MIGRATION.md) and [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md) for **execution sequencing**. Design docs keep their original section numbering.
 
-Detailed design: [OPENCLAW_MIGRATION.md](OPENCLAW_MIGRATION.md).
+#### 23.20–23.23 — Closed Learning Loop Operationalization
 
-### 23G — Rich Runtime Actions and Worker Adapters (`23.24–23.27`)
+Transform `insight_review` into a reusable fake E2E path: reviewer response fixture in the queue, automatic `InsightReport` and `LearningProposal` materialization, operator approval, approved skill registry apply, new session snapshot on the revision, and automatic effectiveness record.
 
-Add generic Git actions, browser preview/annotation, action buttons, richer Codex/OpenCode session adapters, cancellation, streaming, usage capture, and result handoff.
+Detailed design: [INSIGHT_LEARNING_LOOP.md](INSIGHT_LEARNING_LOOP.md).
 
-Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md).
+**Ready when:** run → evidence → `insight_review` → skill proposal → approve → install → session loads skill → effectiveness recorded.
+
+#### 23.24–23.27 — Real Codex/OpenCode Dispatch Adapter
+
+Wire `dispatch.ModeReal` to existing Codex/OpenCode runners behind lease, budget, task snapshot, and skill snapshot gates. Require `--confirm-worker-dispatch`; block real mode in CI. Preserve path policy, artifacts, validation commands, memory policy, lease renewal on long runs, usage capture (with estimate fallback), and basic cancellation/timeout.
+
+#### 23.28–23.31 — `deonclawd` Long-Running Runtime
+
+Real long-running process, configurable loop interval, graceful shutdown, robust PID/state, internal `run-once`, recovery loop, schedule → work → dispatch automation, operational heartbeat, pause/resume, logs and doctor, dry-run/shadow mode.
+
+Detailed design: [PROACTIVE_RUNTIME.md](PROACTIVE_RUNTIME.md).
+
+#### 23.32–23.35 — OpenClaw Migration Inspect/Plan/Shadow
+
+Inventory, skills import plan, heartbeat/cron migration plan, memory/instructions migration proposal, shadow mode without assuming execution, OpenClaw vs DeonClaw behavior diff.
+
+Detailed design: [OPENCLAW_MIGRATION.md](OPENCLAW_MIGRATION.md) (original 23F scope).
+
+#### 23.36–23.39 — OpenClaw Cutover/Rollback
+
+Explicit cutover and rollback only after shadow mode is stable.
+
+#### 23.40–23.43 — Rich Runtime Actions
+
+`deonctl actions list/show/plan/run`; governed Git and browser actions; review actions; action artifacts; UI-ready metadata.
+
+Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md) (original 23G scope).
 
 ## Dependency graph
 
@@ -178,14 +203,25 @@ Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md).
   └── provides schedules and wakeups for migration shadow mode
 
 23E Queue and Budgets
-  ├── required before unattended execution
-  └── required before real provider/network activation
+  ├── merged on main (23.16–23.19.1)
+  └── required before real dispatch and unattended execution
 
-23F OpenClaw Migration
+23.20–23.23 Closed Learning Loop
+  └── fake E2E before real reviewer workers
+
+23.24–23.27 Real Dispatch Adapter
+  ├── requires 23E + closed learning loop fixture path
+  └── required before deonclawd automatic dispatch
+
+23.28–23.31 deonclawd
+  ├── requires real dispatch adapter
+  └── schedule → work → dispatch automation
+
+23.32+ OpenClaw Migration
   ├── passive inventory may begin earlier
-  └── execution cutover requires 23C–23E
+  └── execution cutover requires 23C–23E and stable deonclawd
 
-23G Rich Actions
+23.40+ Rich Actions
   ├── can begin with read-only Git/browser actions
   └── mutating actions require queue, budget, and approval enforcement
 ```

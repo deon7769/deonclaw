@@ -381,13 +381,15 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 ## Next implementation order
 
-Current next sequence (Epic 23 — see [docs/EPIC_23_ROADMAP.md](docs/EPIC_23_ROADMAP.md)):
+Epic 23.16–23.19.1 is **merged and operational on `main`**. Current next sequence (see [docs/EPIC_23_ROADMAP.md](docs/EPIC_23_ROADMAP.md)):
 
-1. OpenClaw migration (`23.20–23.23`)
-2. Rich runtime actions (`23.24–23.27`)
-3. `deonclawd` long-running process with scheduled real dispatch
+1. Closed learning loop fake E2E (`23.20–23.23`)
+2. Real Codex/OpenCode dispatch adapter behind lease/budget/session gates (`23.24–23.27`)
+3. `deonclawd` long-running process with scheduled real dispatch (`23.28–23.31`)
+4. OpenClaw migration inspect/plan/shadow (`23.32–23.35`), cutover/rollback (`23.36–23.39`)
+5. Rich runtime actions (`23.40–23.43`)
 
-Deferred after operational foundation: MCP execution manager, active LanceDB retrieval in runner, UI/dashboard.
+Deferred after dispatch + daemon + budgets are stable: MCP execution manager, active LanceDB retrieval in runner, UI/dashboard.
 
 ## Coding style
 
@@ -425,6 +427,7 @@ Do not commit generated secrets, tokens, local auth files, memory vault contents
 - When commit/push is requested without branch context, confirm the current branch before proceeding; the user has corrected mistaken commits to `main`
 - Update mandatory sprint documentation (README, AGENTS.md, relevant docs, fixture README) in the same sprint before commit
 - Honor explicit "commit/push to main" only when the user states it clearly; otherwise use the feature-branch workflow
+- During contiguous Epic vertical-slice blocks, user may direct commit/push to `main` without opening a PR per chunk
 - After main-direct Epic vertical slices, use feature branch and draft PR for hardening, CI, or security reconciliation work
 
 ## Learned Workspace Facts
@@ -433,4 +436,9 @@ Do not commit generated secrets, tokens, local auth files, memory vault contents
 - `make provider-call-chain-smoke` is the end-to-end CI guard for the provider-call chain fixture through the current activation gates
 - Pre-ship validation for proactive runtime sprints: `gofmt -w .`, `git diff --check`, `go test ./...`, `make proactive-runtime-smoke`
 - `make proactive-runtime-smoke` is the end-to-end CI guard for the proactive runtime fixture through daemon/schedules/heartbeat/hooks smoke
+- Pre-ship validation for work-queue sprints: `gofmt -w .`, `git diff --check`, `go test ./...`, `make work-queue-smoke`
+- `make work-queue-smoke` is the end-to-end CI guard for the work queue and lease fixture
+- Pre-ship validation for budgeted-dispatch sprints: `gofmt -w .`, `git diff --check`, `go test ./...`, `make budgeted-dispatch-smoke`
+- `make budgeted-dispatch-smoke` is the end-to-end CI guard for budgeted fake dispatch through the insight review queue
+- Post-merge Epic reconciliation validation on `main`: `go test ./...`, `make provider-call-chain-smoke`, `make proactive-runtime-smoke`, `make work-queue-smoke`, `make budgeted-dispatch-smoke`
 - Feature branch naming pattern: `cursor/<descriptive-topic>-<sprint-range>`

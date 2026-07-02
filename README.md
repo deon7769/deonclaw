@@ -63,7 +63,9 @@ Implemented vertical slices include:
 | Costs and budgets | pricing ledger, usage events, budget windows, reservations, commits and hard stops |
 | Budgeted dispatch | fake worker dispatch with lease, budget, skill snapshot and insight-review evidence |
 
-The most recent active branch is `cursor/work-queue-leases-23-16`, focused on Epic 23.16-23.19.1.
+**Epic 23.16–23.19.1** (work queue, leases, budgets, and budgeted fake dispatch) is **merged and operational on `main`**. CI smokes: `make work-queue-smoke`, `make budgeted-dispatch-smoke`, `make proactive-runtime-smoke`, `make provider-call-chain-smoke`.
+
+**Next:** closed learning loop fake E2E (`23.20–23.23`) — evidence → insight review → proposal → skill apply → session → effectiveness. See [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md).
 
 ## What is deliberately not active yet
 
