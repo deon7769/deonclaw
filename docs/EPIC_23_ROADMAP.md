@@ -164,7 +164,7 @@ Detailed design: [INSIGHT_LEARNING_LOOP.md](INSIGHT_LEARNING_LOOP.md).
 
 Wire `dispatch.ModeReal` to existing Codex/OpenCode runners behind lease, budget, task snapshot, and skill snapshot gates. Require `--confirm-worker-dispatch`; block real mode in CI. Preserve path policy, artifacts, validation commands, memory policy, lease renewal on long runs, usage capture (with estimate fallback), and basic cancellation/timeout.
 
-**Status:** **23.24 foundation implemented** — `ModeReal` no longer stops before operational gates. Without `--confirm-worker-dispatch`, dispatch returns a blocked `real_dispatch_requires_confirmation` result without starting a worker. In `CI`/`GITHUB_ACTIONS`, it returns `real_dispatch_blocked_in_ci` even with confirmation. Outside CI, manual dispatch reaches Codex/OpenCode worker adapters only after lease, budget reservation, task snapshot validation, and skill snapshot materialization. Fixture smokes remain fake-only; richer real-run artifact/event persistence, lease renewal for long runs, and cancellation/timeout hardening remain in `23.25–23.27`.
+**Status:** **23.24-23.25 foundation implemented** — `ModeReal` no longer stops before operational gates. Without `--confirm-worker-dispatch`, dispatch returns a blocked `real_dispatch_requires_confirmation` result without starting a worker. In `CI`/`GITHUB_ACTIONS`, it returns `real_dispatch_blocked_in_ci` even with confirmation. Outside CI, manual dispatch reaches Codex/OpenCode worker adapters only after lease, budget reservation, task snapshot validation, and skill snapshot materialization. Worker events and artifacts are persisted under the active dispatch run instead of creating a competing run. Fixture smokes remain fake-only; lease renewal for long runs and cancellation/timeout hardening remain in `23.26–23.27`.
 
 #### 23.28–23.31 — `deonclawd` Long-Running Runtime
 
@@ -215,7 +215,7 @@ Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md) (original 23
 
 23.24–23.27 Real Dispatch Adapter
   ├── requires 23E + closed learning loop fixture path
-  └── 23.24 manual confirmed adapter foundation done; artifact/event persistence, lease renewal, cancellation still next
+  └── 23.24-23.25 manual confirmed adapter + worker output persistence done; lease renewal/cancellation still next
 
 23.28–23.31 deonclawd
   ├── requires real dispatch adapter

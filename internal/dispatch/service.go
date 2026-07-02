@@ -232,8 +232,15 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 		TaskJSON: snapshot.TaskJSON, TaskID: task.ID, Worker: workerName,
 		ModelProfile: agent.ModelProfile, RunID: runID, Mode: mode, ConfirmReal: opts.ConfirmWorkerDispatch,
 	})
+	outputs, outputErr := persistWorkerOutputs(ctx, s.Repo, opts.ArtifactsDir, runID, workerResult, now)
 	if err != nil {
+		if outputErr != nil {
+			err = fmt.Errorf("%w; persist worker outputs: %v", err, outputErr)
+		}
 		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, err)
+	}
+	if outputErr != nil {
+		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, outputErr)
 	}
 	if workerResult.Status == runs.StatusFailed || workerResult.Status == runs.StatusPolicyFailed {
 		msg := workerResult.ErrorMessage
@@ -243,6 +250,9 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, fmt.Errorf("%s", msg))
 	}
 	steps = append(steps, StepExecuteWorker)
+	if outputs.Artifacts > 0 || outputs.Events > 0 {
+		steps = append(steps, StepPersistWorkerOutputs)
+	}
 
 	var learningLoop *LearningLoopResult
 	if workItem.Kind == agents.WorkItemKindInsightReview {

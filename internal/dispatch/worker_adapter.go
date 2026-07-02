@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/workers"
@@ -43,12 +44,34 @@ func (r externalWorkerRunner) Run(ctx context.Context, opts WorkerRunOptions) (W
 		UsageMeta:  workerMetadata(result, opts),
 		DurationMS: durationMS,
 	}
+	if result != nil {
+		workerResult.Artifacts = append(workerResult.Artifacts, result.Artifacts...)
+		workerResult.Events = workerEvents(result.Events, opts.RunID, start)
+	}
 	if runErr != nil {
 		workerResult.Status = runs.StatusFailed
 		workerResult.ErrorMessage = runErr.Error()
 		return workerResult, runErr
 	}
 	return workerResult, nil
+}
+
+func workerEvents(workerEvents []workers.WorkerEvent, runID string, start time.Time) []events.Event {
+	eventsOut := make([]events.Event, 0, len(workerEvents))
+	for i, event := range workerEvents {
+		eventType := events.EventType(strings.TrimSpace(event.Type))
+		if eventType == "" {
+			eventType = events.TypeWorkerMessage
+		}
+		eventsOut = append(eventsOut, events.Event{
+			ID:        fmt.Sprintf("evt_%s_worker_%03d", runID, i+1),
+			RunID:     runID,
+			Type:      eventType,
+			Timestamp: start.Add(time.Duration(i) * time.Nanosecond),
+			Payload:   append([]byte(nil), event.Payload...),
+		})
+	}
+	return eventsOut
 }
 
 func decodeWorkerTask(taskJSON string) (tasks.Task, error) {

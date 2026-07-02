@@ -29,8 +29,9 @@ Default mode is `fake`. `--mode real` requires `--confirm-worker-dispatch`; with
 5. Resolve session and materialize skill snapshot into workspace
 6. Create run, bind lease, mark work running
 7. Start worker (fake by default; real only with explicit confirmation, never before lease + budget reservation)
-8. **Atomic budget commit + usage event** in one transaction
-9. Release lease, build evidence bundle, queue `insight_review` with task snapshot
+8. Persist worker events/artifacts under the dispatch run when the worker returns them
+9. **Atomic budget commit + usage event** in one transaction
+10. Release lease, build evidence bundle, queue `insight_review` with task snapshot
 
 See [ADR_BUDGETED_DISPATCH_ORDERING.md](ADR_BUDGETED_DISPATCH_ORDERING.md).
 

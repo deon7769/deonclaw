@@ -61,10 +61,10 @@ func TestExternalWorkerRunnerRejectsNonRealMode(t *testing.T) {
 func TestExternalWorkerRunnerRunsWorkerAndNormalizesMetadata(t *testing.T) {
 	worker := &stubExternalWorker{result: &workers.RunResult{
 		Worker: "codex",
-		Events: []workers.WorkerEvent{{Type: workers.EventStdoutJSON}},
+		Events: []workers.WorkerEvent{{Type: workers.EventStdoutJSON, Payload: json.RawMessage(`{"ok":true}`)}},
 		Artifacts: []artifacts.Artifact{
-			{Path: "artifacts/stdout.jsonl", Kind: artifacts.KindEvents},
-			{Path: "artifacts/stderr.log", Kind: artifacts.KindLog},
+			{Path: "artifacts/stdout.jsonl", Kind: artifacts.KindEvents, Content: []byte("{\"ok\":true}\n")},
+			{Path: "artifacts/stderr.log", Kind: artifacts.KindLog, Content: []byte{}},
 		},
 		Metadata: map[string]string{"provider": "test-provider", "model": "test-model"},
 	}}
@@ -86,6 +86,9 @@ func TestExternalWorkerRunnerRunsWorkerAndNormalizesMetadata(t *testing.T) {
 	}
 	if result.UsageMeta["provider"] != "test-provider" || result.UsageMeta["model_profile"] != "test-profile" || result.UsageMeta["artifact_count"] != 2 {
 		t.Fatalf("usage meta = %+v", result.UsageMeta)
+	}
+	if len(result.Artifacts) != 2 || len(result.Events) != 1 || string(result.Events[0].Payload) != `{"ok":true}` {
+		t.Fatalf("outputs = artifacts:%+v events:%+v", result.Artifacts, result.Events)
 	}
 }
 

@@ -9,8 +9,11 @@ import (
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/agents"
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/budget"
+	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/insights"
+	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/skills"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/usage"
@@ -311,6 +314,85 @@ func TestDispatchOnceRealModeWithConfirmationUsesConfiguredRunner(t *testing.T) 
 	}
 	if !called || captured.Mode != ModeReal || !captured.ConfirmReal || captured.TaskID != task.ID || captured.Worker != "codex" {
 		t.Fatalf("runner called=%v captured=%+v", called, captured)
+	}
+}
+
+func TestDispatchOnceRealModePersistsWorkerArtifactsAndEvents(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-artifacts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "real-artifact-agent", DisplayName: "Real Artifact", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "real-artifact-budget", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-real-artifacts", Title: "Real artifacts", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		return WorkerRunResult{
+			Status: runs.StatusSucceeded,
+			Artifacts: []artifacts.Artifact{{
+				ID:      "stdout",
+				Path:    "artifacts/stdout.log",
+				Kind:    artifacts.KindLog,
+				Content: []byte("worker output\n"),
+			}},
+			Events: []events.Event{{
+				ID:      "worker-message",
+				Type:    events.TypeWorkerMessage,
+				Payload: json.RawMessage(`{"text":"ok"}`),
+			}},
+		}, nil
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	storedArtifacts, err := db.ArtifactsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedArtifacts) != 1 || storedArtifacts[0].RunID != result.RunID || storedArtifacts[0].Kind != artifacts.KindLog || storedArtifacts[0].SizeBytes != int64(len("worker output\n")) || storedArtifacts[0].SHA256 == "" {
+		t.Fatalf("stored artifacts = %+v", storedArtifacts)
+	}
+	if storedArtifacts[0].ID != "art_"+result.RunID+"_worker_001" || filepath.Dir(storedArtifacts[0].Path) != filepath.Join(opts.ArtifactsDir, "worker", result.RunID, "artifacts") {
+		t.Fatalf("stored artifact identity/path = %+v", storedArtifacts[0])
+	}
+	content, err := os.ReadFile(storedArtifacts[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "worker output\n" {
+		t.Fatalf("artifact content = %q", content)
+	}
+	storedEvents, err := db.EventsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedEvents) != 1 || storedEvents[0].RunID != result.RunID || storedEvents[0].Type != events.TypeWorkerMessage || string(storedEvents[0].Payload) != `{"text":"ok"}` {
+		t.Fatalf("stored events = %+v", storedEvents)
+	}
+	if storedEvents[0].ID != "evt_"+result.RunID+"_worker_001" {
+		t.Fatalf("stored event id = %q", storedEvents[0].ID)
 	}
 }
 

@@ -5,7 +5,9 @@ import (
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/agents"
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/budget"
+	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/insights"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/skills"
@@ -39,6 +41,7 @@ const (
 	StepBindLease            = "14_bind_lease"
 	StepMarkWorkRunning      = "15_mark_work_running"
 	StepExecuteWorker        = "16_execute_worker"
+	StepPersistWorkerOutputs = "16a_persist_worker_outputs"
 	StepNormalizeUsage       = "17_normalize_usage"
 	StepCalculateCost        = "18_calculate_cost"
 	StepCommitBudget         = "19_commit_budget"
@@ -62,6 +65,8 @@ type Repository interface {
 	ListLeases(ctx context.Context) ([]workqueue.Lease, error)
 	SaveSession(ctx context.Context, session agents.Session) error
 	SaveRun(ctx context.Context, run *runs.Run) error
+	SaveEvent(ctx context.Context, event *events.Event) error
+	SaveArtifact(ctx context.Context, artifact *artifacts.Artifact) error
 	SaveTask(ctx context.Context, task *tasks.Task) error
 	AppendWorkQueueEvent(ctx context.Context, event workqueue.QueueEvent) error
 	BudgetPolicy(ctx context.Context, id string) (budget.Policy, error)
@@ -96,6 +101,8 @@ type WorkerRunResult struct {
 	UsageMeta    map[string]any
 	DurationMS   int64
 	ErrorMessage string
+	Events       []events.Event
+	Artifacts    []artifacts.Artifact
 }
 
 type BudgetConfigLoader func() (budget.Config, error)
