@@ -9,6 +9,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/budget"
 	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/insights"
+	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/skills"
 	"github.com/deon7769/deonclaw/internal/tasks"
@@ -42,6 +43,7 @@ const (
 	StepMarkWorkRunning      = "15_mark_work_running"
 	StepExecuteWorker        = "16_execute_worker"
 	StepPersistWorkerOutputs = "16a_persist_worker_outputs"
+	StepRunValidation        = "16b_run_validation"
 	StepNormalizeUsage       = "17_normalize_usage"
 	StepCalculateCost        = "18_calculate_cost"
 	StepVerifyLeaseForCommit = "18a_verify_lease_for_commit"
@@ -134,6 +136,7 @@ type OnceOptions struct {
 	BudgetConfigLoader       BudgetConfigLoader
 	PricingLoader            PricingLoader
 	EvidenceBuilder          EvidenceBuilder
+	ValidationRunner         runner.ValidationRunner
 	CodexRunner              WorkerRunner
 	OpenCodeRunner           WorkerRunner
 	Now                      time.Time

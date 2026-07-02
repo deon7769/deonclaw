@@ -22,7 +22,7 @@ Default mode is `fake`. `--mode real` requires `--confirm-worker-dispatch`; with
 
 `--lease` is optional for queued work: dispatch auto-claims exactly one lease atomically. Already-leased work without `--lease` returns `not_started` without starting a worker. Explicit leases must still be active, match the work item and agent, and not be expired.
 
-For real dispatch, `--lease-ttl-seconds` controls the initial lease TTL and renewal TTL, and `--timeout-seconds` cancels the worker context if it runs too long. Real dispatch renews the active lease while the worker is running and revalidates lease ownership before committing budget/usage.
+For real dispatch, `--lease-ttl-seconds` controls the initial lease TTL and renewal TTL, and `--timeout-seconds` cancels the worker context if it runs too long. Real dispatch renews the active lease while the worker is running, revalidates lease ownership before committing budget/usage, and runs configured local `validation.commands` after a successful worker return. Validation outputs are persisted as `validation/validation.json` and `validation/validation.log`; validation failure releases the budget reservation and lease before budget commit.
 
 ## Ordering (23.19.1)
 
@@ -34,9 +34,10 @@ For real dispatch, `--lease-ttl-seconds` controls the initial lease TTL and rene
 6. Create run, bind lease, mark work running
 7. Start worker (fake by default; real only with explicit confirmation, never before lease + budget reservation)
 8. Persist worker events/artifacts under the dispatch run when the worker returns them
-9. In real mode, renew the lease while the worker runs and verify the same active lease still owns the run before commit
-10. **Atomic budget commit + usage event** in one transaction
-11. Release lease, build evidence bundle, queue `insight_review` with task snapshot
+9. In real mode, run configured local validation commands and persist validation artifacts
+10. In real mode, verify the same active lease still owns the run before commit
+11. **Atomic budget commit + usage event** in one transaction
+12. Release lease, build evidence bundle, queue `insight_review` with task snapshot
 
 See [ADR_BUDGETED_DISPATCH_ORDERING.md](ADR_BUDGETED_DISPATCH_ORDERING.md).
 

@@ -15,6 +15,7 @@ import (
 	"github.com/deon7769/deonclaw/internal/budget"
 	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/insights"
+	runnermod "github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/skills"
 	"github.com/deon7769/deonclaw/internal/tasks"
@@ -102,6 +103,38 @@ func seedRealDispatchWork(t *testing.T, db *testStoreAdapter, agentID string, ta
 	}
 	item := seedQueuedWork(t, db, agent, policy.ID, task)
 	return agent, item
+}
+
+func seedRealDispatchWorkWithValidation(t *testing.T, db *testStoreAdapter, agentID string, taskID string, commands []tasks.ValidationCommand) (agents.Agent, agents.WorkItem, tasks.Task) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: agentID, DisplayName: "Real", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	if err := db.SaveAgent(ctx, agent); err != nil {
+		t.Fatalf("SaveAgent() error = %v", err)
+	}
+	policy := budget.Policy{
+		ID: "budget-" + agentID, Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	if err := db.SyncBudgetPolicies(ctx, []budget.Policy{policy}); err != nil {
+		t.Fatalf("SyncBudgetPolicies() error = %v", err)
+	}
+	task := tasks.Task{
+		ID: taskID, Title: "Real validation", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		Validation:       tasks.ValidationSpec{Commands: commands},
+		AllowedPaths:     []string{"/"},
+		ForbiddenPaths:   []string{"/secrets"},
+		ExpectedOutputs:  []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	return agent, item, task
 }
 
 func TestDispatchOnceFakeSuccess(t *testing.T) {
@@ -544,6 +577,123 @@ func TestDispatchOnceRealModeTimeoutCancelsWorkerAndReleasesLease(t *testing.T) 
 	}
 	if lease.Status == workqueue.LeaseStatusActive {
 		t.Fatalf("lease still active after timeout: %+v", lease)
+	}
+}
+
+func TestDispatchOnceRealModeRunsValidationBeforeBudgetCommit(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-validation-pass.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	command := tasks.ValidationCommand{Name: "unit", Command: "go", Args: []string{"test", "./..."}, TimeoutSeconds: 7}
+	_, item, task := seedRealDispatchWorkWithValidation(t, db, "real-validation-agent", "task-real-validation-pass", []tasks.ValidationCommand{command})
+
+	validationCalled := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		return WorkerRunResult{Status: runs.StatusSucceeded, DurationMS: 25}, nil
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.ValidationRunner = func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) runnermod.ValidationResult {
+		validationCalled = true
+		if workspace != task.Workspace.Path {
+			t.Fatalf("validation workspace = %q, want %q", workspace, task.Workspace.Path)
+		}
+		if len(commands) != 1 || commands[0].Name != command.Name || commands[0].TimeoutSeconds != command.TimeoutSeconds {
+			t.Fatalf("validation commands = %+v", commands)
+		}
+		return runnermod.ValidationResult{
+			Status:       runnermod.ValidationPassed,
+			Runtime:      tasks.ValidationRuntimeLocal,
+			CommandCount: len(commands),
+			Commands: []runnermod.ValidationCommandResult{{
+				Name: command.Name, Command: command.Command, Args: append([]string(nil), command.Args...),
+				TimeoutSeconds: command.TimeoutSeconds, Status: runnermod.ValidationPassed,
+			}},
+		}
+	}
+
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	if !validationCalled {
+		t.Fatal("validation runner was not called")
+	}
+	if result.Status != "ok" || !result.BudgetCommitted || !containsStep(result.StepsCompleted, StepRunValidation) {
+		t.Fatalf("dispatch result = %+v", result)
+	}
+	storedArtifacts, err := db.ArtifactsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasArtifactPathSuffix(storedArtifacts, "validation/validation.json") || !hasArtifactPathSuffix(storedArtifacts, "validation/validation.log") {
+		t.Fatalf("validation artifacts missing: %+v", storedArtifacts)
+	}
+}
+
+func TestDispatchOnceRealModeValidationFailureReleasesLeaseAndBudget(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-validation-fail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	command := tasks.ValidationCommand{Name: "unit", Command: "go", Args: []string{"test", "./..."}, TimeoutSeconds: 7}
+	_, item, _ := seedRealDispatchWorkWithValidation(t, db, "real-validation-fail-agent", "task-real-validation-fail", []tasks.ValidationCommand{command})
+
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		return WorkerRunResult{Status: runs.StatusSucceeded, DurationMS: 25}, nil
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.ValidationRunner = func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) runnermod.ValidationResult {
+		return runnermod.ValidationResult{
+			Status:       runnermod.ValidationFailed,
+			Runtime:      tasks.ValidationRuntimeLocal,
+			CommandCount: len(commands),
+			Error:        `validation command "unit" failed with exit code 1`,
+			Commands: []runnermod.ValidationCommandResult{{
+				Name: command.Name, Command: command.Command, Args: append([]string(nil), command.Args...),
+				TimeoutSeconds: command.TimeoutSeconds, ExitCode: 1, Status: runnermod.ValidationFailed,
+				Error: `exit status 1`,
+			}},
+		}
+	}
+
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), `validation command "unit" failed`) {
+		t.Fatalf("DispatchOnce() error = %v result=%+v, want validation failure", err, result)
+	}
+	if result.Status != "failed" || !result.WorkerStarted || result.BudgetCommitted || !result.BudgetReleased || !result.LeaseReleased {
+		t.Fatalf("validation failure result = %+v", result)
+	}
+	run, err := db.Run(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != runs.StatusFailed {
+		t.Fatalf("run status = %q, want failed", run.Status)
+	}
+	workItem, err := db.WorkItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workItem.Status != agents.WorkItemStatusFailed {
+		t.Fatalf("work item status = %q, want failed", workItem.Status)
+	}
+	storedArtifacts, err := db.ArtifactsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasArtifactPathSuffix(storedArtifacts, "validation/validation.json") || !hasArtifactPathSuffix(storedArtifacts, "validation/validation.log") {
+		t.Fatalf("validation artifacts missing after failure: %+v", storedArtifacts)
 	}
 }
 
@@ -1019,4 +1169,23 @@ func TestDispatchRunnerErrorReleasesLease(t *testing.T) {
 			t.Fatalf("lease still active: %+v", lease)
 		}
 	}
+}
+
+func containsStep(steps []string, want string) bool {
+	for _, step := range steps {
+		if step == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArtifactPathSuffix(storedArtifacts []artifacts.Artifact, suffix string) bool {
+	suffix = filepath.FromSlash(suffix)
+	for _, artifact := range storedArtifacts {
+		if strings.HasSuffix(artifact.Path, suffix) {
+			return true
+		}
+	}
+	return false
 }

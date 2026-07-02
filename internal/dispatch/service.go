@@ -255,8 +255,11 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 			err = renewErr
 		}
 	}
-	outputs, outputErr := persistWorkerOutputs(ctx, s.Repo, opts.ArtifactsDir, runID, workerResult, now)
 	if err != nil {
+		outputs, outputErr := persistWorkerOutputs(ctx, s.Repo, opts.ArtifactsDir, runID, workerResult, now)
+		if outputs.Artifacts > 0 || outputs.Events > 0 {
+			steps = append(steps, StepPersistWorkerOutputs)
+		}
 		if outputErr != nil {
 			err = fmt.Errorf("%w; persist worker outputs: %v", err, outputErr)
 		}
@@ -265,10 +268,14 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 		}
 		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, err)
 	}
-	if outputErr != nil {
-		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, outputErr)
-	}
 	if workerResult.Status == runs.StatusFailed || workerResult.Status == runs.StatusPolicyFailed {
+		outputs, outputErr := persistWorkerOutputs(ctx, s.Repo, opts.ArtifactsDir, runID, workerResult, now)
+		if outputs.Artifacts > 0 || outputs.Events > 0 {
+			steps = append(steps, StepPersistWorkerOutputs)
+		}
+		if outputErr != nil {
+			return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, outputErr)
+		}
 		msg := workerResult.ErrorMessage
 		if strings.TrimSpace(msg) == "" {
 			msg = "worker returned failed status"
@@ -276,6 +283,13 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, fmt.Errorf("%s", msg))
 	}
 	if workerResult.Status == runs.StatusCancelled {
+		outputs, outputErr := persistWorkerOutputs(ctx, s.Repo, opts.ArtifactsDir, runID, workerResult, now)
+		if outputs.Artifacts > 0 || outputs.Events > 0 {
+			steps = append(steps, StepPersistWorkerOutputs)
+		}
+		if outputErr != nil {
+			return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, outputErr)
+		}
 		msg := workerResult.ErrorMessage
 		if strings.TrimSpace(msg) == "" {
 			msg = "worker returned cancelled status"
@@ -283,8 +297,30 @@ func (s Service) DispatchOnce(ctx context.Context, opts OnceOptions) (OnceResult
 		return s.cancelDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, fmt.Errorf("%s", msg))
 	}
 	steps = append(steps, StepExecuteWorker)
+
+	var validationErr error
+	if mode == ModeReal && len(task.Validation.Commands) > 0 {
+		validationResult, validationArtifacts, err := runDispatchValidation(ctx, opts, task)
+		if workerResult.UsageMeta == nil {
+			workerResult.UsageMeta = map[string]any{}
+		}
+		workerResult.UsageMeta["validation_status"] = validationResult.Status
+		workerResult.UsageMeta["validation_runtime"] = validationResult.Runtime
+		workerResult.UsageMeta["validation_command_count"] = validationResult.CommandCount
+		workerResult.Artifacts = append(workerResult.Artifacts, validationArtifacts...)
+		validationErr = err
+		steps = append(steps, StepRunValidation)
+	}
+
+	outputs, outputErr := persistWorkerOutputs(ctx, s.Repo, opts.ArtifactsDir, runID, workerResult, now)
+	if outputErr != nil {
+		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, outputErr)
+	}
 	if outputs.Artifacts > 0 || outputs.Events > 0 {
 		steps = append(steps, StepPersistWorkerOutputs)
+	}
+	if validationErr != nil {
+		return s.failDispatch(ctx, opts, steps, run, workItem, lease, reservation, true, now, validationErr)
 	}
 
 	var learningLoop *LearningLoopResult
