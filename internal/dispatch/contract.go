@@ -5,8 +5,11 @@ import (
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/agents"
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/budget"
+	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/insights"
+	"github.com/deon7769/deonclaw/internal/runner"
 	"github.com/deon7769/deonclaw/internal/runs"
 	"github.com/deon7769/deonclaw/internal/skills"
 	"github.com/deon7769/deonclaw/internal/tasks"
@@ -18,8 +21,10 @@ const (
 	ModeFake = "fake"
 	ModeReal = "real"
 
-	BlockedBudgetPolicyRequired = "budget_policy_required"
-	BlockedRealModeUnsupported  = "real_dispatch_not_wired"
+	BlockedBudgetPolicyRequired         = "budget_policy_required"
+	BlockedRealModeUnsupported          = "real_dispatch_not_wired"
+	BlockedRealModeConfirmationRequired = "real_dispatch_requires_confirmation"
+	BlockedRealModeCI                   = "real_dispatch_blocked_in_ci"
 
 	StepValidateOptions      = "01_validate_options"
 	StepLoadWorkItem         = "02_load_work_item"
@@ -37,8 +42,11 @@ const (
 	StepBindLease            = "14_bind_lease"
 	StepMarkWorkRunning      = "15_mark_work_running"
 	StepExecuteWorker        = "16_execute_worker"
+	StepPersistWorkerOutputs = "16a_persist_worker_outputs"
+	StepRunValidation        = "16b_run_validation"
 	StepNormalizeUsage       = "17_normalize_usage"
 	StepCalculateCost        = "18_calculate_cost"
+	StepVerifyLeaseForCommit = "18a_verify_lease_for_commit"
 	StepCommitBudget         = "19_commit_budget"
 	StepPersistUsage         = "20_persist_usage"
 	StepFinalizeRun          = "21_finalize_run"
@@ -56,10 +64,13 @@ type Repository interface {
 	ClaimWorkItem(ctx context.Context, agentID string, workItemID string, ttl time.Duration, now time.Time) (workqueue.ClaimResult, error)
 	Lease(ctx context.Context, id string) (workqueue.Lease, error)
 	SaveLease(ctx context.Context, lease workqueue.Lease) error
+	RenewLease(ctx context.Context, leaseID string, ttl time.Duration, now time.Time) (workqueue.Lease, error)
 	ReleaseLease(ctx context.Context, leaseID string, reason string, requeue bool, now time.Time) error
 	ListLeases(ctx context.Context) ([]workqueue.Lease, error)
 	SaveSession(ctx context.Context, session agents.Session) error
 	SaveRun(ctx context.Context, run *runs.Run) error
+	SaveEvent(ctx context.Context, event *events.Event) error
+	SaveArtifact(ctx context.Context, artifact *artifacts.Artifact) error
 	SaveTask(ctx context.Context, task *tasks.Task) error
 	AppendWorkQueueEvent(ctx context.Context, event workqueue.QueueEvent) error
 	BudgetPolicy(ctx context.Context, id string) (budget.Policy, error)
@@ -94,6 +105,8 @@ type WorkerRunResult struct {
 	UsageMeta    map[string]any
 	DurationMS   int64
 	ErrorMessage string
+	Events       []events.Event
+	Artifacts    []artifacts.Artifact
 }
 
 type BudgetConfigLoader func() (budget.Config, error)
@@ -103,22 +116,30 @@ type PricingLoader func(ctx context.Context, repo Repository, modelProfile strin
 type EvidenceBuilder func(ctx context.Context, repo Repository, runID string, now time.Time) (insights.EvidenceBundle, error)
 
 type OnceOptions struct {
-	WorkItemID            string
-	LeaseID               string
-	LeaseTTL              time.Duration
-	Mode                  string
-	ConfirmWorkerDispatch bool
-	ArtifactsDir          string
-	RegistryRoot          string
-	SkillPolicy           skills.Policy
-	ReviewerResponsePath  string
-	InsightPolicy         insights.Policy
-	BudgetConfigLoader    BudgetConfigLoader
-	PricingLoader         PricingLoader
-	EvidenceBuilder       EvidenceBuilder
-	CodexRunner           WorkerRunner
-	OpenCodeRunner        WorkerRunner
-	Now                   time.Time
+	WorkItemID               string
+	LeaseID                  string
+	LeaseTTL                 time.Duration
+	LeaseRenewInterval       time.Duration
+	WorkerTimeout            time.Duration
+	Mode                     string
+	ConfirmWorkerDispatch    bool
+	RunningInCI              bool
+	ArtifactsDir             string
+	RegistryRoot             string
+	SkillPolicy              skills.Policy
+	ReviewerResponsePath     string
+	InsightPolicy            insights.Policy
+	LearningApprovalDecision string
+	LearningApprovalReason   string
+	LearningApprovalReviewer string
+	LearningConfirmApply     bool
+	BudgetConfigLoader       BudgetConfigLoader
+	PricingLoader            PricingLoader
+	EvidenceBuilder          EvidenceBuilder
+	ValidationRunner         runner.ValidationRunner
+	CodexRunner              WorkerRunner
+	OpenCodeRunner           WorkerRunner
+	Now                      time.Time
 }
 
 type BudgetBlockedContract struct {

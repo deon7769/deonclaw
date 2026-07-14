@@ -136,7 +136,7 @@ Add atomic checkout, leases, usage normalization, cost events, budget reservatio
 
 Detailed design: [BUDGETS_AND_COSTS.md](BUDGETS_AND_COSTS.md), [BUDGETED_DISPATCH.md](BUDGETED_DISPATCH.md).
 
-**Status:** **merged and operational on `main`** (PR #9) — 23.16.1 queue hardening (inbox→queued, task snapshots, lease renew, transactional release/recover, read-only doctor), 23.17 usage/pricing ledger, 23.18 atomic budget reservations, 23.19 budgeted fake dispatch + insight review queue, 23.19.1 dispatch hardening (auto-claim lease, mandatory budget policy, atomic usage+budget commit, skill snapshot materialization). CI: `make work-queue-smoke`, `make budgeted-dispatch-smoke`. `ModeReal` and `--confirm-worker-dispatch` are excluded from CI until `23.24–23.27`.
+**Status:** **merged and operational on `main`** (PR #9) — 23.16.1 queue hardening (inbox→queued, task snapshots, lease renew, transactional release/recover, read-only doctor), 23.17 usage/pricing ledger, 23.18 atomic budget reservations, 23.19 budgeted fake dispatch + insight review queue, 23.19.1 dispatch hardening (auto-claim lease, mandatory budget policy, atomic usage+budget commit, skill snapshot materialization). CI: `make work-queue-smoke`, `make budgeted-dispatch-smoke`. `ModeReal` remains blocked in CI while `23.24–23.27` hardens manual real dispatch.
 
 | Task | State |
 |------|--------|
@@ -152,17 +152,19 @@ Sprint numbers below supersede the original 23F/23G labels in [OPENCLAW_MIGRATIO
 
 #### 23.20–23.23 — Closed Learning Loop Operationalization
 
-Transform `insight_review` into a reusable fake E2E path: reviewer response fixture in the queue, automatic `InsightReport` and `LearningProposal` materialization, operator approval, approved skill registry apply, new session snapshot on the revision, and automatic effectiveness record.
+Transform `insight_review` into a reusable fake E2E path: reviewer response fixture in the queue, automatic `InsightReport` and `LearningProposal` materialization, operator approval, governed apply preview/result artifacts, a planned session-refresh snapshot, and automatic effectiveness records.
 
-**Status:** **23.20 implemented in the budgeted-dispatch fixture path** — fake `insight_review` dispatch can load an explicit reviewer response fixture through `work dispatch-once --insight-policy ... --reviewer-response ...` and materialize `insight-report.json` plus `learning-proposals.json` artifacts linked to the parent evidence bundle. Approval, skill apply, session refresh, and effectiveness remain in `23.21–23.23`.
+**Status:** **23.20-23.23 implemented in the budgeted-dispatch fixture path** — fake `insight_review` dispatch can load an explicit reviewer response fixture through `work dispatch-once --insight-policy ... --reviewer-response ...` and materialize `insight-report.json` plus `learning-proposals.json` artifacts linked to the parent evidence bundle. When `--learning-approval-decision ... --learning-approval-reason ...` are supplied, it also writes governed `learning-approval-<proposal>.json` artifacts bound to each proposal. When `--learning-confirm-apply` is supplied with that approval, it writes `learning-apply-preview-<proposal>.md`, `learning-apply-result-<proposal>.json`, `learning-effectiveness-<proposal>.json`, `learning-session-refresh.json`, and `learning-session-snapshot-<session>.json` artifacts without mutating canonical learning targets. Real skill registry apply remains gated behind later integration.
 
 Detailed design: [INSIGHT_LEARNING_LOOP.md](INSIGHT_LEARNING_LOOP.md).
 
-**Ready when:** run → evidence → `insight_review` → skill proposal → approve → install → session loads skill → effectiveness recorded.
+**Ready when:** run → evidence → `insight_review` → proposal → approve → apply preview/result → planned session refresh → effectiveness recorded.
 
 #### 23.24–23.27 — Real Codex/OpenCode Dispatch Adapter
 
 Wire `dispatch.ModeReal` to existing Codex/OpenCode runners behind lease, budget, task snapshot, and skill snapshot gates. Require `--confirm-worker-dispatch`; block real mode in CI. Preserve path policy, artifacts, validation commands, memory policy, lease renewal on long runs, usage capture (with estimate fallback), and basic cancellation/timeout.
+
+**Status:** **23.24-23.27 implemented** — `ModeReal` no longer stops before operational gates. Without `--confirm-worker-dispatch`, dispatch returns a blocked `real_dispatch_requires_confirmation` result without starting a worker. In `CI`/`GITHUB_ACTIONS`, it returns `real_dispatch_blocked_in_ci` even with confirmation. Outside CI, manual dispatch reaches Codex/OpenCode worker adapters only after lease, budget reservation, task snapshot validation, and skill snapshot materialization. Worker events and artifacts are persisted under the active dispatch run instead of creating a competing run. Real dispatch renews the active lease while the worker runs, rejects expired explicit leases, runs configured local validation commands after successful worker execution, persists validation artifacts under the active dispatch run, revalidates lease ownership before budget/usage commit, and supports `--timeout-seconds` plus `--lease-ttl-seconds` for controlled manual runs. Fixture smokes remain fake-only.
 
 #### 23.28–23.31 — `deonclawd` Long-Running Runtime
 
@@ -209,11 +211,11 @@ Detailed design: [RICH_RUNTIME_ACTIONS.md](RICH_RUNTIME_ACTIONS.md) (original 23
   └── required before real dispatch and unattended execution
 
 23.20–23.23 Closed Learning Loop
-  └── fake E2E before real reviewer workers
+  └── fake E2E before real reviewer workers; report/proposal/approval/apply-preview/effectiveness/session-refresh artifacts done
 
 23.24–23.27 Real Dispatch Adapter
   ├── requires 23E + closed learning loop fixture path
-  └── required before deonclawd automatic dispatch
+  └── 23.24-23.25 manual confirmed adapter + worker output persistence done; lease renewal/cancellation still next
 
 23.28–23.31 deonclawd
   ├── requires real dispatch adapter

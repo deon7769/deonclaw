@@ -41,6 +41,7 @@ type OnceResult struct {
 }
 
 func NewSuccessResult(opts OnceOptions, steps []string, runID string, status runs.RunStatus, meta SuccessMeta) OnceResult {
+	realDispatch := opts.Mode == ModeReal
 	return OnceResult{
 		Status:                "ok",
 		RunID:                 runID,
@@ -64,8 +65,8 @@ func NewSuccessResult(opts OnceOptions, steps []string, runID string, status run
 		ReviewWorkQueued:      meta.ReviewWorkQueued,
 		StepsCompleted:        steps,
 		RunStatus:             status,
-		ProviderCall:          false,
-		NetworkCall:           false,
+		ProviderCall:          realDispatch,
+		NetworkCall:           realDispatch,
 		SecretValuesRead:      false,
 	}
 }
@@ -145,5 +146,22 @@ func NewErrorResult(opts OnceOptions, steps []string, err error) OnceResult {
 		Error:           err.Error(),
 		ProviderCall:    false,
 		NetworkCall:     false,
+	}
+}
+
+func NewCancelledResult(opts OnceOptions, steps []string, err error) OnceResult {
+	realDispatch := opts.Mode == ModeReal
+	return OnceResult{
+		Status:          "cancelled",
+		WorkItemID:      opts.WorkItemID,
+		Mode:            opts.Mode,
+		LeaseRequired:   true,
+		DispatchStarted: true,
+		WorkerStarted:   true,
+		StepsCompleted:  steps,
+		RunStatus:       runs.StatusCancelled,
+		Error:           err.Error(),
+		ProviderCall:    realDispatch,
+		NetworkCall:     realDispatch,
 	}
 }

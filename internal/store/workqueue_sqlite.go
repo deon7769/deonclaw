@@ -400,7 +400,7 @@ func (s *SQLiteStore) RenewLease(ctx context.Context, leaseID string, ttl time.D
 		return workqueue.Lease{}, err
 	}
 	if err := appendWorkQueueEventTx(ctx, tx, workqueueEventRow{
-		ID: "wqe_renew_" + renewed.ID, WorkItemID: renewed.WorkItemID, EventType: workqueue.EventLeaseRenewed,
+		ID: fmt.Sprintf("wqe_renew_%s_%d", renewed.ID, now.UTC().UnixNano()), WorkItemID: renewed.WorkItemID, EventType: workqueue.EventLeaseRenewed,
 		Payload: fmt.Sprintf(`{"lease_id":%q,"expires_at":%q}`, renewed.ID, renewed.ExpiresAt), CreatedAt: renewed.UpdatedAt,
 	}); err != nil {
 		return workqueue.Lease{}, err

@@ -61,13 +61,15 @@ Implemented vertical slices include:
 | Proactive runtime | schedules, wakeups, heartbeat dry-run, daemon state and fixture smoke |
 | Work queue | immutable task snapshots, leases, recovery and read-only doctor |
 | Costs and budgets | pricing ledger, usage events, budget windows, reservations, commits and hard stops |
-| Budgeted dispatch | fake worker dispatch with lease, budget, skill snapshot, insight-review evidence and reviewer-fixture report/proposal materialization |
+| Budgeted dispatch | fake worker dispatch with lease, budget, skill snapshot, insight-review evidence and reviewer-fixture report/proposal/approval/apply-preview materialization |
 
 **Epic 23.16–23.19.1** (work queue, leases, budgets, and budgeted fake dispatch) is **merged and operational on `main`**. CI smokes: `make work-queue-smoke`, `make budgeted-dispatch-smoke`, `make proactive-runtime-smoke`, `make provider-call-chain-smoke`.
 
-**23.20:** first closed-learning-loop fixture leg — dispatch evidence → `insight_review` → reviewer fixture → `InsightReport` + `LearningProposal` artifacts.
+**23.20–23.23:** closed-learning-loop fixture path — dispatch evidence → `insight_review` → reviewer fixture → `InsightReport` + `LearningProposal` artifacts, governed `LearningProposalApproval`, explicit apply preview/result artifacts, automatic effectiveness records, and a planned session-refresh snapshot when approval and `--learning-confirm-apply` are supplied.
 
-**Next:** closed learning loop continuation (`23.21–23.23`) — approval → skill apply → new session snapshot → effectiveness. See [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md).
+**23.24–23.27:** manual `work dispatch-once --mode real --confirm-worker-dispatch` now reaches Codex/OpenCode runner adapters only after lease, budget, task snapshot and skill snapshot gates, then persists worker events and artifacts under the active dispatch run. Real dispatch renews the active lease during worker execution, rejects expired explicit leases, runs configured local validation commands, persists validation artifacts, revalidates lease ownership before budget/usage commit, and supports `--timeout-seconds` plus `--lease-ttl-seconds`. CI remains fake-only.
+
+**Next:** start the `deonclawd` long-running runtime (`23.28–23.31`). Real skill registry apply from learning proposals remains gated behind a later explicit integration. See [Epic 23 Roadmap](docs/EPIC_23_ROADMAP.md).
 
 ## What is deliberately not active yet
 
