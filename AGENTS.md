@@ -151,8 +151,9 @@ Implemented:
 - normalized usage and model pricing ledger (`pricing validate/sync/list/show`, `usage record/show/report`, `internal/money`, `internal/usage`, `model_prices` + `usage_events` tables)
 - budget policies, windows, and atomic reservations (`budgets validate/sync/status/plan/reserve/commit/release/report`, `budgets override new|approve|inspect`, hard stops before worker start)
 - budgeted dispatch vertical slice (`work dispatch-once`, `work-templates validate/sync/list`, fake worker CI path, schedule→work materialization, insight_review queue, `make budgeted-dispatch-smoke`)
-- 23.19.1 dispatch hardening: auto-claim lease, mandatory budget policy, atomic usage+budget commit, lease/budget release on failure, evidence builder, insight review task snapshots, skill snapshot materialization, real mode explicitly blocked in CLI
-- 23.20 closed-learning-loop fixture leg: fake `insight_review` dispatch materializes `InsightReport` and `LearningProposal` artifacts from an explicit reviewer response fixture and insight policy; approval/apply/session/effectiveness remain next
+- 23.19.1 dispatch hardening: auto-claim lease, mandatory budget policy, atomic usage+budget commit, lease/budget release on failure, evidence builder, insight review task snapshots, skill snapshot materialization
+- 23.20-23.23 closed-learning-loop fixture legs: fake `insight_review` dispatch materializes `InsightReport`, `LearningProposal`, explicit `LearningProposalApproval`, governed apply preview/result, effectiveness bundle, and planned session-refresh snapshot artifacts from reviewer/approval/apply fixtures and insight policy; real skill registry apply remains gated
+- 23.24-23.27 real dispatch adapter foundation: manual `work dispatch-once --mode real --confirm-worker-dispatch` reaches Codex/OpenCode worker adapters only after lease, budget, task snapshot and skill snapshot gates, reports provider/network boundaries, persists worker events/artifacts under the active dispatch run, renews active leases during real worker execution, rejects expired explicit leases, runs configured local validation commands, persists validation artifacts, revalidates lease ownership before budget/usage commit, and supports `--timeout-seconds` plus `--lease-ttl-seconds`; CI smokes remain fake-only
 - workers smoke --dry-run model_strategy planning
 - fallback policy schema validation only; no fallback execution or retries
 - execution trace artifact
@@ -384,11 +385,10 @@ If a worker changes files outside allowed paths, the run must fail policy valida
 
 Epic 23.16–23.19.1 is **merged and operational on `main`**. Current next sequence (see [docs/EPIC_23_ROADMAP.md](docs/EPIC_23_ROADMAP.md)):
 
-1. Closed learning loop continuation (`23.21–23.23`): approval → skill apply → session snapshot → effectiveness
-2. Real Codex/OpenCode dispatch adapter behind lease/budget/session gates (`23.24–23.27`)
-3. `deonclawd` long-running process with scheduled real dispatch (`23.28–23.31`)
-4. OpenClaw migration inspect/plan/shadow (`23.32–23.35`), cutover/rollback (`23.36–23.39`)
-5. Rich runtime actions (`23.40–23.43`)
+1. Real Codex/OpenCode dispatch adapter behind lease/budget/session gates (`23.24–23.27`)
+2. `deonclawd` long-running process with scheduled real dispatch (`23.28–23.31`)
+3. OpenClaw migration inspect/plan/shadow (`23.32–23.35`), cutover/rollback (`23.36–23.39`)
+4. Rich runtime actions (`23.40–23.43`)
 
 Deferred after dispatch + daemon + budgets are stable: MCP execution manager, active LanceDB retrieval in runner, UI/dashboard.
 

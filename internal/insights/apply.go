@@ -218,3 +218,15 @@ func ReadApplyDryRunJSON(path string) (ApplyDryRunResult, error) {
 	}
 	return result, nil
 }
+
+func ReadApplyExecuteJSON(path string) (ApplyExecuteResult, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ApplyExecuteResult{}, fmt.Errorf("read apply result %q: %w", path, err)
+	}
+	var result ApplyExecuteResult
+	if err := json.Unmarshal(data, &result); err != nil {
+		return ApplyExecuteResult{}, fmt.Errorf("parse apply result %q: %w", path, err)
+	}
+	return result, nil
+}

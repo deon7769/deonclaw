@@ -72,13 +72,75 @@ REVIEW_JSON="$("$CLI" work dispatch-once \
   --registry-root "$REGISTRY" \
   --skill-policy "$SKILL_POLICY" \
   --insight-policy "$INSIGHT_POLICY" \
-  --reviewer-response "$REVIEWER_RESPONSE")"
+  --reviewer-response "$REVIEWER_RESPONSE" \
+  --learning-approval-decision approved \
+  --learning-approval-reason "Operator approved 23.23 fixture proposal." \
+  --learning-approval-reviewer opencode \
+  --learning-confirm-apply)"
 echo "$REVIEW_JSON"
 echo "$REVIEW_JSON" | grep -q '"status": "ok"' || { echo "review dispatch status not ok" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"worker_started": true' || { echo "review worker not started" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"learning_loop": {' || { echo "learning loop result missing" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"materialized": true' || { echo "learning loop not materialized" >&2; exit 1; }
 echo "$REVIEW_JSON" | grep -q '"proposal_count": 1' || { echo "learning proposal not materialized" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"approval_count": 1' || { echo "learning approval not materialized" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"apply_count": 1' || { echo "learning apply not materialized" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"effectiveness_count": 1' || { echo "learning effectiveness not materialized" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"session_refresh_path":' || { echo "session refresh artifact missing" >&2; exit 1; }
+echo "$REVIEW_JSON" | grep -q '"session_snapshot_sha256":' || { echo "session snapshot hash missing" >&2; exit 1; }
+APPROVAL_REVIEWER="$(REVIEW_JSON="$REVIEW_JSON" python3 - <<'PY'
+import json
+import os
+from pathlib import Path
+
+doc = json.loads(os.environ["REVIEW_JSON"])
+loop = doc.get("learning_loop", {})
+approval_paths = loop.get("approval_paths", [])
+apply_result_paths = loop.get("apply_result_paths", [])
+apply_preview_paths = loop.get("apply_preview_paths", [])
+effectiveness_paths = loop.get("effectiveness_paths", [])
+session_refresh_path = loop.get("session_refresh_path", "")
+session_snapshot_path = loop.get("session_snapshot_path", "")
+session_snapshot_sha256 = loop.get("session_snapshot_sha256", "")
+if len(approval_paths) != 1:
+    raise SystemExit("approval path missing")
+if len(apply_result_paths) != 1 or len(apply_preview_paths) != 1:
+    raise SystemExit("apply paths missing")
+if len(effectiveness_paths) != 1:
+    raise SystemExit("effectiveness path missing")
+if not session_refresh_path or not session_snapshot_path or not session_snapshot_sha256:
+    raise SystemExit("session refresh fields missing")
+approval = json.loads(Path(approval_paths[0]).read_text())
+apply_result = json.loads(Path(apply_result_paths[0]).read_text())
+if not apply_result.get("executed"):
+    raise SystemExit("apply result not executed")
+if apply_result.get("applied_artifact") != apply_preview_paths[0]:
+    raise SystemExit("apply preview path mismatch")
+effectiveness = json.loads(Path(effectiveness_paths[0]).read_text())
+records = effectiveness.get("records", [])
+if len(records) != 1:
+    raise SystemExit("effectiveness record missing")
+record = records[0]
+if record.get("proposal_id") != apply_result.get("proposal_id") or record.get("run_id") != doc.get("run_id"):
+    raise SystemExit("effectiveness linkage mismatch")
+if record.get("metric") != "validation_pass_rate" or float(record.get("value", -1)) != 1.0:
+    raise SystemExit("effectiveness metric mismatch")
+snapshot = json.loads(Path(session_snapshot_path).read_text())
+refresh = json.loads(Path(session_refresh_path).read_text())
+if snapshot.get("sha256") != session_snapshot_sha256:
+    raise SystemExit("snapshot hash mismatch")
+if refresh.get("status") != "planned":
+    raise SystemExit("session refresh should be planned")
+if refresh.get("session_id") != snapshot.get("session_id"):
+    raise SystemExit("session refresh snapshot session mismatch")
+if refresh.get("skill_snapshot_path") != session_snapshot_path or refresh.get("skill_snapshot_sha256") != session_snapshot_sha256:
+    raise SystemExit("session refresh snapshot reference mismatch")
+if apply_result_paths[0] not in refresh.get("apply_result_paths", []):
+    raise SystemExit("session refresh apply result linkage missing")
+print(approval.get("reviewer", ""))
+PY
+)"
+[[ "$APPROVAL_REVIEWER" == "opencode" ]] || { echo "learning approval reviewer not materialized" >&2; exit 1; }
 
 echo "==> package tests"
 go test ./internal/dispatch -run 'TestDispatchOnce' -count=1

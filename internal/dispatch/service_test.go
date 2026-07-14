@@ -2,14 +2,22 @@ package dispatch
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/deon7769/deonclaw/internal/agents"
+	"github.com/deon7769/deonclaw/internal/artifacts"
 	"github.com/deon7769/deonclaw/internal/budget"
+	"github.com/deon7769/deonclaw/internal/events"
 	"github.com/deon7769/deonclaw/internal/insights"
+	runnermod "github.com/deon7769/deonclaw/internal/runner"
+	"github.com/deon7769/deonclaw/internal/runs"
+	"github.com/deon7769/deonclaw/internal/skills"
 	"github.com/deon7769/deonclaw/internal/tasks"
 	"github.com/deon7769/deonclaw/internal/usage"
 	"github.com/deon7769/deonclaw/internal/workqueue"
@@ -66,6 +74,67 @@ func seedQueuedWork(t *testing.T, db *testStoreAdapter, agent agents.Agent, poli
 	}
 	_ = db.SaveTask(ctx, &task)
 	return item
+}
+
+func seedRealDispatchWork(t *testing.T, db *testStoreAdapter, agentID string, taskID string) (agents.Agent, agents.WorkItem) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: agentID, DisplayName: "Real", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	if err := db.SaveAgent(ctx, agent); err != nil {
+		t.Fatalf("SaveAgent() error = %v", err)
+	}
+	policy := budget.Policy{
+		ID: "budget-" + agentID, Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	if err := db.SyncBudgetPolicies(ctx, []budget.Policy{policy}); err != nil {
+		t.Fatalf("SyncBudgetPolicies() error = %v", err)
+	}
+	task := tasks.Task{
+		ID: taskID, Title: "Real dispatch", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	return agent, item
+}
+
+func seedRealDispatchWorkWithValidation(t *testing.T, db *testStoreAdapter, agentID string, taskID string, commands []tasks.ValidationCommand) (agents.Agent, agents.WorkItem, tasks.Task) {
+	t.Helper()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: agentID, DisplayName: "Real", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	if err := db.SaveAgent(ctx, agent); err != nil {
+		t.Fatalf("SaveAgent() error = %v", err)
+	}
+	policy := budget.Policy{
+		ID: "budget-" + agentID, Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	if err := db.SyncBudgetPolicies(ctx, []budget.Policy{policy}); err != nil {
+		t.Fatalf("SyncBudgetPolicies() error = %v", err)
+	}
+	task := tasks.Task{
+		ID: taskID, Title: "Real validation", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		Validation:       tasks.ValidationSpec{Commands: commands},
+		AllowedPaths:     []string{"/"},
+		ForbiddenPaths:   []string{"/secrets"},
+		ExpectedOutputs:  []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	return agent, item, task
 }
 
 func TestDispatchOnceFakeSuccess(t *testing.T) {
@@ -126,6 +195,13 @@ func TestDispatchOnceFakeSuccess(t *testing.T) {
 	}
 	if result.InsightReview == nil || !result.InsightReview.Queued {
 		t.Fatalf("expected insight review work item, got %+v", result.InsightReview)
+	}
+	storedItem, err := db.WorkItem(ctx, item.ID)
+	if err != nil {
+		t.Fatalf("WorkItem() error = %v", err)
+	}
+	if storedItem.Status != agents.WorkItemStatusSucceeded {
+		t.Fatalf("stored work item status = %q, want succeeded", storedItem.Status)
 	}
 }
 
@@ -216,7 +292,7 @@ func TestDispatchOnceAutoClaimAlreadyLeased(t *testing.T) {
 	}
 }
 
-func TestDispatchOnceRealModeBlocked(t *testing.T) {
+func TestDispatchOnceRealModeRequiresConfirmation(t *testing.T) {
 	ctx := context.Background()
 	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real.db"))
 	if err != nil {
@@ -225,13 +301,399 @@ func TestDispatchOnceRealModeBlocked(t *testing.T) {
 	defer db.Close()
 	opts := testDispatchOpts(db, t, agents.WorkItem{ID: "work_x"}, "", NewFakeWorkerRunner())
 	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = false
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real mode without confirmation should return blocked result without error: %v", err)
+	}
+	if result.Status != "blocked" || result.BlockedReason != BlockedRealModeConfirmationRequired || result.WorkerStarted {
+		t.Fatalf("got %+v", result)
+	}
+}
+
+func TestDispatchOnceRealModeBlockedInCI(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-ci.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	called := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		return FakeWorkerRun(ctx, opts)
+	})
+	opts := testDispatchOpts(db, t, agents.WorkItem{ID: "work_ci"}, "", runner)
+	opts.Mode = ModeReal
 	opts.ConfirmWorkerDispatch = true
+	opts.RunningInCI = true
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real mode in CI should return blocked result without error: %v", err)
+	}
+	if result.Status != "blocked" || result.BlockedReason != BlockedRealModeCI || result.WorkerStarted || called {
+		t.Fatalf("got %+v called=%v", result, called)
+	}
+}
+
+func TestDispatchOnceRealModeWithConfirmationUsesConfiguredRunner(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-confirmed.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "real-agent", DisplayName: "Real", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "real-budget", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-real-success", Title: "Real success", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	called := false
+	var captured WorkerRunOptions
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		captured = opts
+		return FakeWorkerRun(ctx, opts)
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	if result.Status != "ok" || result.Mode != ModeReal || !result.WorkerStarted || !result.BudgetCommitted || !result.SkillSnapshotApplied {
+		t.Fatalf("real dispatch result = %+v", result)
+	}
+	if !result.ProviderCall || !result.NetworkCall {
+		t.Fatalf("real dispatch should expose provider/network call boundary: %+v", result)
+	}
+	if !called || captured.Mode != ModeReal || !captured.ConfirmReal || captured.TaskID != task.ID || captured.Worker != "codex" {
+		t.Fatalf("runner called=%v captured=%+v", called, captured)
+	}
+}
+
+func TestDispatchOnceRealModePersistsWorkerArtifactsAndEvents(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-artifacts.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "real-artifact-agent", DisplayName: "Real Artifact", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "real-artifact-budget", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-real-artifacts", Title: "Real artifacts", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		return WorkerRunResult{
+			Status: runs.StatusSucceeded,
+			Artifacts: []artifacts.Artifact{{
+				ID:      "stdout",
+				Path:    "artifacts/stdout.log",
+				Kind:    artifacts.KindLog,
+				Content: []byte("worker output\n"),
+			}},
+			Events: []events.Event{{
+				ID:      "worker-message",
+				Type:    events.TypeWorkerMessage,
+				Payload: json.RawMessage(`{"text":"ok"}`),
+			}},
+		}, nil
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	storedArtifacts, err := db.ArtifactsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedArtifacts) != 1 || storedArtifacts[0].RunID != result.RunID || storedArtifacts[0].Kind != artifacts.KindLog || storedArtifacts[0].SizeBytes != int64(len("worker output\n")) || storedArtifacts[0].SHA256 == "" {
+		t.Fatalf("stored artifacts = %+v", storedArtifacts)
+	}
+	if storedArtifacts[0].ID != "art_"+result.RunID+"_worker_001" || filepath.Dir(storedArtifacts[0].Path) != filepath.Join(opts.ArtifactsDir, "worker", result.RunID, "artifacts") {
+		t.Fatalf("stored artifact identity/path = %+v", storedArtifacts[0])
+	}
+	content, err := os.ReadFile(storedArtifacts[0].Path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != "worker output\n" {
+		t.Fatalf("artifact content = %q", content)
+	}
+	storedEvents, err := db.EventsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(storedEvents) != 1 || storedEvents[0].RunID != result.RunID || storedEvents[0].Type != events.TypeWorkerMessage || string(storedEvents[0].Payload) != `{"text":"ok"}` {
+		t.Fatalf("stored events = %+v", storedEvents)
+	}
+	if storedEvents[0].ID != "evt_"+result.RunID+"_worker_001" {
+		t.Fatalf("stored event id = %q", storedEvents[0].ID)
+	}
+}
+
+func TestDispatchOnceRealModeRenewsLeaseDuringWorkerRun(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-renew.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, item := seedRealDispatchWork(t, db, "real-renew-agent", "task-real-renew")
+
+	runner := workerFunc(func(runCtx context.Context, runOpts WorkerRunOptions) (WorkerRunResult, error) {
+		deadline := time.NewTimer(500 * time.Millisecond)
+		defer deadline.Stop()
+		ticker := time.NewTicker(5 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-runCtx.Done():
+				return WorkerRunResult{}, runCtx.Err()
+			case <-deadline.C:
+				return WorkerRunResult{}, errors.New("lease heartbeat was not renewed")
+			case <-ticker.C:
+				leases, err := db.ListLeases(ctx)
+				if err != nil {
+					return WorkerRunResult{}, err
+				}
+				for _, lease := range leases {
+					if lease.WorkItemID == item.ID && lease.RunID == runOpts.RunID && lease.Status == workqueue.LeaseStatusActive && lease.HeartbeatAt != "" && lease.HeartbeatAt != lease.CreatedAt {
+						return WorkerRunResult{Status: runs.StatusSucceeded, DurationMS: 50}, nil
+					}
+				}
+			}
+		}
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.LeaseTTL = 5 * time.Second
+	opts.LeaseRenewInterval = 10 * time.Millisecond
+
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	if result.Status != "ok" || result.RunStatus != runs.StatusSucceeded {
+		t.Fatalf("real dispatch result = %+v", result)
+	}
+	lease, err := db.Lease(ctx, result.LeaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.HeartbeatAt == "" || lease.HeartbeatAt == lease.CreatedAt {
+		t.Fatalf("lease heartbeat was not renewed: %+v", lease)
+	}
+}
+
+func TestDispatchOnceRealModeTimeoutCancelsWorkerAndReleasesLease(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-timeout.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	_, item := seedRealDispatchWork(t, db, "real-timeout-agent", "task-real-timeout")
+
+	started := false
+	runner := workerFunc(func(runCtx context.Context, runOpts WorkerRunOptions) (WorkerRunResult, error) {
+		started = true
+		<-runCtx.Done()
+		return WorkerRunResult{}, runCtx.Err()
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.LeaseTTL = 5 * time.Second
+	opts.LeaseRenewInterval = 5 * time.Millisecond
+	opts.WorkerTimeout = 20 * time.Millisecond
+
 	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
 	if err == nil {
-		t.Fatal("expected real mode error")
+		t.Fatalf("expected timeout error, got result=%+v", result)
 	}
-	if result.Status != "blocked" || result.WorkerStarted {
-		t.Fatalf("got %+v", result)
+	if !started || !result.WorkerStarted || !result.ProviderCall || !result.NetworkCall {
+		t.Fatalf("worker/provider boundaries not recorded: started=%v result=%+v", started, result)
+	}
+	if result.Status != "cancelled" || result.RunStatus != runs.StatusCancelled || !result.LeaseReleased || !result.BudgetReleased {
+		t.Fatalf("timeout result = %+v err=%v", result, err)
+	}
+	run, err := db.Run(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != runs.StatusCancelled {
+		t.Fatalf("run status = %q, want cancelled", run.Status)
+	}
+	workItem, err := db.WorkItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workItem.Status != agents.WorkItemStatusCancelled {
+		t.Fatalf("work item status = %q, want cancelled", workItem.Status)
+	}
+	lease, err := db.Lease(ctx, result.LeaseID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lease.Status == workqueue.LeaseStatusActive {
+		t.Fatalf("lease still active after timeout: %+v", lease)
+	}
+}
+
+func TestDispatchOnceRealModeRunsValidationBeforeBudgetCommit(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-validation-pass.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	command := tasks.ValidationCommand{Name: "unit", Command: "go", Args: []string{"test", "./..."}, TimeoutSeconds: 7}
+	_, item, task := seedRealDispatchWorkWithValidation(t, db, "real-validation-agent", "task-real-validation-pass", []tasks.ValidationCommand{command})
+
+	validationCalled := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		return WorkerRunResult{Status: runs.StatusSucceeded, DurationMS: 25}, nil
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.ValidationRunner = func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) runnermod.ValidationResult {
+		validationCalled = true
+		if workspace != task.Workspace.Path {
+			t.Fatalf("validation workspace = %q, want %q", workspace, task.Workspace.Path)
+		}
+		if len(commands) != 1 || commands[0].Name != command.Name || commands[0].TimeoutSeconds != command.TimeoutSeconds {
+			t.Fatalf("validation commands = %+v", commands)
+		}
+		return runnermod.ValidationResult{
+			Status:       runnermod.ValidationPassed,
+			Runtime:      tasks.ValidationRuntimeLocal,
+			CommandCount: len(commands),
+			Commands: []runnermod.ValidationCommandResult{{
+				Name: command.Name, Command: command.Command, Args: append([]string(nil), command.Args...),
+				TimeoutSeconds: command.TimeoutSeconds, Status: runnermod.ValidationPassed,
+			}},
+		}
+	}
+
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err != nil {
+		t.Fatalf("real dispatch error = %v result=%+v", err, result)
+	}
+	if !validationCalled {
+		t.Fatal("validation runner was not called")
+	}
+	if result.Status != "ok" || !result.BudgetCommitted || !containsStep(result.StepsCompleted, StepRunValidation) {
+		t.Fatalf("dispatch result = %+v", result)
+	}
+	storedArtifacts, err := db.ArtifactsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasArtifactPathSuffix(storedArtifacts, "validation/validation.json") || !hasArtifactPathSuffix(storedArtifacts, "validation/validation.log") {
+		t.Fatalf("validation artifacts missing: %+v", storedArtifacts)
+	}
+}
+
+func TestDispatchOnceRealModeValidationFailureReleasesLeaseAndBudget(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "real-validation-fail.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	command := tasks.ValidationCommand{Name: "unit", Command: "go", Args: []string{"test", "./..."}, TimeoutSeconds: 7}
+	_, item, _ := seedRealDispatchWorkWithValidation(t, db, "real-validation-fail-agent", "task-real-validation-fail", []tasks.ValidationCommand{command})
+
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		return WorkerRunResult{Status: runs.StatusSucceeded, DurationMS: 25}, nil
+	})
+	opts := testDispatchOpts(db, t, item, "", runner)
+	opts.Mode = ModeReal
+	opts.ConfirmWorkerDispatch = true
+	opts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	opts.ValidationRunner = func(ctx context.Context, workspace string, commands []tasks.ValidationCommand) runnermod.ValidationResult {
+		return runnermod.ValidationResult{
+			Status:       runnermod.ValidationFailed,
+			Runtime:      tasks.ValidationRuntimeLocal,
+			CommandCount: len(commands),
+			Error:        `validation command "unit" failed with exit code 1`,
+			Commands: []runnermod.ValidationCommandResult{{
+				Name: command.Name, Command: command.Command, Args: append([]string(nil), command.Args...),
+				TimeoutSeconds: command.TimeoutSeconds, ExitCode: 1, Status: runnermod.ValidationFailed,
+				Error: `exit status 1`,
+			}},
+		}
+	}
+
+	result, err := Service{Repo: db}.DispatchOnce(ctx, opts)
+	if err == nil || !strings.Contains(err.Error(), `validation command "unit" failed`) {
+		t.Fatalf("DispatchOnce() error = %v result=%+v, want validation failure", err, result)
+	}
+	if result.Status != "failed" || !result.WorkerStarted || result.BudgetCommitted || !result.BudgetReleased || !result.LeaseReleased {
+		t.Fatalf("validation failure result = %+v", result)
+	}
+	run, err := db.Run(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.Status != runs.StatusFailed {
+		t.Fatalf("run status = %q, want failed", run.Status)
+	}
+	workItem, err := db.WorkItem(ctx, item.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workItem.Status != agents.WorkItemStatusFailed {
+		t.Fatalf("work item status = %q, want failed", workItem.Status)
+	}
+	storedArtifacts, err := db.ArtifactsByRun(ctx, result.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasArtifactPathSuffix(storedArtifacts, "validation/validation.json") || !hasArtifactPathSuffix(storedArtifacts, "validation/validation.log") {
+		t.Fatalf("validation artifacts missing after failure: %+v", storedArtifacts)
 	}
 }
 
@@ -357,6 +819,51 @@ func TestDispatchOnceLeaseWrongWorkItemFails(t *testing.T) {
 	}
 	if called {
 		t.Fatal("worker must not run with lease for another work item")
+	}
+}
+
+func TestDispatchOnceExplicitExpiredLeaseFails(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "expired-lease.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "agent-expired", DisplayName: "Expired", Role: "engineer", DefaultWorker: "codex",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "p-expired", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly, Timezone: "UTC",
+		HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000, MaxSingleRunMicroUSD: 3_000_000,
+		ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-expired-lease", Title: "Expired lease", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	claimTime := now.Add(-time.Hour)
+	claim, err := db.ClaimWorkItem(ctx, agent.ID, item.ID, time.Millisecond, claimTime)
+	if err != nil || !claim.Claimed {
+		t.Fatalf("ClaimWorkItem() = %+v err=%v", claim, err)
+	}
+
+	called := false
+	runner := workerFunc(func(ctx context.Context, opts WorkerRunOptions) (WorkerRunResult, error) {
+		called = true
+		return FakeWorkerRun(ctx, opts)
+	})
+	_, err = Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, item, claim.Lease.ID, runner))
+	if err == nil || !strings.Contains(err.Error(), "expired") {
+		t.Fatalf("DispatchOnce() error = %v, want expired lease", err)
+	}
+	if called {
+		t.Fatal("worker must not run with an expired explicit lease")
 	}
 }
 
@@ -487,6 +994,143 @@ func TestDispatchOnceInsightReviewMaterializesReportAndProposals(t *testing.T) {
 	}
 }
 
+func TestDispatchOnceInsightReviewWritesApprovalAndApplyArtifacts(t *testing.T) {
+	ctx := context.Background()
+	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "review-approval.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	now := time.Now().UTC()
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "backend-engineer", DisplayName: "Backend", Role: "engineer", DefaultWorker: "codex",
+		ModelProfile: "opencode-zai-glm-5-1",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	_ = db.SaveAgent(ctx, agent)
+	policy := budget.Policy{
+		ID: "backend-monthly", Scope: budget.ScopeAgent, AgentID: agent.ID, Period: budget.PeriodMonthly,
+		Timezone: "UTC", HardLimitMicroUSD: 50_000_000, DefaultEstimateMicroUSD: 250_000,
+		MaxSingleRunMicroUSD: 3_000_000, ReserveBeforeRun: true, OnExhausted: budget.OnExhaustedBlockWork,
+	}
+	_ = db.SyncBudgetPolicies(ctx, []budget.Policy{policy})
+	task := tasks.Task{
+		ID: "task-fake-success", Title: "Parent", Domain: "general", Worker: "codex", Goal: "noop", Mode: "read_only",
+		Workspace: tasks.WorkspaceSpec{Strategy: "local_repo", Path: "."}, Memory: tasks.MemorySpec{Scope: "none"},
+		AllowedPaths: []string{"/"}, ForbiddenPaths: []string{"/secrets"}, ExpectedOutputs: []string{"ok"},
+		DefinitionOfDone: []string{"ok"},
+	}
+	item := seedQueuedWork(t, db, agent, policy.ID, task)
+	parent, err := Service{Repo: db}.DispatchOnce(ctx, testDispatchOpts(db, t, item, "", NewFakeWorkerRunner()))
+	if err != nil || parent.Status != "ok" || parent.InsightReview == nil || parent.EvidenceBundle == nil {
+		t.Fatalf("parent dispatch = %+v err=%v", parent, err)
+	}
+	reviewItem, err := db.WorkItem(ctx, parent.InsightReview.WorkItemID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(reviewItem.EvidencePath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := insights.WriteEvidenceJSON(*parent.EvidenceBundle, reviewItem.EvidencePath); err != nil {
+		t.Fatal(err)
+	}
+	responsePath := filepath.Join(t.TempDir(), "reviewer-response.json")
+	if err := os.WriteFile(responsePath, []byte(`{"observations":["reviewed evidence"],"what_worked":["evidence exists"],"what_failed":[],"reusable_lessons":["keep evidence-linked proposals"],"uncertainties":[],"risk_notes":[],"proposals":[{"type":"documentation","target":"docs/INSIGHT_LEARNING_LOOP.md","reason":"Document approval fixture behavior.","proposed_change_summary":"Add explicit approval artifact to the fake learning loop fixture.","confidence":0.93}],"action_required":true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	reviewOpts := testDispatchOpts(db, t, reviewItem, "", NewFakeWorkerRunner())
+	reviewOpts.RegistryRoot = filepath.Join(t.TempDir(), "skills-registry")
+	reviewOpts.ReviewerResponsePath = responsePath
+	reviewOpts.InsightPolicy = insights.Policy{Enabled: true, AutoPropose: true, Reviewer: insights.ReviewerConfig{Preferred: insights.ReviewerCodex}}
+	reviewOpts.LearningApprovalDecision = insights.ApprovalDecisionApproved
+	reviewOpts.LearningApprovalReason = "Operator approved fixture proposal for 23.22 smoke."
+	reviewOpts.LearningApprovalReviewer = insights.ReviewerOpenCode
+	reviewOpts.LearningConfirmApply = true
+	reviewResult, err := Service{Repo: db}.DispatchOnce(ctx, reviewOpts)
+	if err != nil {
+		t.Fatalf("review dispatch error = %v", err)
+	}
+	if reviewResult.LearningLoop == nil || reviewResult.LearningLoop.ApprovalCount != 1 {
+		t.Fatalf("expected one approval artifact, got %+v", reviewResult.LearningLoop)
+	}
+	if len(reviewResult.LearningLoop.ApprovalPaths) != 1 {
+		t.Fatalf("approval paths = %+v", reviewResult.LearningLoop.ApprovalPaths)
+	}
+	proposals, err := insights.ReadProposalBundleJSON(reviewResult.LearningLoop.ProposalBundlePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approval, err := insights.ReadApprovalJSON(reviewResult.LearningLoop.ApprovalPaths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approval.Decision != insights.ApprovalDecisionApproved || approval.ProposalID != proposals.Proposals[0].ProposalID {
+		t.Fatalf("approval = %+v proposal = %+v", approval, proposals.Proposals[0])
+	}
+	if approval.Reviewer != insights.ReviewerOpenCode {
+		t.Fatalf("approval reviewer = %q, want %q", approval.Reviewer, insights.ReviewerOpenCode)
+	}
+	if err := insights.ValidateApprovalAgainstProposal(approval, proposals.Proposals[0]); err != nil {
+		t.Fatalf("approval should bind to proposal: %v", err)
+	}
+	if reviewResult.LearningLoop.ApplyCount != 1 {
+		t.Fatalf("expected one apply artifact, got %+v", reviewResult.LearningLoop)
+	}
+	if len(reviewResult.LearningLoop.ApplyResultPaths) != 1 || len(reviewResult.LearningLoop.ApplyPreviewPaths) != 1 {
+		t.Fatalf("apply paths = result=%+v preview=%+v", reviewResult.LearningLoop.ApplyResultPaths, reviewResult.LearningLoop.ApplyPreviewPaths)
+	}
+	applyResult, err := insights.ReadApplyExecuteJSON(reviewResult.LearningLoop.ApplyResultPaths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !applyResult.Executed || applyResult.ProposalID != proposals.Proposals[0].ProposalID || applyResult.AppliedArtifact != reviewResult.LearningLoop.ApplyPreviewPaths[0] {
+		t.Fatalf("apply result = %+v", applyResult)
+	}
+	if reviewResult.LearningLoop.EffectivenessCount != 1 || len(reviewResult.LearningLoop.EffectivenessPaths) != 1 {
+		t.Fatalf("effectiveness artifacts = %+v", reviewResult.LearningLoop)
+	}
+	effectiveness, err := insights.ReadEffectivenessBundleJSON(reviewResult.LearningLoop.EffectivenessPaths[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(effectiveness.Records) != 1 || effectiveness.Records[0].ProposalID != proposals.Proposals[0].ProposalID || effectiveness.Records[0].RunID != reviewResult.RunID {
+		t.Fatalf("effectiveness = %+v", effectiveness)
+	}
+	if reviewResult.LearningLoop.SessionRefreshPath == "" || reviewResult.LearningLoop.SessionSnapshotPath == "" {
+		t.Fatalf("session refresh artifacts missing: %+v", reviewResult.LearningLoop)
+	}
+	snapshot, err := skills.ReadSnapshotJSON(reviewResult.LearningLoop.SessionSnapshotPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if snapshot.AgentID != agent.ID || snapshot.SessionID == "" || snapshot.SHA256 != reviewResult.LearningLoop.SessionSnapshotSHA256 {
+		t.Fatalf("session snapshot = %+v learning_loop=%+v", snapshot, reviewResult.LearningLoop)
+	}
+	refreshData, err := os.ReadFile(reviewResult.LearningLoop.SessionRefreshPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var refresh LearningSessionRefreshArtifact
+	if err := json.Unmarshal(refreshData, &refresh); err != nil {
+		t.Fatal(err)
+	}
+	if refresh.Status != "planned" || refresh.SessionID != snapshot.SessionID || refresh.SkillSnapshotPath != reviewResult.LearningLoop.SessionSnapshotPath || refresh.SkillSnapshotSHA256 != snapshot.SHA256 {
+		t.Fatalf("session refresh = %+v snapshot=%+v", refresh, snapshot)
+	}
+	if len(refresh.ProposalIDs) != 1 || refresh.ProposalIDs[0] != proposals.Proposals[0].ProposalID || len(refresh.ApplyResultPaths) != 1 || refresh.ApplyResultPaths[0] != reviewResult.LearningLoop.ApplyResultPaths[0] {
+		t.Fatalf("session refresh links = %+v", refresh)
+	}
+	sessions, err := db.ListSessionsByAgent(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, session := range sessions {
+		if session.ID == refresh.SessionID {
+			t.Fatalf("learning refresh session should be planned-only, found persisted session %+v", session)
+		}
+	}
+}
+
 func TestDispatchRunnerErrorReleasesLease(t *testing.T) {
 	ctx := context.Background()
 	db, err := openTestStoreAdapter(filepath.Join(t.TempDir(), "fail.db"))
@@ -525,4 +1169,23 @@ func TestDispatchRunnerErrorReleasesLease(t *testing.T) {
 			t.Fatalf("lease still active: %+v", lease)
 		}
 	}
+}
+
+func containsStep(steps []string, want string) bool {
+	for _, step := range steps {
+		if step == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArtifactPathSuffix(storedArtifacts []artifacts.Artifact, suffix string) bool {
+	suffix = filepath.FromSlash(suffix)
+	for _, artifact := range storedArtifacts {
+		if strings.HasSuffix(artifact.Path, suffix) {
+			return true
+		}
+	}
+	return false
 }

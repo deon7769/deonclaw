@@ -119,6 +119,55 @@ func TestReleaseLeaseRequeuesWork(t *testing.T) {
 	}
 }
 
+func TestRenewLeaseAllowsRepeatedHeartbeatsForSameLease(t *testing.T) {
+	ctx := context.Background()
+	db, err := OpenSQLite(filepath.Join(t.TempDir(), "renew.db"))
+	if err != nil {
+		t.Fatalf("OpenSQLite() error = %v", err)
+	}
+	defer db.Close()
+
+	now := time.Date(2026, 6, 22, 10, 0, 0, 0, time.UTC)
+	agent := agents.AgentFromConfig(agents.AgentConfig{
+		ID: "backend-engineer", DisplayName: "Backend", Role: "engineer", DefaultWorker: "codex",
+	}, agents.StatusActive, now.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano))
+	item := agents.WorkItem{
+		ID: "work_renew", Title: "Renew", Status: agents.WorkItemStatusQueued, TaskID: "task_renew",
+		AssignedAgentID: agent.ID, Priority: 50, MaxAttempts: 3,
+		CreatedAt: now.Format(time.RFC3339Nano), UpdatedAt: now.Format(time.RFC3339Nano),
+	}
+	seedClaimableWorkItem(t, db, ctx, agent, item, now)
+
+	claim, err := db.ClaimWorkItem(ctx, agent.ID, item.ID, 15*time.Minute, now)
+	if err != nil || !claim.Claimed {
+		t.Fatalf("ClaimWorkItem() = %+v err=%v", claim, err)
+	}
+
+	first, err := db.RenewLease(ctx, claim.Lease.ID, 15*time.Minute, now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("first RenewLease() error = %v", err)
+	}
+	second, err := db.RenewLease(ctx, claim.Lease.ID, 15*time.Minute, now.Add(2*time.Minute))
+	if err != nil {
+		t.Fatalf("second RenewLease() error = %v", err)
+	}
+
+	if second.HeartbeatAt == "" || second.HeartbeatAt == first.HeartbeatAt {
+		t.Fatalf("heartbeat did not advance: first=%q second=%q", first.HeartbeatAt, second.HeartbeatAt)
+	}
+	firstExpiry, err := time.Parse(time.RFC3339Nano, first.ExpiresAt)
+	if err != nil {
+		t.Fatalf("parse first expires_at: %v", err)
+	}
+	secondExpiry, err := time.Parse(time.RFC3339Nano, second.ExpiresAt)
+	if err != nil {
+		t.Fatalf("parse second expires_at: %v", err)
+	}
+	if !secondExpiry.After(firstExpiry) {
+		t.Fatalf("expiry did not advance: first=%s second=%s", first.ExpiresAt, second.ExpiresAt)
+	}
+}
+
 func TestRecoverWorkQueueMarksLostLease(t *testing.T) {
 	ctx := context.Background()
 	db, err := OpenSQLite(filepath.Join(t.TempDir(), "recover.db"))
